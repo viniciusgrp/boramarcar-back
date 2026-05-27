@@ -1,13 +1,17 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { RegisterTenantDto } from './dto/register-tenant.dto';
+import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
+import { isValidSlug, normalizeSlug } from './utils/slug.util';
 
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
@@ -85,7 +89,14 @@ export class TenantsService {
       );
     }
 
-    const normalizedSlug = this.normalizeSlug(dto.slug);
+    const normalizedSlug = normalizeSlug(dto.slug);
+
+    if (!isValidSlug(normalizedSlug)) {
+      throw new BadRequestException(
+        'A URL personalizada deve conter apenas letras minúsculas, números e traços.',
+      );
+    }
+
     const slugTaken = await this.isSlugTakenByAnotherTenant(
       normalizedSlug,
       tenant.id,
@@ -240,6 +251,102 @@ export class TenantsService {
     return data ? mapTenantRow(data as Tenant) : null;
   }
 
+  async checkSlugAvailability(
+    rawSlug: string,
+  ): Promise<SlugAvailabilityResponseDto> {
+    const slug = normalizeSlug(rawSlug);
+
+    if (!isValidSlug(slug)) {
+      return { slug, available: false };
+    }
+
+    const existing = await this.findBySlug(slug);
+    return { slug, available: !existing };
+  }
+
+  async register(dto: RegisterTenantDto): Promise<Tenant> {
+    const ownerName = dto.owner_name?.trim() ?? '';
+    const email = dto.email?.trim().toLowerCase() ?? '';
+    const password = dto.password ?? '';
+    const tenantName = dto.tenant_name?.trim() ?? '';
+    const normalizedSlug = normalizeSlug(dto.slug ?? '');
+
+    if (!ownerName || !email || !password || !tenantName) {
+      throw new BadRequestException('Preencha todos os campos obrigatórios.');
+    }
+
+    if (password.length < 6) {
+      throw new BadRequestException('A senha deve ter pelo menos 6 caracteres.');
+    }
+
+    if (!isValidSlug(normalizedSlug)) {
+      throw new BadRequestException(
+        'A URL personalizada deve conter apenas letras minúsculas, números e traços.',
+      );
+    }
+
+    const existingSlug = await this.findBySlug(normalizedSlug);
+
+    if (existingSlug) {
+      throw new ConflictException(
+        'Esta URL já está em uso. Escolha outro endereço para sua barbearia.',
+      );
+    }
+
+    const { data: authData, error: authError } = await this.supabaseService
+      .getClient()
+      .auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: ownerName },
+      });
+
+    if (authError || !authData.user) {
+      const message = authError?.message?.toLowerCase() ?? '';
+
+      if (message.includes('already') || message.includes('registered')) {
+        throw new ConflictException('Este e-mail já está cadastrado.');
+      }
+
+      throw new BadRequestException(
+        authError?.message ?? 'Não foi possível criar sua conta.',
+      );
+    }
+
+    const ownerId = authData.user.id;
+
+    const { data: tenantData, error: tenantError } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .insert({
+        name: tenantName,
+        slug: normalizedSlug,
+        primary_color: '#111827',
+        require_deposit: false,
+        owner_id: ownerId,
+        subscription_status: 'INACTIVE',
+      })
+      .select('*')
+      .single();
+
+    if (tenantError || !tenantData) {
+      await this.supabaseService.getClient().auth.admin.deleteUser(ownerId);
+
+      if (tenantError?.code === '23505') {
+        throw new ConflictException(
+          'Esta URL já está em uso. Escolha outro endereço para sua barbearia.',
+        );
+      }
+
+      throw new InternalServerErrorException(
+        tenantError?.message ?? 'Não foi possível criar o estabelecimento.',
+      );
+    }
+
+    return mapTenantRow(tenantData as Tenant);
+  }
+
   async updateStripeCustomerId(
     tenantId: string,
     stripeCustomerId: string,
@@ -256,16 +363,6 @@ export class TenantsService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
-  }
-
-  private normalizeSlug(slug: string): string {
-    return slug
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/^-+|-+$/g, '');
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {

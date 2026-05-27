@@ -4,12 +4,16 @@ import {
   Get,
   NotFoundException,
   Param,
+  Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RegisterTenantDto } from './dto/register-tenant.dto';
+import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
+import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
 import { TenantsService } from './tenants.service';
@@ -17,6 +21,21 @@ import { TenantsService } from './tenants.service';
 @Controller('tenants')
 export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
+
+  @Post('register')
+  async register(
+    @Body() dto: RegisterTenantDto,
+  ): Promise<RegisterTenantResponseDto> {
+    const tenant = await this.tenantsService.register(dto);
+    return { tenant };
+  }
+
+  @Get('slug-available/:slug')
+  async checkSlugAvailability(
+    @Param('slug') slug: string,
+  ): Promise<SlugAvailabilityResponseDto> {
+    return this.tenantsService.checkSlugAvailability(slug);
+  }
 
   @Get('me')
   @UseGuards(AuthGuard)
