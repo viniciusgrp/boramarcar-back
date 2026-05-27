@@ -11,7 +11,12 @@ import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
-import { isValidSlug, normalizeSlug } from './utils/slug.util';
+import {
+  isStoredSlug,
+  isValidSlug,
+  normalizeSlug,
+  resolveSlugForUpdate,
+} from './utils/slug.util';
 
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
@@ -89,16 +94,21 @@ export class TenantsService {
       );
     }
 
-    const normalizedSlug = normalizeSlug(dto.slug);
+    const slugToSave = resolveSlugForUpdate(tenant.slug, dto.slug);
+    const slugWasEdited = slugToSave !== tenant.slug;
 
-    if (!isValidSlug(normalizedSlug)) {
+    const slugIsValid = slugWasEdited
+      ? isValidSlug(slugToSave)
+      : isStoredSlug(slugToSave);
+
+    if (!slugIsValid) {
       throw new BadRequestException(
         'A URL personalizada deve conter apenas letras minúsculas, números e traços.',
       );
     }
 
     const slugTaken = await this.isSlugTakenByAnotherTenant(
-      normalizedSlug,
+      slugToSave,
       tenant.id,
     );
 
@@ -113,7 +123,7 @@ export class TenantsService {
       .from('tenants')
       .update({
         name: dto.name.trim(),
-        slug: normalizedSlug,
+        slug: slugToSave,
         primary_color: dto.primaryColor.trim(),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         require_deposit: dto.requireDeposit,
