@@ -9,6 +9,7 @@ import { BillingModule } from './billing/billing.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
 import { ServicesModule } from './services/services.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { TenantsModule } from './tenants/tenants.module';
     AppointmentsModule,
     BusinessHoursModule,
     BillingModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -56,6 +56,7 @@ export class ProfessionalsService {
       .insert({
         tenant_id: tenantId,
         name: dto.name.trim(),
+        contact_phone: this.normalizeContactPhone(dto.contactPhone),
         avatar_url: dto.avatarUrl?.trim() || null,
         is_active: dto.isActive ?? true,
       })
@@ -96,6 +97,10 @@ export class ProfessionalsService {
 
     if (dto.isActive !== undefined) {
       payload.is_active = dto.isActive;
+    }
+
+    if (dto.contactPhone !== undefined) {
+      payload.contact_phone = this.normalizeContactPhone(dto.contactPhone);
     }
 
     if (Object.keys(payload).length > 0) {
@@ -209,5 +214,14 @@ export class ProfessionalsService {
     }
 
     return data as Professional;
+  }
+
+  private normalizeContactPhone(phone?: string | null): string | null {
+    if (phone === undefined || phone === null) {
+      return null;
+    }
+
+    const trimmed = phone.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 }

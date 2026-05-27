@@ -6,6 +6,7 @@ export interface Tenant {
   slug: string;
   logo_url: string | null;
   primary_color: string;
+  contact_phone: string | null;
   require_deposit: boolean;
   owner_id: string | null;
   stripe_customer_id: string | null;
