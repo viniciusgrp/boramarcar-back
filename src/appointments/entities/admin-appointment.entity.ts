@@ -1,4 +1,5 @@
 import type { AppointmentStatus } from './appointment.entity';
+import type { BookingSource } from './booking-source.type';
 
 export interface AdminAppointment {
   id: string;
@@ -12,4 +13,5 @@ export interface AdminAppointment {
   serviceName: string;
   durationMinutes: number;
   servicePrice: number;
+  bookingSource: BookingSource;
 }

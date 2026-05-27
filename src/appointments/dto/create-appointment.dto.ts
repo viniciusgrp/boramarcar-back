@@ -1,7 +1,9 @@
 export class CreateAppointmentDto {
   tenantId!: string;
   professionalId!: string;
-  serviceId!: string;
+  /** @deprecated Use serviceIds. Kept for backward compatibility. */
+  serviceId?: string;
+  serviceIds?: string[];
   customerName!: string;
   customerPhone!: string;
   startTime!: string;

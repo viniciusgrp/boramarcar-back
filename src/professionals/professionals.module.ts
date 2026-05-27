@@ -8,5 +8,6 @@ import { ProfessionalsService } from './professionals.service';
   imports: [AuthModule, TenantsModule],
   controllers: [ProfessionalsController],
   providers: [ProfessionalsService],
+  exports: [ProfessionalsService],
 })
 export class ProfessionalsModule {}

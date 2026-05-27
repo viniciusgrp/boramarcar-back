@@ -13,6 +13,8 @@ export const APPOINTMENT_STATUSES: AppointmentStatus[] = [
   'NO_SHOW',
 ];
 
+import type { BookingSource } from './booking-source.type';
+
 export interface Appointment {
   id: string;
   tenant_id: string;
@@ -24,4 +26,5 @@ export interface Appointment {
   end_time: string;
   status: AppointmentStatus;
   deposit_paid: boolean;
+  booking_source: BookingSource;
 }

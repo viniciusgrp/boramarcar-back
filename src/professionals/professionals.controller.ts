@@ -45,6 +45,16 @@ export class ProfessionalsController {
     return this.professionalsService.findAllManagedByTenant(tenant.id);
   }
 
+  @Get('managed/:id')
+  @UseGuards(AuthGuard)
+  async findManagedOne(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+  ): Promise<Professional> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.professionalsService.findOneWithServices(id, tenant.id);
+  }
+
   @Post()
   @UseGuards(AuthGuard)
   async create(

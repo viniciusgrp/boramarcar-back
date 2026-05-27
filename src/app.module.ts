@@ -7,6 +7,7 @@ import { SupabaseModule } from './supabase/supabase.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { BillingModule } from './billing/billing.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
+import { ProfessionalHoursModule } from './professional-hours/professional-hours.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
 import { ServicesModule } from './services/services.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -28,6 +29,7 @@ import { TenantsModule } from './tenants/tenants.module';
     ProfessionalsModule,
     AppointmentsModule,
     BusinessHoursModule,
+    ProfessionalHoursModule,
     BillingModule,
     NotificationsModule,
   ],

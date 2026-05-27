@@ -172,7 +172,7 @@ export class ProfessionalsService {
     }
   }
 
-  private async findOneWithServices(
+  async findOneWithServices(
     professionalId: string,
     tenantId: string,
   ): Promise<Professional> {
@@ -191,7 +191,7 @@ export class ProfessionalsService {
     return data as Professional;
   }
 
-  private async assertProfessionalBelongsToTenant(
+  async assertProfessionalBelongsToTenant(
     professionalId: string,
     tenantId: string,
   ): Promise<Professional> {
