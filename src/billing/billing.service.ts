@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
+import type { PlanTier } from '../tenants/entities/plan-tier.type';
+import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
@@ -26,6 +28,7 @@ export interface CreateCheckoutSessionParams {
   tenantId: string;
   tenantName: string;
   ownerEmail: string;
+  planTier: PlanTier;
 }
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -133,6 +136,10 @@ export class BillingService {
       extractSubscriptionPeriodEnd(stripeSubscription),
     );
 
+    // TODO(plan-tier): map stripeSubscription.items.data[0].price.id to plan_tier
+    // (STRIPE_SOLO_PRICE_ID / STRIPE_PRO_TIER_PRICE_ID / STRIPE_ELITE_PRICE_ID)
+    // and persist via tenantsService.updatePlanTier(tenantId, tier).
+
     let tenant =
       await this.tenantsService.updateSubscriptionByStripeCustomerId(
         stripeCustomerId,
@@ -232,7 +239,8 @@ export class BillingService {
       );
     }
 
-    const priceId = this.resolveStripePriceId();
+    const planTier = normalizePlanTier(params.planTier);
+    const priceId = this.resolveStripePriceId(planTier);
 
     const ownerEmail = params.ownerEmail.trim();
 
@@ -277,10 +285,12 @@ export class BillingService {
         cancel_url: cancelUrl,
         metadata: {
           tenant_id: tenant.id,
+          plan_tier: planTier,
         },
         subscription_data: {
           metadata: {
             tenant_id: tenant.id,
+            plan_tier: planTier,
           },
         },
       });
@@ -297,24 +307,43 @@ export class BillingService {
     }
   }
 
-  private resolveStripePriceId(): string {
-    const raw = this.configService.get<string>('STRIPE_PRO_PRICE_ID')?.trim();
+  private resolveStripePriceId(planTier: PlanTier): string {
+    const envKeyByTier: Record<PlanTier, string> = {
+      SOLO: 'STRIPE_SOLO_PRICE_ID',
+      PRO: 'STRIPE_PRO_TIER_PRICE_ID',
+      ELITE: 'STRIPE_ELITE_PRICE_ID',
+    };
+
+    const fallbackByTier: Partial<Record<PlanTier, string>> = {
+      SOLO: 'STRIPE_PRO_PRICE_ID',
+    };
+
+    const envKey = envKeyByTier[planTier];
+    const raw =
+      this.configService.get<string>(envKey)?.trim() ??
+      (fallbackByTier[planTier]
+        ? this.configService.get<string>(fallbackByTier[planTier]!)?.trim()
+        : undefined);
 
     if (!raw) {
       throw new InternalServerErrorException(
-        'STRIPE_PRO_PRICE_ID is not configured',
+        `${envKey} is not configured${fallbackByTier[planTier] ? ` (fallback ${fallbackByTier[planTier]} also missing)` : ''}`,
       );
     }
 
+    return this.assertStripePriceId(raw, envKey);
+  }
+
+  private assertStripePriceId(raw: string, envKey: string): string {
     if (raw.startsWith('prod_')) {
       throw new BadRequestException(
-        'STRIPE_PRO_PRICE_ID está com um Product ID (prod_...). No Stripe Dashboard, abra o produto BoraMarcar Pro e copie o Price ID (começa com price_...).',
+        `${envKey} está com um Product ID (prod_...). Copie o Price ID (price_...) no Stripe Dashboard.`,
       );
     }
 
     if (!raw.startsWith('price_')) {
       throw new BadRequestException(
-        'STRIPE_PRO_PRICE_ID deve ser um Price ID do Stripe (começa com price_...).',
+        `${envKey} deve ser um Price ID do Stripe (começa com price_...).`,
       );
     }
 

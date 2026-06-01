@@ -1,8 +1,14 @@
 import {
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import type { PlanTier } from '../tenants/entities/plan-tier.type';
+import {
+  canAddActiveProfessional,
+  getProfessionalLimitMessage,
+} from '../tenants/utils/plan-tier.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
@@ -46,10 +52,50 @@ export class ProfessionalsService {
     return (data ?? []) as Professional[];
   }
 
+  async countActiveByTenant(tenantId: string): Promise<number> {
+    const { count, error } = await this.supabaseService
+      .getClient()
+      .from('professionals')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return count ?? 0;
+  }
+
+  async assertCanCreateProfessional(
+    tenantId: string,
+    planTier: PlanTier,
+    willBeActive: boolean,
+  ): Promise<void> {
+    if (!willBeActive) {
+      return;
+    }
+
+    const activeCount = await this.countActiveByTenant(tenantId);
+
+    if (!canAddActiveProfessional(planTier, activeCount)) {
+      const message = getProfessionalLimitMessage(planTier);
+
+      throw new ForbiddenException(
+        message ?? 'Limite de profissionais atingido para o seu plano.',
+      );
+    }
+  }
+
   async createForTenant(
     tenantId: string,
+    planTier: PlanTier,
     dto: CreateProfessionalDto,
   ): Promise<Professional> {
+    const willBeActive = dto.isActive ?? true;
+
+    await this.assertCanCreateProfessional(tenantId, planTier, willBeActive);
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('professionals')

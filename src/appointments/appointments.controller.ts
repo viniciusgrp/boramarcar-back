@@ -13,6 +13,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -30,7 +31,7 @@ export class AppointmentsController {
   ) {}
 
   @Get('admin')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   findAllByDate(
     @Query('tenantId') tenantId?: string,
     @Query('date') date?: string,
@@ -66,7 +67,7 @@ export class AppointmentsController {
   }
 
   @Post('internal')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async createInternal(
     @CurrentUser() user: User,
     @Body() dto: CreateInternalAppointmentDto,
@@ -76,7 +77,7 @@ export class AppointmentsController {
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async updateStatus(
     @CurrentUser() user: User,
     @Param('id') id: string,

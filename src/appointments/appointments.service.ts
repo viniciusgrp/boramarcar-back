@@ -397,8 +397,8 @@ export class AppointmentsService {
   private extractRelationName(
     relation: { name: string } | { name: string }[] | null,
   ): string {
-    if (!relation) return '—';
-    if (Array.isArray(relation)) return relation[0]?.name ?? '—';
+    if (!relation) return '-';
+    if (Array.isArray(relation)) return relation[0]?.name ?? '-';
     return relation.name;
   }
 

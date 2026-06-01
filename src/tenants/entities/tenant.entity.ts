@@ -1,3 +1,4 @@
+import type { PlanTier } from './plan-tier.type';
 import type { SubscriptionStatus } from './subscription-status.type';
 
 export interface Tenant {
@@ -13,6 +14,9 @@ export interface Tenant {
   stripe_subscription_id: string | null;
   subscription_status: SubscriptionStatus;
   subscription_expires_at: string | null;
+  trial_starts_at: string | null;
+  trial_ends_at: string | null;
+  plan_tier: PlanTier;
   created_at: string;
   updated_at: string;
 }

@@ -3,6 +3,7 @@ import {
   Controller,
   Headers,
   NotFoundException,
+  Body,
   Post,
   Req,
   UseGuards,
@@ -12,7 +13,10 @@ import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { SkipTenantAccessCheck } from '../tenants/decorators/skip-tenant-access-check.decorator';
 import { TenantsService } from '../tenants/tenants.service';
+import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
+import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { BillingService } from './billing.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
@@ -33,9 +37,11 @@ export class BillingController {
   }
 
   @Post('checkout')
+  @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
   async createCheckout(
     @CurrentUser() user: User,
+    @Body() dto: CreateCheckoutDto,
   ): Promise<CheckoutSessionResponse> {
     const tenant = await this.resolveOwnerTenant(user.id);
 
@@ -49,6 +55,7 @@ export class BillingController {
       tenantId: tenant.id,
       tenantName: tenant.name,
       ownerEmail: user.email,
+      planTier: normalizePlanTier(dto.planTier),
     });
   }
 

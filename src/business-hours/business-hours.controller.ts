@@ -10,6 +10,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { BusinessHoursService } from './business-hours.service';
 import { UpdateBusinessHoursDto } from './dto/update-business-hours.dto';
@@ -23,14 +24,14 @@ export class BusinessHoursController {
   ) {}
 
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async findMine(@CurrentUser() user: User): Promise<BusinessHour[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.businessHoursService.findAllByTenant(tenant.id);
   }
 
   @Put()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async updateMine(
     @CurrentUser() user: User,
     @Body() dto: UpdateBusinessHoursDto,

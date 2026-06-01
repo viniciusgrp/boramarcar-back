@@ -17,6 +17,8 @@ import {
   normalizeSlug,
   resolveSlugForUpdate,
 } from './utils/slug.util';
+import { normalizePlanTier } from './utils/plan-tier.util';
+import { buildTrialPeriod } from './utils/trial-period.util';
 
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
@@ -30,6 +32,7 @@ function mapTenantRow(row: Tenant): Tenant {
       subscriptionStatus === 'CANCELED'
         ? subscriptionStatus
         : 'INACTIVE',
+    plan_tier: normalizePlanTier(row.plan_tier),
   };
 }
 
@@ -325,6 +328,7 @@ export class TenantsService {
     }
 
     const ownerId = authData.user.id;
+    const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
 
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
@@ -336,6 +340,8 @@ export class TenantsService {
         require_deposit: false,
         owner_id: ownerId,
         subscription_status: 'INACTIVE',
+        trial_starts_at: trialStartsAt,
+        trial_ends_at: trialEndsAt,
       })
       .select('*')
       .single();

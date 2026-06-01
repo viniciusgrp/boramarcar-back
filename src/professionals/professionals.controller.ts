@@ -14,6 +14,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
@@ -39,14 +40,14 @@ export class ProfessionalsController {
   }
 
   @Get('managed')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async findManaged(@CurrentUser() user: User): Promise<Professional[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.professionalsService.findAllManagedByTenant(tenant.id);
   }
 
   @Get('managed/:id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async findManagedOne(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -56,7 +57,7 @@ export class ProfessionalsController {
   }
 
   @Post()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async create(
     @CurrentUser() user: User,
     @Body() dto: CreateProfessionalDto,
@@ -66,11 +67,11 @@ export class ProfessionalsController {
     }
 
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.createForTenant(tenant.id, dto);
+    return this.professionalsService.createForTenant(tenant.id, tenant.plan_tier, dto);
   }
 
   @Put(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async update(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -81,7 +82,7 @@ export class ProfessionalsController {
   }
 
   @Delete(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async softDelete(
     @CurrentUser() user: User,
     @Param('id') id: string,

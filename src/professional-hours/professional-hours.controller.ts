@@ -12,6 +12,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { ProfessionalsService } from '../professionals/professionals.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { ProfessionalDayStatusDto } from './dto/professional-day-status.dto';
@@ -28,7 +29,7 @@ export class ProfessionalHoursController {
   ) {}
 
   @Get('day-status')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async getDayStatus(
     @CurrentUser() user: User,
     @Query('date') date?: string,
@@ -53,7 +54,7 @@ export class ProfessionalHoursController {
   }
 
   @Get(':professionalId')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async findByProfessional(
     @CurrentUser() user: User,
     @Param('professionalId') professionalId: string,
@@ -68,7 +69,7 @@ export class ProfessionalHoursController {
   }
 
   @Put(':professionalId')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async updateForProfessional(
     @CurrentUser() user: User,
     @Param('professionalId') professionalId: string,

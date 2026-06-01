@@ -14,6 +14,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -39,14 +40,14 @@ export class ServicesController {
   }
 
   @Get('managed')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async findManaged(@CurrentUser() user: User): Promise<Service[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.servicesService.findAllManagedByTenant(tenant.id);
   }
 
   @Post()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async create(
     @CurrentUser() user: User,
     @Body() dto: CreateServiceDto,
@@ -66,7 +67,7 @@ export class ServicesController {
   }
 
   @Put(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async update(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -77,7 +78,7 @@ export class ServicesController {
   }
 
   @Delete(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard)
   async softDelete(
     @CurrentUser() user: User,
     @Param('id') id: string,
