@@ -8,6 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
+import type { SubscriptionStatus } from '../tenants/entities/subscription-status.type';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
@@ -17,7 +19,12 @@ import type {
   StripeEvent,
   StripeSubscription,
 } from './types/stripe-api.types';
+import { extractSubscriptionPriceId } from './utils/extract-subscription-price-id.util';
 import { mapStripeSubscriptionStatus } from './utils/map-stripe-subscription-status';
+import {
+  buildStripePriceTierMap,
+  resolvePlanTierFromPriceId,
+} from './utils/stripe-plan-tier.util';
 import {
   extractSubscriptionPeriodEnd,
   stripePeriodEndToIso,
@@ -90,9 +97,22 @@ export class BillingService {
       throw new BadRequestException('Invalid Stripe webhook signature');
     }
 
-    await this.processWebhookEvent(event);
+    try {
+      await this.handleStripeWebhook(event);
+    } catch (error) {
+      this.logger.error(
+        `Stripe webhook processing failed for ${event.type}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
 
     return { received: true };
+  }
+
+  async handleStripeWebhook(event: StripeEvent): Promise<void> {
+    await this.processWebhookEvent(event);
   }
 
   private async processWebhookEvent(event: StripeEvent): Promise<void> {
@@ -111,6 +131,42 @@ export class BillingService {
     }
   }
 
+  private resolvePlanTierFromStripePrice(
+    priceId: string | null,
+    metadataPlanTier?: string | null,
+  ): PlanTier {
+    const priceMap = buildStripePriceTierMap(this.configService);
+    const fromPrice = resolvePlanTierFromPriceId(priceId, priceMap);
+
+    if (fromPrice) {
+      return fromPrice;
+    }
+
+    if (metadataPlanTier) {
+      return normalizePlanTier(metadataPlanTier);
+    }
+
+    this.logger.warn(
+      `Unable to map Stripe price "${priceId ?? 'unknown'}" to plan_tier; defaulting to SOLO`,
+    );
+
+    return 'SOLO';
+  }
+
+  private resolveTenantIdFromCheckoutSession(
+    session: StripeCheckoutSession,
+  ): string | null {
+    const metadataTenantId = session.metadata?.tenant_id?.trim();
+
+    if (metadataTenantId) {
+      return metadataTenantId;
+    }
+
+    const clientReferenceId = session.client_reference_id?.trim();
+
+    return clientReferenceId || null;
+  }
+
   private async handleCheckoutSessionCompleted(
     session: StripeCheckoutSession,
   ): Promise<void> {
@@ -120,6 +176,7 @@ export class BillingService {
 
     const stripeCustomerId = extractStripeId(session.customer);
     const stripeSubscriptionId = extractStripeId(session.subscription);
+    const tenantId = this.resolveTenantIdFromCheckoutSession(session);
 
     if (!stripeCustomerId || !stripeSubscriptionId) {
       this.logger.warn(
@@ -130,51 +187,46 @@ export class BillingService {
 
     const stripeSubscription = await this.stripe.subscriptions.retrieve(
       stripeSubscriptionId,
-      { expand: ['items.data'] },
+      { expand: ['items.data.price'] },
     );
     const subscriptionExpiresAt = stripePeriodEndToIso(
       extractSubscriptionPeriodEnd(stripeSubscription),
     );
+    const priceId = extractSubscriptionPriceId(stripeSubscription);
+    const planTier = this.resolvePlanTierFromStripePrice(
+      priceId,
+      session.metadata?.plan_tier,
+    );
 
-    // TODO(plan-tier): map stripeSubscription.items.data[0].price.id to plan_tier
-    // (STRIPE_SOLO_PRICE_ID / STRIPE_PRO_TIER_PRICE_ID / STRIPE_ELITE_PRICE_ID)
-    // and persist via tenantsService.updatePlanTier(tenantId, tier).
+    const billingPayload = {
+      stripeCustomerId,
+      stripeSubscriptionId,
+      subscriptionStatus: 'ACTIVE' as const,
+      subscriptionExpiresAt,
+      planTier,
+    };
 
-    let tenant =
-      await this.tenantsService.updateSubscriptionByStripeCustomerId(
+    let tenant = tenantId
+      ? await this.tenantsService.updateSubscriptionByTenantId(
+          tenantId,
+          billingPayload,
+        )
+      : null;
+
+    if (!tenant) {
+      tenant = await this.tenantsService.updateSubscriptionByStripeCustomerId(
         stripeCustomerId,
-        {
-          stripeSubscriptionId,
-          subscriptionStatus: 'ACTIVE',
-          subscriptionExpiresAt,
-        },
+        billingPayload,
       );
-
-    if (!tenant && session.metadata?.tenant_id) {
-      const existingTenant = await this.tenantsService.findById(
-        session.metadata.tenant_id,
-      );
-
-      if (existingTenant) {
-        await this.tenantsService.updateStripeCustomerId(
-          existingTenant.id,
-          stripeCustomerId,
-        );
-        tenant =
-          await this.tenantsService.updateSubscriptionByStripeCustomerId(
-            stripeCustomerId,
-            {
-              stripeSubscriptionId,
-              subscriptionStatus: 'ACTIVE',
-              subscriptionExpiresAt,
-            },
-          );
-      }
     }
 
     if (!tenant) {
       this.logger.warn(
-        `No tenant found for Stripe customer ${stripeCustomerId} after checkout`,
+        `No tenant found after checkout (customer=${stripeCustomerId}, tenantId=${tenantId ?? 'n/a'})`,
+      );
+    } else {
+      this.logger.log(
+        `Checkout completed: tenant=${tenant.id} plan_tier=${planTier} status=ACTIVE`,
       );
     }
   }
@@ -182,50 +234,101 @@ export class BillingService {
   private async handleSubscriptionUpdated(
     subscription: StripeSubscription,
   ): Promise<void> {
-    await this.syncSubscriptionStatus(subscription);
+    await this.syncSubscriptionFromStripe(subscription, {
+      applyPlanTierOnActive: true,
+    });
   }
 
   private async handleSubscriptionDeleted(
     subscription: StripeSubscription,
   ): Promise<void> {
-    await this.syncSubscriptionStatus(subscription);
-  }
-
-  private async syncSubscriptionStatus(
-    subscription: StripeSubscription,
-  ): Promise<void> {
-    const subscriptionStatus = mapStripeSubscriptionStatus(subscription.status);
-    const stripeSubscriptionId = subscription.id;
-    const stripeCustomerId = extractStripeId(subscription.customer);
     const subscriptionExpiresAt = stripePeriodEndToIso(
       extractSubscriptionPeriodEnd(subscription),
     );
 
+    const updated = await this.syncSubscriptionFromStripe(subscription, {
+      subscriptionStatus: 'CANCELED',
+      planTier: 'SOLO',
+      subscriptionExpiresAt,
+      applyPlanTierOnActive: false,
+    });
+
+    if (!updated) {
+      this.logger.warn(
+        `customer.subscription.deleted: no tenant for subscription ${subscription.id}`,
+      );
+    } else {
+      this.logger.log(
+        `Subscription canceled: tenant=${updated.id} plan_tier=SOLO`,
+      );
+    }
+  }
+
+  private async syncSubscriptionFromStripe(
+    subscription: StripeSubscription,
+    options: {
+      subscriptionStatus?: SubscriptionStatus;
+      planTier?: PlanTier;
+      subscriptionExpiresAt?: string | null;
+      applyPlanTierOnActive: boolean;
+    },
+  ): Promise<Tenant | null> {
+    const stripeStatus = subscription.status;
+    const subscriptionStatus =
+      options.subscriptionStatus ?? mapStripeSubscriptionStatus(stripeStatus);
+    const stripeSubscriptionId = subscription.id;
+    const stripeCustomerId = extractStripeId(subscription.customer);
+    const subscriptionExpiresAt =
+      options.subscriptionExpiresAt ??
+      stripePeriodEndToIso(extractSubscriptionPeriodEnd(subscription));
+
+    let planTier = options.planTier;
+
+    if (
+      options.applyPlanTierOnActive &&
+      (stripeStatus === 'active' || stripeStatus === 'trialing')
+    ) {
+      const priceId = extractSubscriptionPriceId(subscription);
+      planTier = this.resolvePlanTierFromStripePrice(
+        priceId,
+        subscription.metadata?.plan_tier,
+      );
+    }
+
+    const payload = {
+      stripeSubscriptionId,
+      subscriptionStatus,
+      subscriptionExpiresAt,
+      ...(planTier !== undefined ? { planTier } : {}),
+    };
+
     let tenant =
       await this.tenantsService.updateSubscriptionByStripeSubscriptionId(
         stripeSubscriptionId,
-        {
-          subscriptionStatus,
-          subscriptionExpiresAt,
-        },
+        payload,
       );
 
     if (!tenant && stripeCustomerId) {
       tenant = await this.tenantsService.updateSubscriptionByStripeCustomerId(
         stripeCustomerId,
-        {
-          stripeSubscriptionId,
-          subscriptionStatus,
-          subscriptionExpiresAt,
-        },
+        payload,
       );
     }
 
     if (!tenant) {
       this.logger.warn(
-        `No tenant found for subscription ${stripeSubscriptionId}`,
+        `No tenant found for subscription ${stripeSubscriptionId} (status=${subscriptionStatus})`,
       );
+      return null;
     }
+
+    this.logger.log(
+      `Subscription synced: tenant=${tenant.id} status=${subscriptionStatus}${
+        planTier ? ` plan_tier=${planTier}` : ''
+      }`,
+    );
+
+    return tenant;
   }
 
   async createCheckoutSession(

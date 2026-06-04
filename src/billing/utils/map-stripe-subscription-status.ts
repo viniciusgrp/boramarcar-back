@@ -9,9 +9,9 @@ export function mapStripeSubscriptionStatus(
     case 'trialing':
       return 'ACTIVE';
     case 'past_due':
+    case 'unpaid':
       return 'PAST_DUE';
     case 'canceled':
-    case 'unpaid':
     case 'incomplete_expired':
       return 'CANCELED';
     case 'incomplete':

@@ -9,6 +9,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import type { PlanTier } from './entities/plan-tier.type';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
 import {
@@ -203,6 +204,7 @@ export class TenantsService {
       stripeSubscriptionId?: string | null;
       subscriptionStatus: SubscriptionStatus;
       subscriptionExpiresAt?: string | null;
+      planTier?: PlanTier;
     },
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | null> = {
@@ -216,6 +218,10 @@ export class TenantsService {
 
     if (payload.subscriptionExpiresAt !== undefined) {
       updatePayload.subscription_expires_at = payload.subscriptionExpiresAt;
+    }
+
+    if (payload.planTier !== undefined) {
+      updatePayload.plan_tier = payload.planTier;
     }
 
     const { data, error } = await this.supabaseService
@@ -238,6 +244,7 @@ export class TenantsService {
     payload: {
       subscriptionStatus: SubscriptionStatus;
       subscriptionExpiresAt?: string | null;
+      planTier?: PlanTier;
     },
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | null> = {
@@ -249,11 +256,61 @@ export class TenantsService {
       updatePayload.subscription_expires_at = payload.subscriptionExpiresAt;
     }
 
+    if (payload.planTier !== undefined) {
+      updatePayload.plan_tier = payload.planTier;
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
       .update(updatePayload)
       .eq('stripe_subscription_id', stripeSubscriptionId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async updateSubscriptionByTenantId(
+    tenantId: string,
+    payload: {
+      stripeCustomerId?: string | null;
+      stripeSubscriptionId?: string | null;
+      subscriptionStatus: SubscriptionStatus;
+      subscriptionExpiresAt?: string | null;
+      planTier?: PlanTier;
+    },
+  ): Promise<Tenant | null> {
+    const updatePayload: Record<string, string | null> = {
+      subscription_status: payload.subscriptionStatus,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (payload.stripeCustomerId !== undefined) {
+      updatePayload.stripe_customer_id = payload.stripeCustomerId;
+    }
+
+    if (payload.stripeSubscriptionId !== undefined) {
+      updatePayload.stripe_subscription_id = payload.stripeSubscriptionId;
+    }
+
+    if (payload.subscriptionExpiresAt !== undefined) {
+      updatePayload.subscription_expires_at = payload.subscriptionExpiresAt;
+    }
+
+    if (payload.planTier !== undefined) {
+      updatePayload.plan_tier = payload.planTier;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update(updatePayload)
+      .eq('id', tenantId)
       .select('*')
       .maybeSingle();
 
