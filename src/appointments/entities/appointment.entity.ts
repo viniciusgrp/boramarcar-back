@@ -23,6 +23,7 @@ export interface Appointment {
   tenant_id: string;
   professional_id: string;
   service_id: string;
+  customer_id: string | null;
   customer_name: string;
   customer_phone: string;
   start_time: string;

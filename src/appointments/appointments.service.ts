@@ -14,6 +14,7 @@ import {
   parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import { calculateCommissionAmount } from '../professionals/utils/professional-commission.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -66,6 +67,7 @@ export class AppointmentsService {
     private readonly tenantsService: TenantsService,
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
+    private readonly loyaltyService: LoyaltyService,
   ) {}
 
   async getAvailability(
@@ -179,6 +181,20 @@ export class AppointmentsService {
       ? 'PENDING'
       : 'PAID';
 
+    const { customer, isNew: isNewCustomer } =
+      await this.loyaltyService.findOrCreateCustomerForAppointment(
+        dto.tenantId,
+        dto.customerName,
+        dto.customerPhone,
+      );
+
+    const loyaltyFeedback =
+      await this.loyaltyService.buildBookingLoyaltyFeedback(
+        dto.tenantId,
+        booking.totalPrice,
+        isNewCustomer,
+      );
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -186,6 +202,7 @@ export class AppointmentsService {
         tenant_id: dto.tenantId,
         professional_id: dto.professionalId,
         service_id: primaryServiceId,
+        customer_id: customer.id,
         customer_name: dto.customerName.trim(),
         customer_phone: dto.customerPhone.trim(),
         start_time: startTime.toISOString(),
@@ -213,7 +230,7 @@ export class AppointmentsService {
     );
 
     if (!requiresDepositPayment) {
-      return { appointment };
+      return { appointment, loyaltyFeedback };
     }
 
     const checkoutUrl =
@@ -224,7 +241,7 @@ export class AppointmentsService {
         depositAmountBrl: booking.totalDepositAmount,
       });
 
-    return { appointment, checkoutUrl };
+    return { appointment, checkoutUrl, loyaltyFeedback };
   }
 
   async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
@@ -262,6 +279,18 @@ export class AppointmentsService {
       dto.customerName,
       dto.customerPhone,
     );
+
+    let customerId: string | null = null;
+
+    if (customer.phone.trim()) {
+      const resolvedCustomer =
+        await this.loyaltyService.findOrCreateCustomerForAppointment(
+          tenantId,
+          customer.name,
+          customer.phone,
+        );
+      customerId = resolvedCustomer.customer.id;
+    }
 
     const booking = await this.resolveBookingServices(tenantId, [
       dto.serviceId,
@@ -313,6 +342,7 @@ export class AppointmentsService {
         tenant_id: tenantId,
         professional_id: dto.professionalId,
         service_id: dto.serviceId,
+        customer_id: customerId,
         customer_name: customer.name,
         customer_phone: customer.phone,
         start_time: startTime.toISOString(),
@@ -375,7 +405,9 @@ export class AppointmentsService {
     const { data: existing, error: fetchError } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select('id, status, professional_id, total_price')
+      .select(
+        'id, status, professional_id, total_price, customer_id, customer_name, customer_phone',
+      )
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -427,6 +459,17 @@ export class AppointmentsService {
 
     if (updateError) {
       throw new InternalServerErrorException(updateError.message);
+    }
+
+    if (status === 'COMPLETED' && existing.status !== 'COMPLETED') {
+      await this.loyaltyService.awardPointsForCompletedAppointment({
+        tenantId,
+        appointmentId,
+        customerId: existing.customer_id ?? null,
+        customerName: existing.customer_name,
+        customerPhone: existing.customer_phone,
+        totalPrice: Number(existing.total_price ?? 0),
+      });
     }
 
     const appointment = await this.findAdminById(tenantId, appointmentId);
