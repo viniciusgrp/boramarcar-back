@@ -5,9 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
+import { resolveServiceDepositFields } from './utils/service-deposit.util';
 
 @Injectable()
 export class ServicesService {
@@ -26,7 +28,7 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []) as Service[];
+    return (data ?? []).map((row) => this.mapServiceRow(row as Service));
   }
 
   async findAllManagedByTenant(tenantId: string): Promise<Service[]> {
@@ -41,14 +43,21 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []) as Service[];
+    return (data ?? []).map((row) => this.mapServiceRow(row as Service));
   }
 
   async createForTenant(
     tenantId: string,
+    planTier: PlanTier,
     dto: CreateServiceDto,
   ): Promise<Service> {
     this.validateServicePayload(dto.durationMinutes, dto.price);
+
+    const depositFields = resolveServiceDepositFields(
+      planTier,
+      dto.requiresDeposit,
+      dto.depositAmount,
+    );
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -60,6 +69,7 @@ export class ServicesService {
         duration_minutes: dto.durationMinutes,
         price: dto.price,
         is_active: dto.isActive ?? true,
+        ...depositFields,
       })
       .select('*')
       .single();
@@ -68,11 +78,12 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data as Service;
+    return this.mapServiceRow(data as Service);
   }
 
   async updateForTenant(
     tenantId: string,
+    planTier: PlanTier,
     serviceId: string,
     dto: UpdateServiceDto,
   ): Promise<Service> {
@@ -108,6 +119,16 @@ export class ServicesService {
       payload.is_active = dto.isActive;
     }
 
+    if (dto.requiresDeposit !== undefined || dto.depositAmount !== undefined) {
+      const depositFields = resolveServiceDepositFields(
+        planTier,
+        dto.requiresDeposit,
+        dto.depositAmount,
+      );
+      payload.requires_deposit = depositFields.requires_deposit;
+      payload.deposit_amount = depositFields.deposit_amount;
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('services')
@@ -121,14 +142,17 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data as Service;
+    return this.mapServiceRow(data as Service);
   }
 
   async softDeleteForTenant(
     tenantId: string,
+    planTier: PlanTier,
     serviceId: string,
   ): Promise<Service> {
-    return this.updateForTenant(tenantId, serviceId, { isActive: false });
+    return this.updateForTenant(tenantId, planTier, serviceId, {
+      isActive: false,
+    });
   }
 
   private async assertServiceBelongsToTenant(
@@ -153,7 +177,19 @@ export class ServicesService {
       );
     }
 
-    return data as Service;
+    return this.mapServiceRow(data as Service);
+  }
+
+  private mapServiceRow(row: Service): Service {
+    return {
+      ...row,
+      requires_deposit: row.requires_deposit ?? false,
+      deposit_amount:
+        row.deposit_amount === null || row.deposit_amount === undefined
+          ? null
+          : Number(row.deposit_amount),
+      price: Number(row.price),
+    };
   }
 
   private validateServicePayload(durationMinutes: number, price: number): void {

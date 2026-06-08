@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
@@ -11,6 +13,7 @@ import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import type { SubscriptionStatus } from '../tenants/entities/subscription-status.type';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
+import { AppointmentsService } from '../appointments/appointments.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
@@ -38,6 +41,13 @@ export interface CreateCheckoutSessionParams {
   planTier: PlanTier;
 }
 
+export interface CreateDepositCheckoutSessionParams {
+  appointmentId: string;
+  tenantId: string;
+  tenantName: string;
+  depositAmountBrl: number;
+}
+
 type StripeClient = InstanceType<typeof Stripe>;
 
 @Injectable()
@@ -48,6 +58,8 @@ export class BillingService {
   constructor(
     private readonly configService: ConfigService,
     private readonly tenantsService: TenantsService,
+    @Inject(forwardRef(() => AppointmentsService))
+    private readonly appointmentsService: AppointmentsService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
 
@@ -153,6 +165,39 @@ export class BillingService {
     return 'SOLO';
   }
 
+  private async handleDepositCheckoutCompleted(
+    session: StripeCheckoutSession,
+  ): Promise<void> {
+    const checkoutType = session.metadata?.checkout_type;
+
+    if (checkoutType !== 'appointment_deposit') {
+      return;
+    }
+
+    const appointmentId = session.metadata?.appointment_id?.trim();
+
+    if (!appointmentId) {
+      this.logger.warn(
+        'Deposit checkout.session.completed missing appointment_id metadata',
+      );
+      return;
+    }
+
+    const appointment =
+      await this.appointmentsService.confirmDepositPayment(appointmentId);
+
+    if (!appointment) {
+      this.logger.warn(
+        `Deposit payment received but appointment ${appointmentId} was not found`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `Deposit confirmed: appointment=${appointmentId} status=CONFIRMED payment_status=PAID`,
+    );
+  }
+
   private resolveTenantIdFromCheckoutSession(
     session: StripeCheckoutSession,
   ): string | null {
@@ -167,9 +212,70 @@ export class BillingService {
     return clientReferenceId || null;
   }
 
+  async createDepositCheckoutSession(
+    params: CreateDepositCheckoutSessionParams,
+  ): Promise<string> {
+    if (params.depositAmountBrl <= 0) {
+      throw new BadRequestException('Deposit amount must be greater than zero');
+    }
+
+    const successBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_SUCCESS_URL');
+    const cancelUrl = this.getRequiredUrl('STRIPE_DEPOSIT_CANCEL_URL');
+    const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}`;
+
+    const unitAmountCents = Math.round(params.depositAmountBrl * 100);
+
+    try {
+      const session = await this.stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'brl',
+              unit_amount: unitAmountCents,
+              product_data: {
+                name: `Sinal: ${params.tenantName}`,
+                description: 'Pagamento antecipado para confirmar agendamento',
+              },
+            },
+          },
+        ],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: {
+          checkout_type: 'appointment_deposit',
+          appointment_id: params.appointmentId,
+          tenant_id: params.tenantId,
+        },
+      });
+
+      if (!session.url) {
+        throw new InternalServerErrorException(
+          'Stripe did not return a checkout session URL',
+        );
+      }
+
+      return session.url;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Não foi possível criar a sessão de pagamento do sinal no Stripe.',
+      );
+    }
+  }
+
   private async handleCheckoutSessionCompleted(
     session: StripeCheckoutSession,
   ): Promise<void> {
+    if (session.mode === 'payment') {
+      await this.handleDepositCheckoutCompleted(session);
+      return;
+    }
+
     if (session.mode !== 'subscription') {
       return;
     }

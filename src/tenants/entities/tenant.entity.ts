@@ -6,6 +6,8 @@ export interface Tenant {
   name: string;
   slug: string;
   logo_url: string | null;
+  banner_url: string | null;
+  address: string | null;
   primary_color: string;
   contact_phone: string | null;
   require_deposit: boolean;

@@ -63,7 +63,7 @@ export class ServicesController {
     }
 
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.servicesService.createForTenant(tenant.id, dto);
+    return this.servicesService.createForTenant(tenant.id, tenant.plan_tier, dto);
   }
 
   @Put(':id')
@@ -74,7 +74,12 @@ export class ServicesController {
     @Body() dto: UpdateServiceDto,
   ): Promise<Service> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.servicesService.updateForTenant(tenant.id, id, dto);
+    return this.servicesService.updateForTenant(
+      tenant.id,
+      tenant.plan_tier,
+      id,
+      dto,
+    );
   }
 
   @Delete(':id')
@@ -84,7 +89,11 @@ export class ServicesController {
     @Param('id') id: string,
   ): Promise<Service> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.servicesService.softDeleteForTenant(tenant.id, id);
+    return this.servicesService.softDeleteForTenant(
+      tenant.id,
+      tenant.plan_tier,
+      id,
+    );
   }
 
   private async resolveOwnerTenant(userId: string) {

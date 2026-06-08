@@ -19,7 +19,7 @@ import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
-import { Appointment } from './entities/appointment.entity';
+import { CreateAppointmentResponse } from './entities/create-appointment-response.entity';
 import { AppointmentsService } from './appointments.service';
 import { parseServiceIdsQuery } from './utils/parse-service-ids.util';
 
@@ -96,7 +96,7 @@ export class AppointmentsController {
   }
 
   @Post()
-  create(@Body() dto: CreateAppointmentDto): Promise<Appointment> {
+  create(@Body() dto: CreateAppointmentDto): Promise<CreateAppointmentResponse> {
     return this.appointmentsService.create(dto);
   }
 

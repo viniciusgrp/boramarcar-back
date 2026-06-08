@@ -4,4 +4,6 @@ export class CreateServiceDto {
   durationMinutes!: number;
   price!: number;
   isActive?: boolean;
+  requiresDeposit?: boolean;
+  depositAmount?: number;
 }

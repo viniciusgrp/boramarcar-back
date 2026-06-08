@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   addMinutes,
@@ -11,8 +13,10 @@ import {
   isAfter,
   parseISO,
 } from 'date-fns';
+import { BillingService } from '../billing/billing.service';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
@@ -23,6 +27,8 @@ import {
   Appointment,
   AppointmentStatus,
 } from './entities/appointment.entity';
+import type { CreateAppointmentResponse } from './entities/create-appointment-response.entity';
+import type { PaymentStatus } from './entities/payment-status.type';
 import { ResolvedBookingServices } from './types/resolved-booking-service.type';
 import {
   AppointmentServiceRelation,
@@ -56,6 +62,9 @@ export class AppointmentsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly professionalHoursService: ProfessionalHoursService,
+    private readonly tenantsService: TenantsService,
+    @Inject(forwardRef(() => BillingService))
+    private readonly billingService: BillingService,
   ) {}
 
   async getAvailability(
@@ -91,7 +100,7 @@ export class AppointmentsService {
         .select('start_time, end_time')
         .eq('tenant_id', tenantId)
         .eq('professional_id', professionalId)
-        .in('status', ['PENDING', 'CONFIRMED'])
+        .in('status', ['PENDING', 'PENDING_PAYMENT', 'CONFIRMED'])
         .gte('start_time', dayStartIso)
         .lte('start_time', dayEndIso);
 
@@ -126,8 +135,16 @@ export class AppointmentsService {
     return availableSlots;
   }
 
-  async create(dto: CreateAppointmentDto): Promise<Appointment> {
+  async create(dto: CreateAppointmentDto): Promise<CreateAppointmentResponse> {
     this.validateCreateDto(dto);
+
+    const tenant = await this.tenantsService.findById(dto.tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${dto.tenantId}" was not found`,
+      );
+    }
 
     const serviceIds = normalizeServiceIds(dto);
     const booking = await this.resolveBookingServices(dto.tenantId, serviceIds);
@@ -149,6 +166,17 @@ export class AppointmentsService {
     }
 
     const primaryServiceId = booking.items[0].id;
+    const requiresDepositPayment =
+      tenant.plan_tier === 'ELITE' &&
+      booking.requiresDeposit &&
+      booking.totalDepositAmount > 0;
+
+    const appointmentStatus: AppointmentStatus = requiresDepositPayment
+      ? 'PENDING_PAYMENT'
+      : 'CONFIRMED';
+    const paymentStatus: PaymentStatus = requiresDepositPayment
+      ? 'PENDING'
+      : 'PAID';
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -161,8 +189,9 @@ export class AppointmentsService {
         customer_phone: dto.customerPhone.trim(),
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
-        status: 'CONFIRMED',
+        status: appointmentStatus,
         deposit_paid: false,
+        payment_status: paymentStatus,
         booking_source: 'PUBLIC',
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: booking.totalPrice,
@@ -174,7 +203,7 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const appointment = data as Appointment;
+    const appointment = this.mapAppointmentRow(data as Appointment);
 
     await this.insertAppointmentServices(
       appointment.id,
@@ -182,7 +211,39 @@ export class AppointmentsService {
       booking,
     );
 
-    return appointment;
+    if (!requiresDepositPayment) {
+      return { appointment };
+    }
+
+    const checkoutUrl =
+      await this.billingService.createDepositCheckoutSession({
+        appointmentId: appointment.id,
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        depositAmountBrl: booking.totalDepositAmount,
+      });
+
+    return { appointment, checkoutUrl };
+  }
+
+  async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({
+        status: 'CONFIRMED',
+        payment_status: 'PAID',
+        deposit_paid: true,
+      })
+      .eq('id', appointmentId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ? this.mapAppointmentRow(data as Appointment) : null;
   }
 
   async createInternal(
@@ -257,6 +318,7 @@ export class AppointmentsService {
         end_time: endTime.toISOString(),
         status: 'CONFIRMED',
         deposit_paid: false,
+        payment_status: 'PAID',
         booking_source: 'INTERNAL',
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: booking.totalPrice,
@@ -476,7 +538,7 @@ export class AppointmentsService {
       .select('start_time, end_time')
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
-      .in('status', ['PENDING', 'CONFIRMED'])
+      .in('status', ['PENDING', 'PENDING_PAYMENT', 'CONFIRMED'])
       .gte('start_time', dayStartIso)
       .lte('start_time', dayEndIso);
 
@@ -587,7 +649,9 @@ export class AppointmentsService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('services')
-      .select('id, name, duration_minutes, price')
+      .select(
+        'id, name, duration_minutes, price, requires_deposit, deposit_amount',
+      )
       .eq('tenant_id', tenantId)
       .in('id', uniqueIds);
 
@@ -600,6 +664,8 @@ export class AppointmentsService {
       name: string;
       duration_minutes: number;
       price: number;
+      requires_deposit: boolean;
+      deposit_amount: number | null;
     }[];
 
     if (rows.length !== uniqueIds.length) {
@@ -613,13 +679,26 @@ export class AppointmentsService {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const items = uniqueIds.map((id) => {
       const row = byId.get(id)!;
+      const requiresDeposit = Boolean(row.requires_deposit);
+      const depositAmount =
+        requiresDeposit && row.deposit_amount !== null
+          ? Number(row.deposit_amount)
+          : 0;
+
       return {
         id: row.id,
         name: row.name,
         durationMinutes: row.duration_minutes,
         price: Number(row.price),
+        requiresDeposit,
+        depositAmount,
       };
     });
+
+    const totalDepositAmount = items.reduce(
+      (sum, item) => sum + (item.requiresDeposit ? item.depositAmount : 0),
+      0,
+    );
 
     return {
       items,
@@ -628,6 +707,15 @@ export class AppointmentsService {
         0,
       ),
       totalPrice: items.reduce((sum, item) => sum + item.price, 0),
+      totalDepositAmount,
+      requiresDeposit: items.some((item) => item.requiresDeposit),
+    };
+  }
+
+  private mapAppointmentRow(row: Appointment): Appointment {
+    return {
+      ...row,
+      payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
     };
   }
 

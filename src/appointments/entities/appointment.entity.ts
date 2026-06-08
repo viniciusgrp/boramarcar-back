@@ -1,5 +1,9 @@
+import type { BookingSource } from './booking-source.type';
+import type { PaymentStatus } from './payment-status.type';
+
 export type AppointmentStatus =
   | 'PENDING'
+  | 'PENDING_PAYMENT'
   | 'CONFIRMED'
   | 'CANCELLED'
   | 'COMPLETED'
@@ -7,13 +11,12 @@ export type AppointmentStatus =
 
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = [
   'PENDING',
+  'PENDING_PAYMENT',
   'CONFIRMED',
   'CANCELLED',
   'COMPLETED',
   'NO_SHOW',
 ];
-
-import type { BookingSource } from './booking-source.type';
 
 export interface Appointment {
   id: string;
@@ -26,5 +29,6 @@ export interface Appointment {
   end_time: string;
   status: AppointmentStatus;
   deposit_paid: boolean;
+  payment_status: PaymentStatus;
   booking_source: BookingSource;
 }

@@ -130,6 +130,9 @@ export class TenantsService {
         slug: slugToSave,
         primary_color: dto.primaryColor.trim(),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
+        logo_url: this.normalizeOptionalText(dto.logoUrl),
+        banner_url: this.normalizeOptionalText(dto.bannerUrl),
+        address: this.normalizeOptionalText(dto.address),
         require_deposit: dto.requireDeposit,
         updated_at: new Date().toISOString(),
       })
@@ -439,11 +442,15 @@ export class TenantsService {
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {
-    if (phone === undefined || phone === null) {
+    return this.normalizeOptionalText(phone);
+  }
+
+  private normalizeOptionalText(value?: string | null): string | null {
+    if (value === undefined || value === null) {
       return null;
     }
 
-    const trimmed = phone.trim();
+    const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
   }
 }

@@ -4,4 +4,6 @@ export class UpdateServiceDto {
   durationMinutes?: number;
   price?: number;
   isActive?: boolean;
+  requiresDeposit?: boolean;
+  depositAmount?: number | null;
 }
