@@ -13,6 +13,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
+import { resolveProfessionalCommissionPercent } from './utils/professional-commission.util';
 
 const PROFESSIONAL_WITH_SERVICES_SELECT =
   '*, professional_services(service_id)';
@@ -34,7 +35,7 @@ export class ProfessionalsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []) as Professional[];
+    return (data ?? []).map((row) => this.mapProfessionalRow(row as Professional));
   }
 
   async findAllManagedByTenant(tenantId: string): Promise<Professional[]> {
@@ -49,7 +50,7 @@ export class ProfessionalsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []) as Professional[];
+    return (data ?? []).map((row) => this.mapProfessionalRow(row as Professional));
   }
 
   async countActiveByTenant(tenantId: string): Promise<number> {
@@ -96,6 +97,11 @@ export class ProfessionalsService {
 
     await this.assertCanCreateProfessional(tenantId, planTier, willBeActive);
 
+    const commissionPercent = resolveProfessionalCommissionPercent(
+      planTier,
+      dto.commissionPercent,
+    );
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('professionals')
@@ -104,6 +110,7 @@ export class ProfessionalsService {
         name: dto.name.trim(),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         avatar_url: dto.avatarUrl?.trim() || null,
+        commission_percent: commissionPercent,
         is_active: dto.isActive ?? true,
       })
       .select('*')
@@ -126,12 +133,13 @@ export class ProfessionalsService {
 
   async updateForTenant(
     tenantId: string,
+    planTier: PlanTier,
     professionalId: string,
     dto: UpdateProfessionalDto,
   ): Promise<Professional> {
     await this.assertProfessionalBelongsToTenant(professionalId, tenantId);
 
-    const payload: Record<string, string | boolean | null> = {};
+    const payload: Record<string, string | boolean | number | null> = {};
 
     if (dto.name !== undefined) {
       payload.name = dto.name.trim();
@@ -147,6 +155,13 @@ export class ProfessionalsService {
 
     if (dto.contactPhone !== undefined) {
       payload.contact_phone = this.normalizeContactPhone(dto.contactPhone);
+    }
+
+    if (dto.commissionPercent !== undefined) {
+      payload.commission_percent = resolveProfessionalCommissionPercent(
+        planTier,
+        dto.commissionPercent,
+      );
     }
 
     if (Object.keys(payload).length > 0) {
@@ -175,9 +190,12 @@ export class ProfessionalsService {
 
   async softDeleteForTenant(
     tenantId: string,
+    planTier: PlanTier,
     professionalId: string,
   ): Promise<Professional> {
-    return this.updateForTenant(tenantId, professionalId, { isActive: false });
+    return this.updateForTenant(tenantId, planTier, professionalId, {
+      isActive: false,
+    });
   }
 
   private async replaceProfessionalServices(
@@ -234,7 +252,7 @@ export class ProfessionalsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data as Professional;
+    return this.mapProfessionalRow(data as Professional);
   }
 
   async assertProfessionalBelongsToTenant(
@@ -259,7 +277,14 @@ export class ProfessionalsService {
       );
     }
 
-    return data as Professional;
+    return this.mapProfessionalRow(data as Professional);
+  }
+
+  private mapProfessionalRow(row: Professional): Professional {
+    return {
+      ...row,
+      commission_percent: Number(row.commission_percent ?? 0),
+    };
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {

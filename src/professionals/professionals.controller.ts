@@ -78,7 +78,12 @@ export class ProfessionalsController {
     @Body() dto: UpdateProfessionalDto,
   ): Promise<Professional> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.updateForTenant(tenant.id, id, dto);
+    return this.professionalsService.updateForTenant(
+      tenant.id,
+      tenant.plan_tier,
+      id,
+      dto,
+    );
   }
 
   @Delete(':id')
@@ -88,7 +93,11 @@ export class ProfessionalsController {
     @Param('id') id: string,
   ): Promise<Professional> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.softDeleteForTenant(tenant.id, id);
+    return this.professionalsService.softDeleteForTenant(
+      tenant.id,
+      tenant.plan_tier,
+      id,
+    );
   }
 
   private async resolveOwnerTenant(userId: string) {

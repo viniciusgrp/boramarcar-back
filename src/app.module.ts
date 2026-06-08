@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { SupabaseModule } from './supabase/supabase.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { BillingModule } from './billing/billing.module';
+import { FinanceModule } from './finance/finance.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
 import { ProfessionalHoursModule } from './professional-hours/professional-hours.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
@@ -31,6 +32,7 @@ import { TenantsModule } from './tenants/tenants.module';
     BusinessHoursModule,
     ProfessionalHoursModule,
     BillingModule,
+    FinanceModule,
     NotificationsModule,
   ],
   controllers: [AppController],

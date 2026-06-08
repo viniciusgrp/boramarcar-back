@@ -14,6 +14,7 @@ import {
   parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
+import { calculateCommissionAmount } from '../professionals/utils/professional-commission.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -374,7 +375,7 @@ export class AppointmentsService {
     const { data: existing, error: fetchError } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select('id')
+      .select('id, status, professional_id, total_price')
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -389,10 +390,38 @@ export class AppointmentsService {
       );
     }
 
+    const updatePayload: {
+      status: UpdateAppointmentStatusDto['status'];
+      commission_amount?: number;
+    } = { status };
+
+    if (status === 'COMPLETED' && existing.status !== 'COMPLETED') {
+      const { data: professional, error: professionalError } =
+        await this.supabaseService
+          .getClient()
+          .from('professionals')
+          .select('commission_percent')
+          .eq('id', existing.professional_id)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+
+      if (professionalError) {
+        throw new InternalServerErrorException(professionalError.message);
+      }
+
+      const totalPrice = Number(existing.total_price ?? 0);
+      const commissionPercent = Number(professional?.commission_percent ?? 0);
+
+      updatePayload.commission_amount = calculateCommissionAmount(
+        totalPrice,
+        commissionPercent,
+      );
+    }
+
     const { error: updateError } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .update({ status })
+      .update(updatePayload)
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId);
 
@@ -716,6 +745,7 @@ export class AppointmentsService {
     return {
       ...row,
       payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
+      commission_amount: Number(row.commission_amount ?? 0),
     };
   }
 

@@ -8,6 +8,7 @@ export interface Professional {
   name: string;
   contact_phone: string | null;
   avatar_url: string | null;
+  commission_percent: number;
   is_active: boolean;
   professional_services?: ProfessionalServiceLink[];
 }

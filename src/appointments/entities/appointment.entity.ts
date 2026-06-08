@@ -30,5 +30,6 @@ export interface Appointment {
   status: AppointmentStatus;
   deposit_paid: boolean;
   payment_status: PaymentStatus;
+  commission_amount: number;
   booking_source: BookingSource;
 }
