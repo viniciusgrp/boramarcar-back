@@ -101,6 +101,11 @@ export class LoyaltyService {
       throw new BadRequestException('Field "pointsCost" must be greater than zero');
     }
 
+    const serviceId = await this.resolveRewardServiceId(
+      tenantId,
+      dto.serviceId,
+    );
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('loyalty_rewards')
@@ -108,6 +113,7 @@ export class LoyaltyService {
         tenant_id: tenantId,
         title,
         points_cost: dto.pointsCost,
+        service_id: serviceId,
         is_active: dto.isActive ?? true,
       })
       .select('*')
@@ -127,7 +133,7 @@ export class LoyaltyService {
   ): Promise<LoyaltyReward> {
     await this.assertRewardBelongsToTenant(rewardId, tenantId);
 
-    const payload: Record<string, string | number | boolean> = {
+    const payload: Record<string, string | number | boolean | null> = {
       updated_at: new Date().toISOString(),
     };
 
@@ -153,6 +159,13 @@ export class LoyaltyService {
 
     if (dto.isActive !== undefined) {
       payload.is_active = dto.isActive;
+    }
+
+    if (dto.serviceId !== undefined) {
+      payload.service_id = await this.resolveRewardServiceId(
+        tenantId,
+        dto.serviceId,
+      );
     }
 
     const { data, error } = await this.supabaseService
@@ -287,6 +300,93 @@ export class LoyaltyService {
       rewards,
       recentTransactions,
     };
+  }
+
+  async validateRewardForAppointmentBooking(params: {
+    tenantId: string;
+    customerId: string;
+    rewardId: string;
+    serviceIds: string[];
+  }): Promise<LoyaltyReward> {
+    const settings = await this.getSettingsForTenant(params.tenantId);
+
+    if (!settings.is_active) {
+      throw new BadRequestException('Programa de fidelidade está desativado.');
+    }
+
+    const customer = await this.assertCustomerBelongsToTenant(
+      params.customerId,
+      params.tenantId,
+    );
+    const reward = await this.assertRewardBelongsToTenant(
+      params.rewardId,
+      params.tenantId,
+    );
+
+    if (!reward.is_active) {
+      throw new BadRequestException('Esta recompensa não está disponível.');
+    }
+
+    if (customer.points_balance < reward.points_cost) {
+      throw new BadRequestException('Saldo de pontos insuficiente.');
+    }
+
+    if (reward.service_id) {
+      const matchesService = params.serviceIds.includes(reward.service_id);
+
+      if (!matchesService) {
+        throw new BadRequestException(
+          'Esta recompensa não está vinculada aos serviços selecionados.',
+        );
+      }
+    }
+
+    return reward;
+  }
+
+  async redeemRewardForAppointment(params: {
+    tenantId: string;
+    customerId: string;
+    rewardId: string;
+    appointmentId: string;
+  }): Promise<void> {
+    const customer = await this.assertCustomerBelongsToTenant(
+      params.customerId,
+      params.tenantId,
+    );
+    const reward = await this.assertRewardBelongsToTenant(
+      params.rewardId,
+      params.tenantId,
+    );
+
+    if (customer.points_balance < reward.points_cost) {
+      throw new BadRequestException('Saldo de pontos insuficiente.');
+    }
+
+    const newBalance = customer.points_balance - reward.points_cost;
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .update({
+        points_balance: newBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', params.customerId)
+      .eq('tenant_id', params.tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    await this.insertTransaction({
+      tenantId: params.tenantId,
+      customerId: params.customerId,
+      type: 'REDEEMED',
+      points: reward.points_cost,
+      description: `Resgate no agendamento: ${reward.title}`,
+      appointmentId: params.appointmentId,
+    });
   }
 
   async redeemReward(
@@ -760,6 +860,38 @@ export class LoyaltyService {
     return this.mapRewardRow(data as LoyaltyReward);
   }
 
+  private async resolveRewardServiceId(
+    tenantId: string,
+    serviceId?: string | null,
+  ): Promise<string | null> {
+    if (serviceId === undefined || serviceId === null || serviceId === '') {
+      return null;
+    }
+
+    const trimmedId = serviceId.trim();
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('services')
+      .select('id')
+      .eq('id', trimmedId)
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new BadRequestException(
+        'O serviço selecionado não foi encontrado ou está inativo.',
+      );
+    }
+
+    return trimmedId;
+  }
+
   private validateSettingsPayload(dto: UpdateLoyaltySettingsDto): void {
     if (dto.pointsPerCurrency <= 0) {
       throw new BadRequestException(
@@ -811,6 +943,7 @@ export class LoyaltyService {
     return {
       ...row,
       points_cost: Number(row.points_cost),
+      service_id: row.service_id ?? null,
     };
   }
 

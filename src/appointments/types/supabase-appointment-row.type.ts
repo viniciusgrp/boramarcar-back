@@ -30,6 +30,7 @@ export interface SupabaseAppointmentWithRelations {
   booking_source?: string;
   total_duration_minutes?: number | null;
   total_price?: number | null;
+  loyalty_reward_id?: string | null;
   professionals: RelationName;
   services: ServiceRelation;
   appointment_services?: AppointmentServiceRelation | null;

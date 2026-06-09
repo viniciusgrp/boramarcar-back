@@ -14,4 +14,5 @@ export interface AdminAppointment {
   durationMinutes: number;
   servicePrice: number;
   bookingSource: BookingSource;
+  paidWithPoints: boolean;
 }

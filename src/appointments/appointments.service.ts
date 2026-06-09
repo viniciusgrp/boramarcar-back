@@ -49,6 +49,7 @@ const ADMIN_APPOINTMENT_SELECT = `
   booking_source,
   total_duration_minutes,
   total_price,
+  loyalty_reward_id,
   professionals ( name ),
   services ( name, duration_minutes, price ),
   appointment_services (
@@ -169,7 +170,29 @@ export class AppointmentsService {
     }
 
     const primaryServiceId = booking.items[0].id;
-    const requiresDepositPayment =
+    const loyaltyRewardId = dto.loyaltyRewardId?.trim() || null;
+
+    const { customer, isNew: isNewCustomer } =
+      await this.loyaltyService.findOrCreateCustomerForAppointment(
+        dto.tenantId,
+        dto.customerName,
+        dto.customerPhone,
+      );
+
+    if (loyaltyRewardId) {
+      await this.loyaltyService.validateRewardForAppointmentBooking({
+        tenantId: dto.tenantId,
+        customerId: customer.id,
+        rewardId: loyaltyRewardId,
+        serviceIds,
+      });
+    }
+
+    const isPaidWithPoints = Boolean(loyaltyRewardId);
+    const appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+
+    let requiresDepositPayment =
+      !isPaidWithPoints &&
       tenant.plan_tier === 'ELITE' &&
       booking.requiresDeposit &&
       booking.totalDepositAmount > 0;
@@ -181,17 +204,10 @@ export class AppointmentsService {
       ? 'PENDING'
       : 'PAID';
 
-    const { customer, isNew: isNewCustomer } =
-      await this.loyaltyService.findOrCreateCustomerForAppointment(
-        dto.tenantId,
-        dto.customerName,
-        dto.customerPhone,
-      );
-
     const loyaltyFeedback =
       await this.loyaltyService.buildBookingLoyaltyFeedback(
         dto.tenantId,
-        booking.totalPrice,
+        appointmentTotalPrice,
         isNewCustomer,
       );
 
@@ -208,11 +224,12 @@ export class AppointmentsService {
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
         status: appointmentStatus,
-        deposit_paid: false,
+        deposit_paid: isPaidWithPoints,
         payment_status: paymentStatus,
         booking_source: 'PUBLIC',
         total_duration_minutes: booking.totalDurationMinutes,
-        total_price: booking.totalPrice,
+        total_price: appointmentTotalPrice,
+        loyalty_reward_id: loyaltyRewardId,
       })
       .select('*')
       .single();
@@ -228,6 +245,15 @@ export class AppointmentsService {
       dto.tenantId,
       booking,
     );
+
+    if (loyaltyRewardId) {
+      await this.loyaltyService.redeemRewardForAppointment({
+        tenantId: dto.tenantId,
+        customerId: customer.id,
+        rewardId: loyaltyRewardId,
+        appointmentId: appointment.id,
+      });
+    }
 
     if (!requiresDepositPayment) {
       return { appointment, loyaltyFeedback };
@@ -406,7 +432,7 @@ export class AppointmentsService {
       .getClient()
       .from('appointments')
       .select(
-        'id, status, professional_id, total_price, customer_id, customer_name, customer_phone',
+        'id, status, professional_id, total_price, customer_id, customer_name, customer_phone, loyalty_reward_id',
       )
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
@@ -461,7 +487,11 @@ export class AppointmentsService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    if (status === 'COMPLETED' && existing.status !== 'COMPLETED') {
+    if (
+      status === 'COMPLETED' &&
+      existing.status !== 'COMPLETED' &&
+      !existing.loyalty_reward_id
+    ) {
       await this.loyaltyService.awardPointsForCompletedAppointment({
         tenantId,
         appointmentId,
@@ -648,6 +678,7 @@ export class AppointmentsService {
       durationMinutes: lineItems.durationMinutes,
       servicePrice: lineItems.servicePrice,
       bookingSource: this.normalizeBookingSource(row.booking_source),
+      paidWithPoints: Boolean(row.loyalty_reward_id),
     };
   }
 

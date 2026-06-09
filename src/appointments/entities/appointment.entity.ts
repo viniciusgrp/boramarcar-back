@@ -33,4 +33,5 @@ export interface Appointment {
   payment_status: PaymentStatus;
   commission_amount: number;
   booking_source: BookingSource;
+  loyalty_reward_id?: string | null;
 }

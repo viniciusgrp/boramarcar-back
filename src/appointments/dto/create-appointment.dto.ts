@@ -7,4 +7,5 @@ export class CreateAppointmentDto {
   customerName!: string;
   customerPhone!: string;
   startTime!: string;
+  loyaltyRewardId?: string;
 }
