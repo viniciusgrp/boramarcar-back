@@ -132,7 +132,13 @@ export class TenantsService {
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         logo_url: this.normalizeOptionalText(dto.logoUrl),
         banner_url: this.normalizeOptionalText(dto.bannerUrl),
-        address: this.normalizeOptionalText(dto.address),
+        address_cep: this.normalizeCep(dto.addressCep),
+        address_street: this.normalizeOptionalText(dto.addressStreet),
+        address_number: this.normalizeOptionalText(dto.addressNumber),
+        address_complement: this.normalizeOptionalText(dto.addressComplement),
+        address_neighborhood: this.normalizeOptionalText(dto.addressNeighborhood),
+        address_city: this.normalizeOptionalText(dto.addressCity),
+        address_state: this.normalizeState(dto.addressState),
         require_deposit: dto.requireDeposit,
         updated_at: new Date().toISOString(),
       })
@@ -452,5 +458,32 @@ export class TenantsService {
 
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private normalizeCep(cep?: string | null): string | null {
+    if (cep === undefined || cep === null) {
+      return null;
+    }
+
+    const digits = cep.replace(/\D/g, '').slice(0, 8);
+
+    if (digits.length === 0) {
+      return null;
+    }
+
+    if (digits.length <= 5) {
+      return digits;
+    }
+
+    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  }
+
+  private normalizeState(state?: string | null): string | null {
+    if (state === undefined || state === null) {
+      return null;
+    }
+
+    const normalized = state.trim().toUpperCase().slice(0, 2);
+    return normalized.length > 0 ? normalized : null;
   }
 }

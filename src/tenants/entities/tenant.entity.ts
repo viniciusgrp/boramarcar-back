@@ -7,7 +7,13 @@ export interface Tenant {
   slug: string;
   logo_url: string | null;
   banner_url: string | null;
-  address: string | null;
+  address_cep: string | null;
+  address_street: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  address_neighborhood: string | null;
+  address_city: string | null;
+  address_state: string | null;
   primary_color: string;
   contact_phone: string | null;
   require_deposit: boolean;
