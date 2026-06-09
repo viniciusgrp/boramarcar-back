@@ -4,17 +4,22 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
 import {
+  addHours,
   addMinutes,
   format,
   isAfter,
   parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
+import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
+import { MailService } from '../mail/mail.service';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 import { calculateCommissionAmount } from '../professionals/utils/professional-commission.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -36,7 +41,32 @@ import {
   AppointmentServiceRelation,
   SupabaseAppointmentWithRelations,
 } from './types/supabase-appointment-row.type';
+import type { ReminderAppointmentRow } from './types/reminder-appointment-row.type';
 import { normalizeServiceIds } from './utils/normalize-service-ids.util';
+
+const REMINDER_APPOINTMENT_SELECT = `
+  id,
+  customer_name,
+  start_time,
+  tenants (
+    id,
+    name,
+    address_cep,
+    address_street,
+    address_number,
+    address_complement,
+    address_neighborhood,
+    address_city,
+    address_state
+  ),
+  customers ( email ),
+  professionals ( name ),
+  services ( name ),
+  appointment_services (
+    sort_order,
+    services ( name )
+  )
+`;
 
 const ADMIN_APPOINTMENT_SELECT = `
   id,
@@ -62,6 +92,8 @@ const ADMIN_APPOINTMENT_SELECT = `
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly professionalHoursService: ProfessionalHoursService,
@@ -69,6 +101,7 @@ export class AppointmentsService {
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly mailService: MailService,
   ) {}
 
   async getAvailability(
@@ -254,6 +287,20 @@ export class AppointmentsService {
         appointmentId: appointment.id,
       });
     }
+
+    const professionalName = await this.resolveProfessionalName(
+      dto.tenantId,
+      dto.professionalId,
+    );
+    const serviceName = booking.items.map((item) => item.name).join(' + ');
+
+    this.dispatchAppointmentConfirmationEmail({
+      tenant,
+      customer,
+      appointment,
+      serviceName,
+      professionalName,
+    });
 
     if (!requiresDepositPayment) {
       return { appointment, loyaltyFeedback };
@@ -845,6 +892,184 @@ export class AppointmentsService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+  }
+
+  async sendDueAppointmentReminders(): Promise<void> {
+    const now = new Date();
+    const windowStart = addHours(now, 24);
+    const windowEnd = addHours(now, 25);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(REMINDER_APPOINTMENT_SELECT)
+      .eq('status', 'CONFIRMED')
+      .gte('start_time', windowStart.toISOString())
+      .lt('start_time', windowEnd.toISOString());
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as ReminderAppointmentRow[];
+
+    for (const row of rows) {
+      const tenant = this.extractReminderTenant(row.tenants);
+      const customerEmail = this.extractCustomerEmail(row.customers);
+
+      if (!tenant || !customerEmail) {
+        continue;
+      }
+
+      const serviceName = this.extractReminderServiceName(row);
+      const professionalName = this.extractRelationName(row.professionals);
+
+      try {
+        await this.mailService.sendAppointmentReminder(
+          {
+            customerName: row.customer_name,
+            customerEmail,
+            serviceName,
+            professionalName,
+            startTime: row.start_time,
+          },
+          tenant,
+        );
+      } catch (sendError) {
+        const message =
+          sendError instanceof Error
+            ? sendError.message
+            : 'Unknown reminder email error';
+        this.logger.error(
+          `Failed to send reminder for appointment ${row.id}: ${message}`,
+        );
+      }
+    }
+  }
+
+  private dispatchAppointmentConfirmationEmail(params: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    const customerEmail = params.customer.email?.trim();
+
+    if (!customerEmail) {
+      return;
+    }
+
+    void this.mailService
+      .sendAppointmentConfirmation(
+        {
+          customerName: params.appointment.customer_name,
+          customerEmail,
+          serviceName: params.serviceName,
+          professionalName: params.professionalName,
+          startTime: params.appointment.start_time,
+        },
+        params.tenant,
+      )
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown confirmation email error';
+        this.logger.error(
+          `Failed to send confirmation for appointment ${params.appointment.id}: ${message}`,
+        );
+      });
+  }
+
+  private async resolveProfessionalName(
+    tenantId: string,
+    professionalId: string,
+  ): Promise<string> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('professionals')
+      .select('name')
+      .eq('id', professionalId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data?.name?.trim() || 'Profissional';
+  }
+
+  private extractReminderTenant(
+    relation: ReminderAppointmentRow['tenants'],
+  ): Tenant | null {
+    if (!relation) {
+      return null;
+    }
+
+    const row = Array.isArray(relation) ? relation[0] : relation;
+
+    if (!row?.id || !row.name) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      slug: '',
+      logo_url: null,
+      banner_url: null,
+      address_cep: row.address_cep,
+      address_street: row.address_street,
+      address_number: row.address_number,
+      address_complement: row.address_complement,
+      address_neighborhood: row.address_neighborhood,
+      address_city: row.address_city,
+      address_state: row.address_state,
+      primary_color: '#111827',
+      contact_phone: null,
+      require_deposit: false,
+      owner_id: null,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      subscription_status: 'INACTIVE',
+      subscription_expires_at: null,
+      trial_starts_at: null,
+      trial_ends_at: null,
+      plan_tier: 'SOLO',
+      created_at: '',
+      updated_at: '',
+    };
+  }
+
+  private extractCustomerEmail(
+    relation: ReminderAppointmentRow['customers'],
+  ): string | null {
+    if (!relation) {
+      return null;
+    }
+
+    const row = Array.isArray(relation) ? relation[0] : relation;
+    const email = row?.email?.trim();
+
+    return email || null;
+  }
+
+  private extractReminderServiceName(row: ReminderAppointmentRow): string {
+    const junctionRows = this.normalizeAppointmentServices(
+      row.appointment_services,
+    );
+
+    if (junctionRows.length > 0) {
+      const sorted = [...junctionRows].sort(
+        (a, b) => a.sort_order - b.sort_order,
+      );
+
+      return sorted
+        .map((item) => this.extractRelationName(item.services))
+        .join(' + ');
+    }
+
+    return this.extractRelationName(row.services);
   }
 
   private normalizeBookingSource(value?: string): BookingSource {

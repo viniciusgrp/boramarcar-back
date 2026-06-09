@@ -950,6 +950,7 @@ export class LoyaltyService {
   private mapCustomerRow(row: Customer): Customer {
     return {
       ...row,
+      email: row.email ?? null,
       points_balance: Number(row.points_balance ?? 0),
     };
   }
