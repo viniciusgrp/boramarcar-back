@@ -146,7 +146,7 @@ export class ProfessionalsService {
     }
 
     if (dto.avatarUrl !== undefined) {
-      payload.avatar_url = dto.avatarUrl.trim() || null;
+      payload.avatar_url = dto.avatarUrl?.trim() || null;
     }
 
     if (dto.isActive !== undefined) {
