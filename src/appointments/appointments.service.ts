@@ -64,10 +64,10 @@ const REMINDER_APPOINTMENT_SELECT = `
   ),
   customers ( email ),
   professionals ( name ),
-  services ( name ),
+  services!service_id ( name ),
   appointment_services (
     sort_order,
-    services ( name )
+    services!service_id ( name )
   )
 `;
 
@@ -84,12 +84,12 @@ const ADMIN_APPOINTMENT_SELECT = `
   total_price,
   loyalty_reward_id,
   professionals ( name ),
-  services ( name, duration_minutes, price ),
+  services!service_id ( name, duration_minutes, price ),
   appointment_services (
     sort_order,
     duration_minutes,
     price,
-    services ( name )
+    services!service_id ( name )
   )
 `;
 

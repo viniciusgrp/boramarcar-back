@@ -81,13 +81,13 @@ export class FinanceService {
         commission_amount,
         booking_source,
         professionals ( name ),
-        services ( name, price ),
+        services!service_id ( name, price ),
         appointment_services (
           service_id,
           sort_order,
           duration_minutes,
           price,
-          services ( name )
+          services!service_id ( name )
         )
       `,
       )
