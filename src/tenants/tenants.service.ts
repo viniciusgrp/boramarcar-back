@@ -9,6 +9,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import type { TenantBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from './entities/plan-tier.type';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
@@ -34,7 +35,16 @@ function mapTenantRow(row: Tenant): Tenant {
         ? subscriptionStatus
         : 'INACTIVE',
     plan_tier: normalizePlanTier(row.plan_tier),
+    booking_acceptance_type: normalizeTenantBookingAcceptanceType(
+      row.booking_acceptance_type,
+    ),
   };
+}
+
+function normalizeTenantBookingAcceptanceType(
+  value: TenantBookingAcceptanceType | null | undefined,
+): TenantBookingAcceptanceType {
+  return value === 'MANUAL' ? 'MANUAL' : 'AUTOMATIC';
 }
 
 @Injectable()
@@ -140,6 +150,9 @@ export class TenantsService {
         address_city: this.normalizeOptionalText(dto.addressCity),
         address_state: this.normalizeState(dto.addressState),
         require_deposit: dto.requireDeposit,
+        booking_acceptance_type: normalizeTenantBookingAcceptanceType(
+          dto.bookingAcceptanceType,
+        ),
         updated_at: new Date().toISOString(),
       })
       .eq('id', tenant.id)

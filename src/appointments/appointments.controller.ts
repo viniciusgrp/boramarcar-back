@@ -76,6 +76,26 @@ export class AppointmentsController {
     return this.appointmentsService.createInternal(tenant.id, dto);
   }
 
+  @Patch(':id/approve')
+  @UseGuards(AuthGuard, TenantAccessGuard)
+  async approve(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+  ): Promise<AdminAppointment> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.appointmentsService.approveAppointmentForTenant(tenant.id, id);
+  }
+
+  @Patch(':id/reject')
+  @UseGuards(AuthGuard, TenantAccessGuard)
+  async reject(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+  ): Promise<AdminAppointment> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.appointmentsService.rejectAppointmentForTenant(tenant.id, id);
+  }
+
   @Patch(':id/status')
   @UseGuards(AuthGuard, TenantAccessGuard)
   async updateStatus(

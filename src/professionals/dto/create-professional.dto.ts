@@ -1,3 +1,5 @@
+import type { ProfessionalBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
+
 export class CreateProfessionalDto {
   name!: string;
   contactPhone?: string | null;
@@ -5,4 +7,5 @@ export class CreateProfessionalDto {
   commissionPercent?: number;
   isActive?: boolean;
   serviceIds?: string[];
+  bookingAcceptanceType?: ProfessionalBookingAcceptanceType;
 }

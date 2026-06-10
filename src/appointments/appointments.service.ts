@@ -8,6 +8,8 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
+import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
+import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
   addHours,
   addMinutes,
@@ -43,6 +45,7 @@ import {
 } from './types/supabase-appointment-row.type';
 import type { ReminderAppointmentRow } from './types/reminder-appointment-row.type';
 import { normalizeServiceIds } from './utils/normalize-service-ids.util';
+import { resolveInitialAppointmentStatus } from './utils/resolve-initial-appointment-status.util';
 
 const REMINDER_APPOINTMENT_SELECT = `
   id,
@@ -137,7 +140,12 @@ export class AppointmentsService {
         .select('start_time, end_time')
         .eq('tenant_id', tenantId)
         .eq('professional_id', professionalId)
-        .in('status', ['PENDING', 'PENDING_PAYMENT', 'CONFIRMED'])
+        .in('status', [
+          'PENDING',
+          'PENDING_PAYMENT',
+          'PENDING_APPROVAL',
+          'CONFIRMED',
+        ])
         .gte('start_time', dayStartIso)
         .lte('start_time', dayEndIso);
 
@@ -224,15 +232,27 @@ export class AppointmentsService {
     const isPaidWithPoints = Boolean(loyaltyRewardId);
     const appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
 
-    let requiresDepositPayment =
+    const requiresDepositPayment =
       !isPaidWithPoints &&
       tenant.plan_tier === 'ELITE' &&
       booking.requiresDeposit &&
       booking.totalDepositAmount > 0;
 
-    const appointmentStatus: AppointmentStatus = requiresDepositPayment
-      ? 'PENDING_PAYMENT'
-      : 'CONFIRMED';
+    const professionalBookingSettings =
+      await this.resolveProfessionalBookingSettings(
+        dto.tenantId,
+        dto.professionalId,
+      );
+    const effectiveBookingAcceptance = resolveEffectiveBookingAcceptance(
+      tenant.booking_acceptance_type,
+      professionalBookingSettings.bookingAcceptanceType,
+    );
+
+    const appointmentStatus = resolveInitialAppointmentStatus({
+      requiresDepositPayment,
+      isPaidWithPoints,
+      bookingAcceptanceType: effectiveBookingAcceptance,
+    });
     const paymentStatus: PaymentStatus = requiresDepositPayment
       ? 'PENDING'
       : 'PAID';
@@ -288,18 +308,15 @@ export class AppointmentsService {
       });
     }
 
-    const professionalName = await this.resolveProfessionalName(
-      dto.tenantId,
-      dto.professionalId,
-    );
     const serviceName = booking.items.map((item) => item.name).join(' + ');
 
-    this.dispatchAppointmentConfirmationEmail({
+    this.dispatchAppointmentEmails({
+      status: appointmentStatus,
       tenant,
       customer,
       appointment,
       serviceName,
-      professionalName,
+      professionalName: professionalBookingSettings.name,
     });
 
     if (!requiresDepositPayment) {
@@ -464,6 +481,84 @@ export class AppointmentsService {
     const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
 
     return rows.map((row) => this.mapAdminAppointmentRow(row));
+  }
+
+  async approveAppointmentForTenant(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<AdminAppointment> {
+    const context = await this.loadAppointmentEmailContext(
+      tenantId,
+      appointmentId,
+    );
+
+    if (context.appointment.status !== 'PENDING_APPROVAL') {
+      throw new BadRequestException(
+        'Only appointments pending approval can be approved',
+      );
+    }
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({ status: 'CONFIRMED' })
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    this.dispatchAppointmentConfirmationEmail(context);
+
+    const appointment = await this.findAdminById(tenantId, appointmentId);
+
+    if (!appointment) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    return appointment;
+  }
+
+  async rejectAppointmentForTenant(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<AdminAppointment> {
+    const context = await this.loadAppointmentEmailContext(
+      tenantId,
+      appointmentId,
+    );
+
+    if (context.appointment.status !== 'PENDING_APPROVAL') {
+      throw new BadRequestException(
+        'Only appointments pending approval can be rejected',
+      );
+    }
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({ status: 'CANCELLED' })
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    this.dispatchAppointmentRejectionEmail(context);
+
+    const appointment = await this.findAdminById(tenantId, appointmentId);
+
+    if (!appointment) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    return appointment;
   }
 
   async updateStatusForTenant(
@@ -687,7 +782,12 @@ export class AppointmentsService {
       .select('start_time, end_time')
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
-      .in('status', ['PENDING', 'PENDING_PAYMENT', 'CONFIRMED'])
+      .in('status', [
+        'PENDING',
+        'PENDING_PAYMENT',
+        'PENDING_APPROVAL',
+        'CONFIRMED',
+      ])
       .gte('start_time', dayStartIso)
       .lte('start_time', dayEndIso);
 
@@ -947,6 +1047,24 @@ export class AppointmentsService {
     }
   }
 
+  private dispatchAppointmentEmails(params: {
+    status: AppointmentStatus;
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    if (params.status === 'PENDING_APPROVAL') {
+      this.dispatchAppointmentPendingApprovalEmails(params);
+      return;
+    }
+
+    if (params.status === 'CONFIRMED') {
+      this.dispatchAppointmentConfirmationEmail(params);
+    }
+  }
+
   private dispatchAppointmentConfirmationEmail(params: {
     tenant: Tenant;
     customer: Customer;
@@ -980,14 +1098,182 @@ export class AppointmentsService {
       });
   }
 
-  private async resolveProfessionalName(
+  private dispatchAppointmentPendingApprovalEmails(params: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    const mailAppointment = {
+      customerName: params.appointment.customer_name,
+      customerEmail: params.customer.email?.trim() ?? '',
+      serviceName: params.serviceName,
+      professionalName: params.professionalName,
+      startTime: params.appointment.start_time,
+    };
+
+    if (mailAppointment.customerEmail) {
+      void this.mailService
+        .sendAppointmentPendingReview(mailAppointment, params.tenant)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Unknown pending review email error';
+          this.logger.error(
+            `Failed to send pending review for appointment ${params.appointment.id}: ${message}`,
+          );
+        });
+    }
+
+    void this.resolveTenantOwnerEmail(params.tenant.owner_id)
+      .then((ownerEmail) => {
+        if (!ownerEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentPendingApprovalOwner(
+          ownerEmail,
+          mailAppointment,
+          params.tenant,
+        );
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown owner pending approval email error';
+        this.logger.error(
+          `Failed to notify owner for appointment ${params.appointment.id}: ${message}`,
+        );
+      });
+  }
+
+  private dispatchAppointmentRejectionEmail(params: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    const customerEmail = params.customer.email?.trim();
+
+    if (!customerEmail) {
+      return;
+    }
+
+    void this.mailService
+      .sendAppointmentRejection(
+        {
+          customerName: params.appointment.customer_name,
+          customerEmail,
+          serviceName: params.serviceName,
+          professionalName: params.professionalName,
+          startTime: params.appointment.start_time,
+        },
+        params.tenant,
+      )
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown rejection email error';
+        this.logger.error(
+          `Failed to send rejection for appointment ${params.appointment.id}: ${message}`,
+        );
+      });
+  }
+
+  private async loadAppointmentEmailContext(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<{
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(
+        `
+        *,
+        tenants (*),
+        customers (*),
+        professionals ( name ),
+        services ( name ),
+        appointment_services (
+          sort_order,
+          services ( name )
+        )
+      `,
+      )
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    const row = data as Appointment &
+      SupabaseAppointmentWithRelations & {
+        tenants: Tenant | Tenant[] | null;
+        customers: Customer | Customer[] | null;
+      };
+
+    const tenantRelation = row.tenants;
+    const tenantRow = Array.isArray(tenantRelation)
+      ? tenantRelation[0]
+      : tenantRelation;
+
+    if (!tenantRow) {
+      throw new NotFoundException('Tenant not found for this appointment');
+    }
+
+    const customerRelation = row.customers;
+    const customerRow = Array.isArray(customerRelation)
+      ? customerRelation[0]
+      : customerRelation;
+
+    const lineItems = this.extractAppointmentLineItems(row);
+
+    return {
+      tenant: tenantRow as Tenant,
+      customer: (customerRow ?? {
+        id: row.customer_id ?? '',
+        tenant_id: tenantId,
+        name: row.customer_name,
+        phone: row.customer_phone,
+        email: null,
+        loyalty_points: 0,
+        created_at: '',
+        updated_at: '',
+      }) as Customer,
+      appointment: this.mapAppointmentRow(row),
+      serviceName: lineItems.serviceName,
+      professionalName: this.extractRelationName(row.professionals),
+    };
+  }
+
+  private async resolveProfessionalBookingSettings(
     tenantId: string,
     professionalId: string,
-  ): Promise<string> {
+  ): Promise<{
+    name: string;
+    bookingAcceptanceType: ProfessionalBookingAcceptanceType;
+  }> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('professionals')
-      .select('name')
+      .select('name, booking_acceptance_type')
       .eq('id', professionalId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -996,7 +1282,42 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data?.name?.trim() || 'Profissional';
+    if (!data) {
+      throw new NotFoundException(
+        `Professional with id "${professionalId}" was not found`,
+      );
+    }
+
+    const bookingAcceptanceType = data.booking_acceptance_type;
+
+    return {
+      name: data.name?.trim() || 'Profissional',
+      bookingAcceptanceType:
+        bookingAcceptanceType === 'AUTOMATIC' ||
+        bookingAcceptanceType === 'MANUAL'
+          ? bookingAcceptanceType
+          : 'DEFAULT',
+    };
+  }
+
+  private async resolveTenantOwnerEmail(
+    ownerId: string | null,
+  ): Promise<string | null> {
+    if (!ownerId?.trim()) {
+      return null;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(ownerId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const email = data.user?.email?.trim();
+
+    return email || null;
   }
 
   private extractReminderTenant(
@@ -1028,6 +1349,7 @@ export class AppointmentsService {
       primary_color: '#111827',
       contact_phone: null,
       require_deposit: false,
+      booking_acceptance_type: 'AUTOMATIC',
       owner_id: null,
       stripe_customer_id: null,
       stripe_subscription_id: null,

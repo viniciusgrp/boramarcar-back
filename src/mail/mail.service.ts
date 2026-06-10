@@ -49,6 +49,58 @@ export class MailService {
     });
   }
 
+  async sendAppointmentPendingReview(
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: appointment.customerEmail,
+      subject: `Agendamento em análise - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Seu agendamento está em análise',
+        intro:
+          'Recebemos sua solicitação e ela será analisada pelo estabelecimento. Você receberá um e-mail assim que for confirmada.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
+  async sendAppointmentPendingApprovalOwner(
+    ownerEmail: string,
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Novo agendamento aguardando aprovação - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Novo agendamento aguardando aprovação',
+        intro:
+          'Um cliente solicitou um horário que precisa da sua aprovação. Acesse o painel para aprovar ou recusar.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
+  async sendAppointmentRejection(
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: appointment.customerEmail,
+      subject: `Agendamento não confirmado - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Seu agendamento não foi confirmado',
+        intro:
+          'Infelizmente o estabelecimento não pôde confirmar este horário. Entre em contato para escolher outro momento.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
   private createTransporter(): Transporter | null {
     const host = this.configService.get<string>('SMTP_HOST')?.trim();
     const user = this.configService.get<string>('SMTP_USER')?.trim();

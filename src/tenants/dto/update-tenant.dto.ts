@@ -1,3 +1,5 @@
+import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
+
 export class UpdateTenantDto {
   name!: string;
   slug!: string;
@@ -13,4 +15,5 @@ export class UpdateTenantDto {
   addressCity?: string | null;
   addressState?: string | null;
   requireDeposit!: boolean;
+  bookingAcceptanceType!: TenantBookingAcceptanceType;
 }

@@ -1,3 +1,4 @@
+import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from './plan-tier.type';
 import type { SubscriptionStatus } from './subscription-status.type';
 
@@ -17,6 +18,7 @@ export interface Tenant {
   primary_color: string;
   contact_phone: string | null;
   require_deposit: boolean;
+  booking_acceptance_type: TenantBookingAcceptanceType;
   owner_id: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;

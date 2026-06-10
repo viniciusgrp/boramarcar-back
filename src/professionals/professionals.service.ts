@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import {
   canAddActiveProfessional,
@@ -111,6 +112,9 @@ export class ProfessionalsService {
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         avatar_url: dto.avatarUrl?.trim() || null,
         commission_percent: commissionPercent,
+        booking_acceptance_type: this.normalizeProfessionalBookingAcceptanceType(
+          dto.bookingAcceptanceType,
+        ),
         is_active: dto.isActive ?? true,
       })
       .select('*')
@@ -162,6 +166,11 @@ export class ProfessionalsService {
         planTier,
         dto.commissionPercent,
       );
+    }
+
+    if (dto.bookingAcceptanceType !== undefined) {
+      payload.booking_acceptance_type =
+        this.normalizeProfessionalBookingAcceptanceType(dto.bookingAcceptanceType);
     }
 
     if (Object.keys(payload).length > 0) {
@@ -284,7 +293,20 @@ export class ProfessionalsService {
     return {
       ...row,
       commission_percent: Number(row.commission_percent ?? 0),
+      booking_acceptance_type: this.normalizeProfessionalBookingAcceptanceType(
+        row.booking_acceptance_type,
+      ),
     };
+  }
+
+  private normalizeProfessionalBookingAcceptanceType(
+    value: ProfessionalBookingAcceptanceType | null | undefined,
+  ): ProfessionalBookingAcceptanceType {
+    if (value === 'AUTOMATIC' || value === 'MANUAL') {
+      return value;
+    }
+
+    return 'DEFAULT';
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {

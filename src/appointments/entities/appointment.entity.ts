@@ -4,6 +4,7 @@ import type { PaymentStatus } from './payment-status.type';
 export type AppointmentStatus =
   | 'PENDING'
   | 'PENDING_PAYMENT'
+  | 'PENDING_APPROVAL'
   | 'CONFIRMED'
   | 'CANCELLED'
   | 'COMPLETED'
@@ -12,6 +13,7 @@ export type AppointmentStatus =
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = [
   'PENDING',
   'PENDING_PAYMENT',
+  'PENDING_APPROVAL',
   'CONFIRMED',
   'CANCELLED',
   'COMPLETED',
