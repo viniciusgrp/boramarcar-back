@@ -18,6 +18,7 @@ import { TenantsService } from '../tenants/tenants.service';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { BillingService } from './billing.service';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 
@@ -34,6 +35,14 @@ export class BillingController {
     @Req() request: RawBodyRequest<Request>,
   ): Promise<WebhookAckResponse> {
     return this.billingService.handleWebhook(signature, request.rawBody);
+  }
+
+  @Post('sync-subscription')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async syncSubscription(@CurrentUser() user: User): Promise<Tenant> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.syncTenantSubscription(tenant.id);
   }
 
   @Post('checkout')

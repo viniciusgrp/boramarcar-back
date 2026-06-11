@@ -437,6 +437,76 @@ export class BillingService {
     return tenant;
   }
 
+  async syncTenantSubscription(tenantId: string): Promise<Tenant> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    let subscription: StripeSubscription | null = null;
+
+    if (tenant.stripe_subscription_id) {
+      try {
+        subscription = await this.stripe.subscriptions.retrieve(
+          tenant.stripe_subscription_id,
+          { expand: ['items.data.price'] },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to retrieve subscription ${tenant.stripe_subscription_id}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+    }
+
+    if (!subscription && tenant.stripe_customer_id) {
+      subscription = await this.findLatestBillableSubscription(
+        tenant.stripe_customer_id,
+      );
+    }
+
+    if (!subscription) {
+      throw new BadRequestException(
+        'Ainda não encontramos uma assinatura ativa no Stripe. Se você acabou de pagar, aguarde alguns segundos e tente novamente. Em desenvolvimento local, use o Stripe CLI para encaminhar webhooks.',
+      );
+    }
+
+    const updated = await this.syncSubscriptionFromStripe(subscription, {
+      applyPlanTierOnActive: true,
+    });
+
+    if (!updated) {
+      throw new InternalServerErrorException(
+        'Não foi possível sincronizar a assinatura com o estabelecimento.',
+      );
+    }
+
+    return updated;
+  }
+
+  private async findLatestBillableSubscription(
+    stripeCustomerId: string,
+  ): Promise<StripeSubscription | null> {
+    for (const status of ['active', 'trialing', 'past_due'] as const) {
+      const listed = await this.stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status,
+        limit: 1,
+        expand: ['data.items.data.price'],
+      });
+
+      if (listed.data[0]) {
+        return listed.data[0];
+      }
+    }
+
+    return null;
+  }
+
   async createCheckoutSession(
     params: CreateCheckoutSessionParams,
   ): Promise<CheckoutSessionResponse> {

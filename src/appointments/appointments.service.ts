@@ -71,6 +71,18 @@ const REMINDER_APPOINTMENT_SELECT = `
   )
 `;
 
+const APPOINTMENT_EMAIL_CONTEXT_SELECT = `
+  *,
+  tenants (*),
+  customers (*),
+  professionals ( name ),
+  services!service_id ( name ),
+  appointment_services (
+    sort_order,
+    services!service_id ( name )
+  )
+`;
+
 const ADMIN_APPOINTMENT_SELECT = `
   id,
   professional_id,
@@ -1203,19 +1215,7 @@ export class AppointmentsService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select(
-        `
-        *,
-        tenants (*),
-        customers (*),
-        professionals ( name ),
-        services ( name ),
-        appointment_services (
-          sort_order,
-          services ( name )
-        )
-      `,
-      )
+      .select(APPOINTMENT_EMAIL_CONTEXT_SELECT)
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
       .maybeSingle();

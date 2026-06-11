@@ -381,7 +381,7 @@ export class TenantsService {
 
     if (existingSlug) {
       throw new ConflictException(
-        'Esta URL já está em uso. Escolha outro endereço para sua barbearia.',
+        'Esta URL já está em uso. Escolha outro endereço para sua empresa.',
       );
     }
 
@@ -430,7 +430,7 @@ export class TenantsService {
 
       if (tenantError?.code === '23505') {
         throw new ConflictException(
-          'Esta URL já está em uso. Escolha outro endereço para sua barbearia.',
+          'Esta URL já está em uso. Escolha outro endereço para sua empresa.',
         );
       }
 
