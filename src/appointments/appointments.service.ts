@@ -358,9 +358,17 @@ export class AppointmentsService {
     tenantId: string,
     dto: CreateInternalAppointmentDto,
   ): Promise<AdminAppointment> {
-    if (!dto.professionalId?.trim() || !dto.serviceId?.trim() || !dto.startTime?.trim()) {
+    const serviceIds = normalizeServiceIds(dto);
+
+    if (!dto.professionalId?.trim() || !dto.startTime?.trim()) {
       throw new BadRequestException(
-        'Fields "professionalId", "serviceId" and "startTime" are required',
+        'Fields "professionalId" and "startTime" are required',
+      );
+    }
+
+    if (serviceIds.length === 0) {
+      throw new BadRequestException(
+        'At least one service must be provided via "serviceIds" or "serviceId"',
       );
     }
 
@@ -382,9 +390,8 @@ export class AppointmentsService {
       customerId = resolvedCustomer.customer.id;
     }
 
-    const booking = await this.resolveBookingServices(tenantId, [
-      dto.serviceId,
-    ]);
+    const booking = await this.resolveBookingServices(tenantId, serviceIds);
+    const primaryServiceId = booking.items[0].id;
 
     const startTime = parseISO(dto.startTime);
     const durationMinutes = booking.totalDurationMinutes;
@@ -431,7 +438,7 @@ export class AppointmentsService {
       .insert({
         tenant_id: tenantId,
         professional_id: dto.professionalId,
-        service_id: dto.serviceId,
+        service_id: primaryServiceId,
         customer_id: customerId,
         customer_name: customer.name,
         customer_phone: customer.phone,
