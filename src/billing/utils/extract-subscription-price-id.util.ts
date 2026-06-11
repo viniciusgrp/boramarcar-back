@@ -17,19 +17,35 @@ export function extractSubscriptionPriceId(subscription: unknown): string | null
     return null;
   }
 
-  const firstItem = data[0] as Record<string, unknown>;
-  const price = firstItem.price;
-
-  if (price && typeof price === 'object') {
-    const priceId = (price as Record<string, unknown>).id;
-
-    if (typeof priceId === 'string' && priceId.startsWith('price_')) {
-      return priceId;
+  for (const item of data) {
+    if (!item || typeof item !== 'object') {
+      continue;
     }
-  }
 
-  if (typeof firstItem.price === 'string') {
-    return firstItem.price;
+    const itemRecord = item as Record<string, unknown>;
+    const price = itemRecord.price;
+
+    if (price && typeof price === 'object') {
+      const priceId = (price as Record<string, unknown>).id;
+
+      if (typeof priceId === 'string' && priceId.startsWith('price_')) {
+        return priceId;
+      }
+    }
+
+    if (typeof price === 'string' && price.startsWith('price_')) {
+      return price;
+    }
+
+    const plan = itemRecord.plan;
+
+    if (plan && typeof plan === 'object') {
+      const planId = (plan as Record<string, unknown>).id;
+
+      if (typeof planId === 'string' && planId.startsWith('price_')) {
+        return planId;
+      }
+    }
   }
 
   return null;

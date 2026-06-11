@@ -45,6 +45,16 @@ export class BillingController {
     return this.billingService.syncTenantSubscription(tenant.id);
   }
 
+  @Post('portal')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async createPortalSession(
+    @CurrentUser() user: User,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.createCustomerPortalSession(tenant.id);
+  }
+
   @Post('checkout')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)

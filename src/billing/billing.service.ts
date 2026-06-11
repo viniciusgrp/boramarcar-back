@@ -34,6 +34,7 @@ import {
 } from './utils/stripe-period-end.util';
 import { extractStripeId } from './utils/stripe-id.util';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
+import { tenantHasManageableSubscription } from './utils/tenant-billing-access.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -146,7 +147,11 @@ export class BillingService {
 
   private resolvePlanTierFromStripePrice(
     priceId: string | null,
-    metadataPlanTier?: string | null,
+    options?: {
+      metadataPlanTier?: string | null;
+      allowMetadataFallback?: boolean;
+      existingPlanTier?: PlanTier;
+    },
   ): PlanTier {
     const priceMap = buildStripePriceTierMap(this.configService);
     const fromPrice = resolvePlanTierFromPriceId(priceId, priceMap);
@@ -155,8 +160,15 @@ export class BillingService {
       return fromPrice;
     }
 
-    if (metadataPlanTier) {
-      return normalizePlanTier(metadataPlanTier);
+    if (options?.allowMetadataFallback && options.metadataPlanTier) {
+      return normalizePlanTier(options.metadataPlanTier);
+    }
+
+    if (options?.existingPlanTier) {
+      this.logger.warn(
+        `Unable to map Stripe price "${priceId ?? 'unknown'}" to plan_tier; keeping ${options.existingPlanTier}`,
+      );
+      return options.existingPlanTier;
     }
 
     this.logger.warn(
@@ -300,10 +312,10 @@ export class BillingService {
       extractSubscriptionPeriodEnd(stripeSubscription),
     );
     const priceId = extractSubscriptionPriceId(stripeSubscription);
-    const planTier = this.resolvePlanTierFromStripePrice(
-      priceId,
-      session.metadata?.plan_tier,
-    );
+    const planTier = this.resolvePlanTierFromStripePrice(priceId, {
+      metadataPlanTier: session.metadata?.plan_tier,
+      allowMetadataFallback: true,
+    });
 
     const existingTenant = tenantId
       ? await this.tenantsService.findById(tenantId)
@@ -350,7 +362,12 @@ export class BillingService {
   private async handleSubscriptionUpdated(
     subscription: StripeSubscription,
   ): Promise<void> {
-    await this.syncSubscriptionFromStripe(subscription, {
+    const freshSubscription = await this.stripe.subscriptions.retrieve(
+      subscription.id,
+      { expand: ['items.data.price'] },
+    );
+
+    await this.syncSubscriptionFromStripe(freshSubscription, {
       applyPlanTierOnActive: true,
     });
   }
@@ -398,6 +415,11 @@ export class BillingService {
       options.subscriptionExpiresAt ??
       stripePeriodEndToIso(extractSubscriptionPeriodEnd(subscription));
 
+    const existingTenant = await this.resolveTenantForSubscriptionSync(
+      stripeSubscriptionId,
+      stripeCustomerId,
+    );
+
     let planTier = options.planTier;
 
     if (
@@ -405,16 +427,10 @@ export class BillingService {
       (stripeStatus === 'active' || stripeStatus === 'trialing')
     ) {
       const priceId = extractSubscriptionPriceId(subscription);
-      planTier = this.resolvePlanTierFromStripePrice(
-        priceId,
-        subscription.metadata?.plan_tier,
-      );
+      planTier = this.resolvePlanTierFromStripePrice(priceId, {
+        existingPlanTier: existingTenant?.plan_tier,
+      });
     }
-
-    const existingTenant = await this.resolveTenantForSubscriptionSync(
-      stripeSubscriptionId,
-      stripeCustomerId,
-    );
     const trialTransition = resolveSubscriptionTrialTransition(
       existingTenant,
       subscriptionStatus,
@@ -544,6 +560,54 @@ export class BillingService {
     return null;
   }
 
+  async createCustomerPortalSession(
+    tenantId: string,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    const stripeCustomerId = tenant.stripe_customer_id?.trim();
+
+    if (!stripeCustomerId) {
+      throw new BadRequestException(
+        'Nenhuma assinatura vinculada ao Stripe. Assine um plano antes de gerenciar a cobrança.',
+      );
+    }
+
+    const returnUrl = this.getRequiredUrl('STRIPE_BILLING_PORTAL_RETURN_URL');
+
+    try {
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: stripeCustomerId,
+        return_url: returnUrl,
+      });
+
+      if (!session.url) {
+        throw new InternalServerErrorException(
+          'Stripe did not return a customer portal session URL',
+        );
+      }
+
+      return { url: session.url };
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof InternalServerErrorException
+      ) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Não foi possível abrir o portal de assinatura no Stripe.',
+      );
+    }
+  }
+
   async createCheckoutSession(
     params: CreateCheckoutSessionParams,
   ): Promise<CheckoutSessionResponse> {
@@ -552,6 +616,12 @@ export class BillingService {
     if (!tenant) {
       throw new NotFoundException(
         `Tenant with id "${params.tenantId}" was not found`,
+      );
+    }
+
+    if (tenantHasManageableSubscription(tenant)) {
+      throw new BadRequestException(
+        'Você já possui uma assinatura ativa. Use "Gerenciar assinatura" para trocar de plano ou cancelar.',
       );
     }
 
