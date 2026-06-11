@@ -26,6 +26,7 @@ export interface Tenant {
   subscription_expires_at: string | null;
   trial_starts_at: string | null;
   trial_ends_at: string | null;
+  pre_subscription_trial_ends_at: string | null;
   plan_tier: PlanTier;
   created_at: string;
   updated_at: string;

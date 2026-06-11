@@ -22,11 +22,39 @@ import {
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod } from './utils/trial-period.util';
 
+export interface TenantSubscriptionUpdatePayload {
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  subscriptionStatus: SubscriptionStatus;
+  subscriptionExpiresAt?: string | null;
+  planTier?: PlanTier;
+  trialEndsAt?: string | null;
+  preSubscriptionTrialEndsAt?: string | null;
+}
+
+function applySubscriptionTrialFields(
+  updatePayload: Record<string, string | null>,
+  payload: Pick<
+    TenantSubscriptionUpdatePayload,
+    'trialEndsAt' | 'preSubscriptionTrialEndsAt'
+  >,
+): void {
+  if (payload.trialEndsAt !== undefined) {
+    updatePayload.trial_ends_at = payload.trialEndsAt;
+  }
+
+  if (payload.preSubscriptionTrialEndsAt !== undefined) {
+    updatePayload.pre_subscription_trial_ends_at =
+      payload.preSubscriptionTrialEndsAt;
+  }
+}
+
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
 
   return {
     ...row,
+    pre_subscription_trial_ends_at: row.pre_subscription_trial_ends_at ?? null,
     subscription_status:
       subscriptionStatus === 'ACTIVE' ||
       subscriptionStatus === 'INACTIVE' ||
@@ -222,12 +250,7 @@ export class TenantsService {
 
   async updateSubscriptionByStripeCustomerId(
     stripeCustomerId: string,
-    payload: {
-      stripeSubscriptionId?: string | null;
-      subscriptionStatus: SubscriptionStatus;
-      subscriptionExpiresAt?: string | null;
-      planTier?: PlanTier;
-    },
+    payload: TenantSubscriptionUpdatePayload,
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | null> = {
       subscription_status: payload.subscriptionStatus,
@@ -246,6 +269,8 @@ export class TenantsService {
       updatePayload.plan_tier = payload.planTier;
     }
 
+    applySubscriptionTrialFields(updatePayload, payload);
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
@@ -263,11 +288,7 @@ export class TenantsService {
 
   async updateSubscriptionByStripeSubscriptionId(
     stripeSubscriptionId: string,
-    payload: {
-      subscriptionStatus: SubscriptionStatus;
-      subscriptionExpiresAt?: string | null;
-      planTier?: PlanTier;
-    },
+    payload: TenantSubscriptionUpdatePayload,
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | null> = {
       subscription_status: payload.subscriptionStatus,
@@ -281,6 +302,8 @@ export class TenantsService {
     if (payload.planTier !== undefined) {
       updatePayload.plan_tier = payload.planTier;
     }
+
+    applySubscriptionTrialFields(updatePayload, payload);
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -299,13 +322,7 @@ export class TenantsService {
 
   async updateSubscriptionByTenantId(
     tenantId: string,
-    payload: {
-      stripeCustomerId?: string | null;
-      stripeSubscriptionId?: string | null;
-      subscriptionStatus: SubscriptionStatus;
-      subscriptionExpiresAt?: string | null;
-      planTier?: PlanTier;
-    },
+    payload: TenantSubscriptionUpdatePayload,
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | null> = {
       subscription_status: payload.subscriptionStatus,
@@ -327,6 +344,8 @@ export class TenantsService {
     if (payload.planTier !== undefined) {
       updatePayload.plan_tier = payload.planTier;
     }
+
+    applySubscriptionTrialFields(updatePayload, payload);
 
     const { data, error } = await this.supabaseService
       .getClient()

@@ -1364,6 +1364,7 @@ export class AppointmentsService {
       subscription_expires_at: null,
       trial_starts_at: null,
       trial_ends_at: null,
+      pre_subscription_trial_ends_at: null,
       plan_tier: 'SOLO',
       created_at: '',
       updated_at: '',

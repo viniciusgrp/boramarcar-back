@@ -33,6 +33,7 @@ import {
   stripePeriodEndToIso,
 } from './utils/stripe-period-end.util';
 import { extractStripeId } from './utils/stripe-id.util';
+import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -304,12 +305,21 @@ export class BillingService {
       session.metadata?.plan_tier,
     );
 
+    const existingTenant = tenantId
+      ? await this.tenantsService.findById(tenantId)
+      : await this.tenantsService.findByStripeCustomerId(stripeCustomerId);
+    const trialTransition = resolveSubscriptionTrialTransition(
+      existingTenant,
+      'ACTIVE',
+    );
+
     const billingPayload = {
       stripeCustomerId,
       stripeSubscriptionId,
       subscriptionStatus: 'ACTIVE' as const,
       subscriptionExpiresAt,
       planTier,
+      ...trialTransition,
     };
 
     let tenant = tenantId
@@ -401,11 +411,21 @@ export class BillingService {
       );
     }
 
+    const existingTenant = await this.resolveTenantForSubscriptionSync(
+      stripeSubscriptionId,
+      stripeCustomerId,
+    );
+    const trialTransition = resolveSubscriptionTrialTransition(
+      existingTenant,
+      subscriptionStatus,
+    );
+
     const payload = {
       stripeSubscriptionId,
       subscriptionStatus,
       subscriptionExpiresAt,
       ...(planTier !== undefined ? { planTier } : {}),
+      ...trialTransition,
     };
 
     let tenant =
@@ -433,6 +453,23 @@ export class BillingService {
         planTier ? ` plan_tier=${planTier}` : ''
       }`,
     );
+
+    return tenant;
+  }
+
+  private async resolveTenantForSubscriptionSync(
+    stripeSubscriptionId: string,
+    stripeCustomerId: string | null,
+  ): Promise<Tenant | null> {
+    let tenant =
+      await this.tenantsService.findByStripeSubscriptionId(
+        stripeSubscriptionId,
+      );
+
+    if (!tenant && stripeCustomerId) {
+      tenant =
+        await this.tenantsService.findByStripeCustomerId(stripeCustomerId);
+    }
 
     return tenant;
   }
