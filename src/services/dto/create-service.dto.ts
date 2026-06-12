@@ -6,4 +6,5 @@ export class CreateServiceDto {
   isActive?: boolean;
   requiresDeposit?: boolean;
   depositAmount?: number;
+  customCommissionRate?: number | null;
 }

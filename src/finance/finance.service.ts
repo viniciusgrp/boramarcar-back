@@ -18,6 +18,8 @@ import {
   isValidFinanceReportStatus,
   mapFinanceReportAppointmentRow,
 } from './utils/finance-report-mapper.util';
+import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
+import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 
 interface CompletedAppointmentRow {
   professional_id: string;
@@ -80,14 +82,14 @@ export class FinanceService {
         total_price,
         commission_amount,
         booking_source,
-        professionals ( name ),
-        services!service_id ( name, price ),
+        professionals ( name, commission_percent ),
+        services!service_id ( name, price, custom_commission_rate ),
         appointment_services (
           service_id,
           sort_order,
           duration_minutes,
           price,
-          services!service_id ( name )
+          services!service_id ( name, custom_commission_rate )
         )
       `,
       )
@@ -128,7 +130,7 @@ export class FinanceService {
     }
 
     const appointments = (data ?? []).map((row) =>
-      mapFinanceReportAppointmentRow(
+      this.mapFinanceReportAppointmentWithCommission(
         row as Parameters<typeof mapFinanceReportAppointmentRow>[0],
       ),
     );
@@ -226,6 +228,38 @@ export class FinanceService {
     return [...grouped.values()].sort((left, right) =>
       left.professionalName.localeCompare(right.professionalName, 'pt-BR'),
     );
+  }
+
+  private mapFinanceReportAppointmentWithCommission(
+    row: Parameters<typeof mapFinanceReportAppointmentRow>[0],
+  ) {
+    const appointment = mapFinanceReportAppointmentRow(row);
+
+    if (appointment.status !== 'COMPLETED') {
+      return appointment;
+    }
+
+    const professionalRelation = row.professionals as
+      | { commission_percent?: number | null }
+      | { commission_percent?: number | null }[]
+      | null;
+    const professionalRow = Array.isArray(professionalRelation)
+      ? professionalRelation[0]
+      : professionalRelation;
+    const professionalCommissionPercent = Number(
+      professionalRow?.commission_percent ?? 0,
+    );
+    const serviceLines = buildAppointmentCommissionServiceLines(
+      row as unknown as Parameters<typeof buildAppointmentCommissionServiceLines>[0],
+    );
+
+    return {
+      ...appointment,
+      commissionAmount: calculateAppointmentCommissionAmount(
+        serviceLines,
+        professionalCommissionPercent,
+      ),
+    };
   }
 
   private async resolveAppointmentIdsForService(

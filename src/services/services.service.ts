@@ -10,6 +10,7 @@ import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
 import { resolveServiceDepositFields } from './utils/service-deposit.util';
+import { resolveServiceCustomCommissionRate } from './utils/service-custom-commission-rate.util';
 
 @Injectable()
 export class ServicesService {
@@ -58,6 +59,10 @@ export class ServicesService {
       dto.requiresDeposit,
       dto.depositAmount,
     );
+    const customCommissionRate = resolveServiceCustomCommissionRate(
+      planTier,
+      dto.customCommissionRate,
+    );
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -69,6 +74,7 @@ export class ServicesService {
         duration_minutes: dto.durationMinutes,
         price: dto.price,
         is_active: dto.isActive ?? true,
+        custom_commission_rate: customCommissionRate,
         ...depositFields,
       })
       .select('*')
@@ -127,6 +133,13 @@ export class ServicesService {
       );
       payload.requires_deposit = depositFields.requires_deposit;
       payload.deposit_amount = depositFields.deposit_amount;
+    }
+
+    if (dto.customCommissionRate !== undefined) {
+      payload.custom_commission_rate = resolveServiceCustomCommissionRate(
+        planTier,
+        dto.customCommissionRate,
+      );
     }
 
     const { data, error } = await this.supabaseService
@@ -188,6 +201,11 @@ export class ServicesService {
         row.deposit_amount === null || row.deposit_amount === undefined
           ? null
           : Number(row.deposit_amount),
+      custom_commission_rate:
+        row.custom_commission_rate === null ||
+        row.custom_commission_rate === undefined
+          ? null
+          : Number(row.custom_commission_rate),
       price: Number(row.price),
     };
   }

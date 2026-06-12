@@ -7,5 +7,6 @@ export interface Service {
   price: number;
   requires_deposit: boolean;
   deposit_amount: number | null;
+  custom_commission_rate: number | null;
   is_active: boolean;
 }

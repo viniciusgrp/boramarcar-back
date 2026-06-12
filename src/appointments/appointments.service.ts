@@ -23,7 +23,8 @@ import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-card-preferences.type';
-import { calculateCommissionAmount } from '../professionals/utils/professional-commission.util';
+import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
+import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -600,7 +601,23 @@ export class AppointmentsService {
       .getClient()
       .from('appointments')
       .select(
-        'id, status, professional_id, total_price, customer_id, customer_name, customer_phone, loyalty_reward_id',
+        `
+        id,
+        status,
+        professional_id,
+        total_price,
+        service_id,
+        customer_id,
+        customer_name,
+        customer_phone,
+        loyalty_reward_id,
+        services!service_id ( custom_commission_rate, price ),
+        appointment_services (
+          service_id,
+          price,
+          services ( custom_commission_rate )
+        )
+      `,
       )
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
@@ -640,11 +657,13 @@ export class AppointmentsService {
         throw new InternalServerErrorException(professionalError.message);
       }
 
-      const totalPrice = Number(existing.total_price ?? 0);
       const commissionPercent = Number(professional?.commission_percent ?? 0);
+      const serviceLines = buildAppointmentCommissionServiceLines(
+        existing as Parameters<typeof buildAppointmentCommissionServiceLines>[0],
+      );
 
-      updatePayload.commission_amount = calculateCommissionAmount(
-        totalPrice,
+      updatePayload.commission_amount = calculateAppointmentCommissionAmount(
+        serviceLines,
         commissionPercent,
       );
     }
