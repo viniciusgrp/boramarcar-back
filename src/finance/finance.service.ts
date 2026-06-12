@@ -13,6 +13,9 @@ import type {
   FinanceReportResponse,
 } from './entities/finance-report.entity';
 import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
+import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
+import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
+import { normalizePayoutFrequency } from '../tenants/entities/payout-frequency.type';
 import {
   buildFinanceReportSummary,
   isValidFinanceReportStatus,
@@ -20,6 +23,7 @@ import {
 } from './utils/finance-report-mapper.util';
 import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
+import { CashRegisterService } from './cash-register.service';
 
 interface CompletedAppointmentRow {
   professional_id: string;
@@ -33,7 +37,10 @@ interface CompletedAppointmentRow {
 
 @Injectable()
 export class FinanceService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly cashRegisterService: CashRegisterService,
+  ) {}
 
   assertFinanceAccess(planTier: PlanTier): void {
     if (!canConfigureCommissions(planTier)) {
@@ -163,6 +170,276 @@ export class FinanceService {
       name: (row.name as string)?.trim() || 'Cliente',
       phone: (row.phone as string)?.trim() || '',
     }));
+  }
+
+  async getCashFlowSummary(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<CashFlowSummary> {
+    this.assertFinanceAccess(planTier);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('cash_flow_entries')
+      .select('type, amount')
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+
+    for (const row of data ?? []) {
+      const amount = Number(row.amount ?? 0);
+
+      if (row.type === 'REVENUE') {
+        totalRevenue += amount;
+        continue;
+      }
+
+      if (row.type === 'EXPENSE') {
+        totalExpenses += amount;
+      }
+    }
+
+    totalRevenue = this.roundCurrency(totalRevenue);
+    totalExpenses = this.roundCurrency(totalExpenses);
+
+    return {
+      totalRevenue,
+      totalExpenses,
+      netProfit: this.roundCurrency(totalRevenue - totalExpenses),
+    };
+  }
+
+  async getPayoutsSummary(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<PayoutSummaryResponse> {
+    this.assertFinanceAccess(planTier);
+
+    const tenant = await this.loadTenantFinanceSettings(tenantId);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .select('professional_id, amount, professionals(name)')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'PENDING');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const grouped = new Map<
+      string,
+      { professionalName: string; pendingAmount: number; pendingCount: number }
+    >();
+
+    for (const row of data ?? []) {
+      const professionalId = row.professional_id as string;
+      const amount = Number(row.amount ?? 0);
+      const professionalName = this.resolveProfessionalName(
+        row.professionals as CompletedAppointmentRow['professionals'],
+      );
+      const existing = grouped.get(professionalId);
+
+      if (existing) {
+        existing.pendingAmount = this.roundCurrency(
+          existing.pendingAmount + amount,
+        );
+        existing.pendingCount += 1;
+        continue;
+      }
+
+      grouped.set(professionalId, {
+        professionalName,
+        pendingAmount: this.roundCurrency(amount),
+        pendingCount: 1,
+      });
+    }
+
+    const professionals = [...grouped.entries()]
+      .map(([professionalId, item]) => ({
+        professionalId,
+        professionalName: item.professionalName,
+        pendingAmount: item.pendingAmount,
+        pendingCount: item.pendingCount,
+      }))
+      .sort((left, right) =>
+        left.professionalName.localeCompare(right.professionalName, 'pt-BR'),
+      );
+
+    return {
+      enablePayoutControl: tenant.enable_payout_control,
+      payoutFrequency: tenant.payout_frequency,
+      professionals,
+    };
+  }
+
+  async settlePayoutsForProfessional(
+    tenantId: string,
+    planTier: PlanTier,
+    professionalId: string,
+  ): Promise<void> {
+    this.assertFinanceAccess(planTier);
+
+    const tenant = await this.loadTenantFinanceSettings(tenantId);
+
+    if (!tenant.enable_payout_control) {
+      throw new BadRequestException(
+        'O controle de repasse de funcionários não está ativo para este estabelecimento.',
+      );
+    }
+
+    const { data: pendingRows, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .select('id, amount')
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .eq('status', 'PENDING');
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (!pendingRows || pendingRows.length === 0) {
+      throw new BadRequestException(
+        'Não há repasses pendentes para este profissional.',
+      );
+    }
+
+    const { data: professional, error: professionalError } =
+      await this.supabaseService
+        .getClient()
+        .from('professionals')
+        .select('id, name')
+        .eq('id', professionalId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+    if (professionalError) {
+      throw new InternalServerErrorException(professionalError.message);
+    }
+
+    if (!professional) {
+      throw new BadRequestException('Profissional não encontrado.');
+    }
+
+    const totalAmount = this.roundCurrency(
+      pendingRows.reduce(
+        (sum, row) => sum + Number(row.amount ?? 0),
+        0,
+      ),
+    );
+
+    if (totalAmount <= 0) {
+      throw new BadRequestException(
+        'O valor total dos repasses pendentes deve ser maior que zero.',
+      );
+    }
+
+    const paidAt = new Date().toISOString();
+    const payoutIds = pendingRows.map((row) => row.id as string);
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .update({
+        status: 'PAID',
+        paid_at: paidAt,
+      })
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .eq('status', 'PENDING')
+      .in('id', payoutIds);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    const professionalName =
+      (professional.name as string)?.trim() || 'Profissional';
+
+    const cashRegisterId =
+      await this.cashRegisterService.resolveOpenCashRegisterId(tenantId);
+
+    const { error: expenseError } = await this.supabaseService
+      .getClient()
+      .from('cash_flow_entries')
+      .insert({
+        tenant_id: tenantId,
+        cash_register_id: cashRegisterId,
+        type: 'EXPENSE',
+        amount: totalAmount,
+        description: `Repasse de Comissão - ${professionalName}`,
+        category: 'COMMISSION_PAYOUT',
+        is_recurring: false,
+      });
+
+    if (expenseError) {
+      throw new InternalServerErrorException(expenseError.message);
+    }
+  }
+
+  async recordCompletedAppointmentCashFlow(params: {
+    tenantId: string;
+    appointmentId: string;
+    professionalId: string;
+    totalPrice: number;
+    commissionAmount: number;
+    enablePayoutControl: boolean;
+  }): Promise<void> {
+    const cashRegisterId =
+      await this.cashRegisterService.resolveOpenCashRegisterId(params.tenantId);
+    const revenueAmount = this.roundCurrency(params.totalPrice);
+
+    if (revenueAmount > 0) {
+      const { error: revenueError } = await this.supabaseService
+        .getClient()
+        .from('cash_flow_entries')
+        .insert({
+          tenant_id: params.tenantId,
+          cash_register_id: cashRegisterId,
+          type: 'REVENUE',
+          amount: revenueAmount,
+          description: 'Receita de atendimento concluído',
+          category: 'APPOINTMENT',
+          is_recurring: false,
+        });
+
+      if (revenueError) {
+        throw new InternalServerErrorException(revenueError.message);
+      }
+    }
+
+    if (!params.enablePayoutControl) {
+      return;
+    }
+
+    const payoutAmount = this.roundCurrency(params.commissionAmount);
+
+    if (payoutAmount <= 0) {
+      return;
+    }
+
+    const { error: payoutError } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .insert({
+        tenant_id: params.tenantId,
+        professional_id: params.professionalId,
+        appointment_id: params.appointmentId,
+        amount: payoutAmount,
+        status: 'PENDING',
+      });
+
+    if (payoutError) {
+      throw new InternalServerErrorException(payoutError.message);
+    }
   }
 
   async getCommissionReport(
@@ -345,6 +622,33 @@ export class FinanceService {
     }
 
     return relation.name?.trim() || 'Profissional';
+  }
+
+  private async loadTenantFinanceSettings(tenantId: string): Promise<{
+    enable_payout_control: boolean;
+    payout_frequency: ReturnType<typeof normalizePayoutFrequency>;
+  }> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('enable_payout_control, payout_frequency')
+      .eq('id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new BadRequestException('Estabelecimento não encontrado.');
+    }
+
+    return {
+      enable_payout_control: Boolean(data.enable_payout_control),
+      payout_frequency: normalizePayoutFrequency(
+        data.payout_frequency as string | null | undefined,
+      ),
+    };
   }
 
   private roundCurrency(value: number): number {

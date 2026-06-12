@@ -29,6 +29,7 @@ import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { FinanceService } from '../finance/finance.service';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
@@ -119,6 +120,7 @@ export class AppointmentsService {
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly financeService: FinanceService,
     private readonly mailService: MailService,
   ) {}
 
@@ -682,6 +684,23 @@ export class AppointmentsService {
 
     if (updateError) {
       throw new InternalServerErrorException(updateError.message);
+    }
+
+    if (isCompletingAppointment) {
+      const tenant = await this.tenantsService.findById(tenantId);
+
+      if (!tenant) {
+        throw new NotFoundException('Estabelecimento não encontrado.');
+      }
+
+      await this.financeService.recordCompletedAppointmentCashFlow({
+        tenantId,
+        appointmentId,
+        professionalId: existing.professional_id,
+        totalPrice: Number(existing.total_price ?? 0),
+        commissionAmount: Number(updatePayload.commission_amount ?? 0),
+        enablePayoutControl: tenant.enable_payout_control,
+      });
     }
 
     if (isCompletingAppointment && !existing.loyalty_reward_id) {
@@ -1411,6 +1430,8 @@ export class AppointmentsService {
       pre_subscription_trial_ends_at: null,
       plan_tier: 'SOLO',
       calendar_card_preferences: { ...DEFAULT_CALENDAR_CARD_PREFERENCES },
+      enable_payout_control: false,
+      payout_frequency: 'WEEKLY',
       created_at: '',
       updated_at: '',
     };

@@ -2,6 +2,7 @@ import type { TenantBookingAcceptanceType } from '../../booking/entities/booking
 import type { PlanTier } from './plan-tier.type';
 import type { SubscriptionStatus } from './subscription-status.type';
 import type { CalendarCardPreferences } from './calendar-card-preferences.type';
+import type { PayoutFrequency } from './payout-frequency.type';
 
 export interface Tenant {
   id: string;
@@ -30,6 +31,8 @@ export interface Tenant {
   pre_subscription_trial_ends_at: string | null;
   plan_tier: PlanTier;
   calendar_card_preferences: CalendarCardPreferences;
+  enable_payout_control: boolean;
+  payout_frequency: PayoutFrequency;
   created_at: string;
   updated_at: string;
 }

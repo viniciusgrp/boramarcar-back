@@ -22,6 +22,7 @@ import {
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod } from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
+import { normalizePayoutFrequency } from './entities/payout-frequency.type';
 import { TenantUsersService } from './tenant-users.service';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
@@ -74,6 +75,8 @@ function mapTenantRow(row: Tenant): Tenant {
     calendar_card_preferences: normalizeCalendarCardPreferences(
       row.calendar_card_preferences,
     ),
+    enable_payout_control: Boolean(row.enable_payout_control),
+    payout_frequency: normalizePayoutFrequency(row.payout_frequency),
   };
 }
 
@@ -256,6 +259,11 @@ export class TenantsService {
         ),
         calendar_card_preferences: normalizeCalendarCardPreferences(
           dto.calendarCardPreferences ?? tenant.calendar_card_preferences,
+        ),
+        enable_payout_control:
+          dto.enablePayoutControl ?? tenant.enable_payout_control,
+        payout_frequency: normalizePayoutFrequency(
+          dto.payoutFrequency ?? tenant.payout_frequency,
         ),
         updated_at: new Date().toISOString(),
       })
