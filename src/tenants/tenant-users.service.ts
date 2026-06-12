@@ -130,6 +130,8 @@ export class TenantUsersService {
       );
     }
 
+    await this.assertEmailCanReceiveInvite(tenantId, email);
+
     const professionalId = this.resolveProfessionalIdForRole(role, dto);
     const token = randomBytes(24).toString('hex');
     const expiresAt = addDays(new Date(), 7).toISOString();
@@ -357,6 +359,117 @@ export class TenantUsersService {
     }
 
     return professionalId;
+  }
+
+  private async assertEmailCanReceiveInvite(
+    tenantId: string,
+    email: string,
+  ): Promise<void> {
+    const existingUser = await this.findAuthUserByEmail(email);
+
+    if (!existingUser) {
+      return;
+    }
+
+    const userId = existingUser.id;
+
+    const { data: memberships, error: membershipError } =
+      await this.supabaseService
+        .getClient()
+        .from('tenant_users')
+        .select('tenant_id, tenants(name)')
+        .eq('user_id', userId);
+
+    if (membershipError) {
+      throw new InternalServerErrorException(membershipError.message);
+    }
+
+    for (const row of memberships ?? []) {
+      const linkedTenantName = this.resolveTenantNameFromRelation(row.tenants);
+
+      if (row.tenant_id === tenantId) {
+        throw new BadRequestException(
+          'Este e-mail já faz parte da equipe deste estabelecimento.',
+        );
+      }
+
+      throw new BadRequestException(
+        `Este e-mail já está vinculado a "${linkedTenantName}". Hoje cada conta pode pertencer a apenas um estabelecimento.`,
+      );
+    }
+
+    const { data: ownedTenant, error: ownerError } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('id, name')
+      .eq('owner_id', userId)
+      .maybeSingle();
+
+    if (ownerError) {
+      throw new InternalServerErrorException(ownerError.message);
+    }
+
+    if (!ownedTenant) {
+      return;
+    }
+
+    const ownedTenantName = ownedTenant.name?.trim() || 'outro estabelecimento';
+
+    if (ownedTenant.id === tenantId) {
+      throw new BadRequestException(
+        'Este e-mail já é o dono deste estabelecimento.',
+      );
+    }
+
+    throw new BadRequestException(
+      `Este e-mail já é dono do estabelecimento "${ownedTenantName}". Use outro e-mail para convidar como funcionário.`,
+    );
+  }
+
+  private async findAuthUserByEmail(email: string): Promise<User | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+    let page = 1;
+    const perPage = 200;
+
+    while (page <= 10) {
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .auth.admin.listUsers({ page, perPage });
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      const match = data.users.find(
+        (user) => user.email?.trim().toLowerCase() === normalizedEmail,
+      );
+
+      if (match) {
+        return match;
+      }
+
+      if (data.users.length < perPage) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return null;
+  }
+
+  private resolveTenantNameFromRelation(
+    relation: { name: string } | { name: string }[] | null,
+  ): string {
+    if (!relation) {
+      return 'outro estabelecimento';
+    }
+
+    if (Array.isArray(relation)) {
+      return relation[0]?.name?.trim() || 'outro estabelecimento';
+    }
+
+    return relation.name?.trim() || 'outro estabelecimento';
   }
 
   private async resolveUserEmail(userId: string): Promise<string> {
