@@ -25,6 +25,7 @@ import type { Tenant } from '../tenants/entities/tenant.entity';
 import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-card-preferences.type';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
+import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -611,11 +612,11 @@ export class AppointmentsService {
         customer_name,
         customer_phone,
         loyalty_reward_id,
-        services!service_id ( custom_commission_rate, price ),
+        services!service_id ( custom_commission_rate, price, loyalty_points_earned ),
         appointment_services (
           service_id,
           price,
-          services ( custom_commission_rate )
+          services ( custom_commission_rate, loyalty_points_earned )
         )
       `,
       )
@@ -684,6 +685,10 @@ export class AppointmentsService {
     }
 
     if (isCompletingAppointment && !existing.loyalty_reward_id) {
+      const loyaltyServiceLines = buildAppointmentLoyaltyServiceLines(
+        existing as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
+      );
+
       await this.loyaltyService.awardPointsForCompletedAppointment({
         tenantId,
         appointmentId,
@@ -691,6 +696,7 @@ export class AppointmentsService {
         customerName: existing.customer_name,
         customerPhone: existing.customer_phone,
         totalPrice: Number(existing.total_price ?? 0),
+        serviceLines: loyaltyServiceLines,
       });
     }
 

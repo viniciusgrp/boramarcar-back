@@ -16,6 +16,10 @@ import type { LoyaltyReward } from './entities/loyalty-reward.entity';
 import type { LoyaltySettings } from './entities/loyalty-settings.entity';
 import type { LoyaltyTransaction } from './entities/loyalty-transaction.entity';
 import {
+  calculateAppointmentLoyaltyPoints,
+  type AppointmentLoyaltyServiceLine,
+} from '../services/utils/service-loyalty-points.util';
+import {
   calculateEarnedPoints,
   normalizePhoneKey,
 } from './utils/loyalty-points.util';
@@ -520,6 +524,7 @@ export class LoyaltyService {
     customerName: string;
     customerPhone: string;
     totalPrice: number;
+    serviceLines?: AppointmentLoyaltyServiceLine[];
   }): Promise<void> {
     const settings = await this.getSettingsForTenant(params.tenantId);
 
@@ -538,10 +543,15 @@ export class LoyaltyService {
       customerId = resolved.customer.id;
     }
 
-    const earnedPoints = calculateEarnedPoints(
-      params.totalPrice,
-      settings.points_per_currency,
-    );
+    const earnedPoints = params.serviceLines?.length
+      ? calculateAppointmentLoyaltyPoints(
+          params.serviceLines,
+          settings.points_per_currency,
+        )
+      : calculateEarnedPoints(
+          params.totalPrice,
+          settings.points_per_currency,
+        );
 
     if (earnedPoints <= 0) {
       return;

@@ -7,4 +7,5 @@ export class CreateServiceDto {
   requiresDeposit?: boolean;
   depositAmount?: number;
   customCommissionRate?: number | null;
+  loyaltyPointsEarned?: number | null;
 }

@@ -11,6 +11,7 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
 import { resolveServiceDepositFields } from './utils/service-deposit.util';
 import { resolveServiceCustomCommissionRate } from './utils/service-custom-commission-rate.util';
+import { resolveServiceLoyaltyPointsEarned } from './utils/service-loyalty-points.util';
 
 @Injectable()
 export class ServicesService {
@@ -63,6 +64,9 @@ export class ServicesService {
       planTier,
       dto.customCommissionRate,
     );
+    const loyaltyPointsEarned = resolveServiceLoyaltyPointsEarned(
+      dto.loyaltyPointsEarned,
+    );
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -75,6 +79,7 @@ export class ServicesService {
         price: dto.price,
         is_active: dto.isActive ?? true,
         custom_commission_rate: customCommissionRate,
+        loyalty_points_earned: loyaltyPointsEarned,
         ...depositFields,
       })
       .select('*')
@@ -142,6 +147,12 @@ export class ServicesService {
       );
     }
 
+    if (dto.loyaltyPointsEarned !== undefined) {
+      payload.loyalty_points_earned = resolveServiceLoyaltyPointsEarned(
+        dto.loyaltyPointsEarned,
+      );
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('services')
@@ -206,6 +217,7 @@ export class ServicesService {
         row.custom_commission_rate === undefined
           ? null
           : Number(row.custom_commission_rate),
+      loyalty_points_earned: Number(row.loyalty_points_earned ?? 0),
       price: Number(row.price),
     };
   }
