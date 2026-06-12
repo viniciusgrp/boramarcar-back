@@ -4,4 +4,5 @@ export interface BookingLoyaltyFeedback {
   welcomeBonusPoints: number;
   tenantSlug?: string;
   tenantName?: string;
+  customerReferralCode?: string | null;
 }

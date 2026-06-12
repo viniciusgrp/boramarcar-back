@@ -21,4 +21,7 @@ export class UpdateTenantDto {
   calendarCardPreferences?: CalendarCardPreferences;
   enablePayoutControl?: boolean;
   payoutFrequency?: PayoutFrequency;
+  enableReferralProgram?: boolean;
+  referrerPointsBonus?: number;
+  refereePointsBonus?: number;
 }

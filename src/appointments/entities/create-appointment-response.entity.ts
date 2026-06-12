@@ -5,4 +5,5 @@ export interface CreateAppointmentResponse {
   appointment: Appointment;
   checkoutUrl?: string;
   loyaltyFeedback?: BookingLoyaltyFeedback;
+  customerReferralCode?: string | null;
 }

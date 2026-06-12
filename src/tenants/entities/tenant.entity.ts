@@ -33,6 +33,9 @@ export interface Tenant {
   calendar_card_preferences: CalendarCardPreferences;
   enable_payout_control: boolean;
   payout_frequency: PayoutFrequency;
+  enable_referral_program: boolean;
+  referrer_points_bonus: number;
+  referee_points_bonus: number;
   created_at: string;
   updated_at: string;
 }

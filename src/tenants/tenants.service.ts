@@ -77,6 +77,9 @@ function mapTenantRow(row: Tenant): Tenant {
     ),
     enable_payout_control: Boolean(row.enable_payout_control),
     payout_frequency: normalizePayoutFrequency(row.payout_frequency),
+    enable_referral_program: Boolean(row.enable_referral_program),
+    referrer_points_bonus: Number(row.referrer_points_bonus ?? 0),
+    referee_points_bonus: Number(row.referee_points_bonus ?? 0),
   };
 }
 
@@ -264,6 +267,16 @@ export class TenantsService {
           dto.enablePayoutControl ?? tenant.enable_payout_control,
         payout_frequency: normalizePayoutFrequency(
           dto.payoutFrequency ?? tenant.payout_frequency,
+        ),
+        enable_referral_program:
+          dto.enableReferralProgram ?? tenant.enable_referral_program,
+        referrer_points_bonus: this.resolveNonNegativeInteger(
+          dto.referrerPointsBonus,
+          tenant.referrer_points_bonus,
+        ),
+        referee_points_bonus: this.resolveNonNegativeInteger(
+          dto.refereePointsBonus,
+          tenant.referee_points_bonus,
         ),
         updated_at: new Date().toISOString(),
       })
@@ -602,5 +615,22 @@ export class TenantsService {
 
     const normalized = state.trim().toUpperCase().slice(0, 2);
     return normalized.length > 0 ? normalized : null;
+  }
+
+  private resolveNonNegativeInteger(
+    nextValue: number | undefined,
+    currentValue: number,
+  ): number {
+    if (nextValue === undefined) {
+      return currentValue;
+    }
+
+    if (!Number.isInteger(nextValue) || nextValue < 0) {
+      throw new BadRequestException(
+        'Os pontos de indicação devem ser números inteiros maiores ou iguais a zero.',
+      );
+    }
+
+    return nextValue;
   }
 }

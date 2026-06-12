@@ -23,10 +23,14 @@ import {
   calculateEarnedPoints,
   normalizePhoneKey,
 } from './utils/loyalty-points.util';
+import { ReferralService } from './referral.service';
 
 @Injectable()
 export class LoyaltyService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly referralService: ReferralService,
+  ) {}
 
   async getSettingsForTenant(tenantId: string): Promise<LoyaltySettings> {
     const { data, error } = await this.supabaseService
@@ -280,6 +284,12 @@ export class LoyaltyService {
       welcomeBonusPoints,
       tenantSlug: tenant?.slug ?? undefined,
       tenantName: tenant?.name ?? undefined,
+      customerReferralCode: appointment.customer_id
+        ? await this.referralService.resolveCustomerReferralCodeForAppointment(
+            tenantId,
+            appointment.customer_id as string,
+          )
+        : null,
     };
   }
 
@@ -451,6 +461,7 @@ export class LoyaltyService {
     tenantId: string,
     name: string,
     phone: string,
+    referralCode?: string | null,
   ): Promise<{ customer: Customer; isNew: boolean }> {
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
@@ -481,13 +492,27 @@ export class LoyaltyService {
         }
 
         return {
-          customer: this.mapCustomerRow(data as Customer),
+          customer: await this.finalizeCustomerReferralState(
+            tenantId,
+            this.mapCustomerRow(data as Customer),
+            referralCode,
+          ),
           isNew: false,
         };
       }
 
-      return { customer: existing, isNew: false };
+      return {
+        customer: await this.finalizeCustomerReferralState(
+          tenantId,
+          existing,
+          referralCode,
+        ),
+        isNew: false,
+      };
     }
+
+    const newReferralCode =
+      await this.referralService.generateReferralCodeForNewCustomer();
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -497,6 +522,7 @@ export class LoyaltyService {
         name: trimmedName,
         phone: trimmedPhone,
         points_balance: 0,
+        referral_code: newReferralCode,
       })
       .select('*')
       .single();
@@ -514,7 +540,40 @@ export class LoyaltyService {
       tenantId,
     );
 
-    return { customer: refreshed, isNew: true };
+    const finalizedCustomer = await this.finalizeCustomerReferralState(
+      tenantId,
+      refreshed,
+      referralCode,
+    );
+
+    return { customer: finalizedCustomer, isNew: true };
+  }
+
+  async awardReferralBonusesForFirstCompletedAppointment(params: {
+    tenantId: string;
+    appointmentId: string;
+    customerId: string;
+  }): Promise<void> {
+    return this.referralService.awardReferralBonusesForFirstCompletedAppointment(
+      params,
+    );
+  }
+
+  private async finalizeCustomerReferralState(
+    tenantId: string,
+    customer: Customer,
+    referralCode?: string | null,
+  ): Promise<Customer> {
+    const withReferralCode = await this.referralService.ensureReferralCodeForCustomer(
+      tenantId,
+      customer,
+    );
+
+    return this.referralService.applyReferralLinkIfEligible(
+      tenantId,
+      withReferralCode,
+      referralCode,
+    );
   }
 
   async awardPointsForCompletedAppointment(params: {
@@ -1030,6 +1089,8 @@ export class LoyaltyService {
     return {
       ...row,
       email: row.email ?? null,
+      referral_code: row.referral_code ?? null,
+      referred_by_id: row.referred_by_id ?? null,
       points_balance: Number(row.points_balance ?? 0),
     };
   }

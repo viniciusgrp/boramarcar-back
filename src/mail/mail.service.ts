@@ -101,6 +101,40 @@ export class MailService {
     });
   }
 
+  async sendReferralBonusEarned(params: {
+    recipientEmail: string | null;
+    recipientName: string;
+    points: number;
+    tenantName: string;
+    role: 'referrer' | 'referee';
+  }): Promise<void> {
+    const recipient = params.recipientEmail?.trim();
+
+    if (!recipient) {
+      return;
+    }
+
+    const isReferrer = params.role === 'referrer';
+    const title = isReferrer
+      ? 'Você ganhou pontos por indicar um amigo!'
+      : 'Você ganhou pontos no seu primeiro atendimento!';
+    const intro = isReferrer
+      ? `Parabéns, ${params.recipientName}! Seu amigo concluiu o primeiro atendimento em ${params.tenantName} e você recebeu ${params.points} pontos de fidelidade.`
+      : `Parabéns, ${params.recipientName}! Você concluiu seu primeiro atendimento em ${params.tenantName} e recebeu ${params.points} pontos de fidelidade por ter sido indicado.`;
+
+    await this.sendMail({
+      to: recipient,
+      subject: `${title} - ${params.tenantName}`,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h1 style="font-size: 20px; margin-bottom: 12px;">${title}</h1>
+          <p style="margin: 0 0 16px;">${intro}</p>
+          <p style="margin: 0; color: #6B7280;">Continue acumulando pontos e aproveite as recompensas do programa de fidelidade.</p>
+        </div>
+      `,
+    });
+  }
+
   private createTransporter(): Transporter | null {
     const host = this.configService.get<string>('SMTP_HOST')?.trim();
     const user = this.configService.get<string>('SMTP_USER')?.trim();

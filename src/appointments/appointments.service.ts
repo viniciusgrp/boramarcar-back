@@ -235,6 +235,7 @@ export class AppointmentsService {
         dto.tenantId,
         dto.customerName,
         dto.customerPhone,
+        dto.referralCode?.trim() || null,
       );
 
     if (loyaltyRewardId) {
@@ -337,7 +338,11 @@ export class AppointmentsService {
     });
 
     if (!requiresDepositPayment) {
-      return { appointment, loyaltyFeedback };
+      return {
+        appointment,
+        loyaltyFeedback,
+        customerReferralCode: customer.referral_code,
+      };
     }
 
     const checkoutUrl =
@@ -348,7 +353,12 @@ export class AppointmentsService {
         depositAmountBrl: booking.totalDepositAmount,
       });
 
-    return { appointment, checkoutUrl, loyaltyFeedback };
+    return {
+      appointment,
+      checkoutUrl,
+      loyaltyFeedback,
+      customerReferralCode: customer.referral_code,
+    };
   }
 
   async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
@@ -717,6 +727,16 @@ export class AppointmentsService {
         totalPrice: Number(existing.total_price ?? 0),
         serviceLines: loyaltyServiceLines,
       });
+
+      if (existing.customer_id) {
+        await this.loyaltyService.awardReferralBonusesForFirstCompletedAppointment(
+          {
+            tenantId,
+            appointmentId,
+            customerId: existing.customer_id,
+          },
+        );
+      }
     }
 
     if (isRevertingCompletion && !existing.loyalty_reward_id) {
@@ -1432,6 +1452,9 @@ export class AppointmentsService {
       calendar_card_preferences: { ...DEFAULT_CALENDAR_CARD_PREFERENCES },
       enable_payout_control: false,
       payout_frequency: 'WEEKLY',
+      enable_referral_program: false,
+      referrer_points_bonus: 0,
+      referee_points_bonus: 0,
       created_at: '',
       updated_at: '',
     };
