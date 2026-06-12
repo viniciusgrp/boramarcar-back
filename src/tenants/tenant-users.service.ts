@@ -134,6 +134,17 @@ export class TenantUsersService {
     const token = randomBytes(24).toString('hex');
     const expiresAt = addDays(new Date(), 7).toISOString();
 
+    const { error: revokePendingError } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .delete()
+      .eq('email', email)
+      .is('accepted_at', null);
+
+    if (revokePendingError) {
+      throw new InternalServerErrorException(revokePendingError.message);
+    }
+
     const { error } = await this.supabaseService
       .getClient()
       .from('tenant_user_invites')
