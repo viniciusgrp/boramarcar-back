@@ -11,6 +11,6 @@ import { ReferralService } from './referral.service';
   imports: [AuthModule, TenantsModule, MailModule],
   controllers: [LoyaltyController],
   providers: [LoyaltyService, ReferralService, LoyaltyExpirationService],
-  exports: [LoyaltyService],
+  exports: [LoyaltyService, ReferralService],
 })
 export class LoyaltyModule {}

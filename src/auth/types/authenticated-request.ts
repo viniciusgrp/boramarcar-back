@@ -3,6 +3,6 @@ import type { Request } from 'express';
 import type { TenantAccessContext } from '../../tenants/entities/tenant-access-context.entity';
 
 export interface AuthenticatedRequest extends Request {
-  user: User;
+  user?: User;
   tenantAccess?: TenantAccessContext;
 }

@@ -2,13 +2,9 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
 import { AuthenticatedRequest } from '../types/authenticated-request';
 
-export const CurrentUser = createParamDecorator(
-  (_data: unknown, context: ExecutionContext): User => {
+export const OptionalCurrentUser = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): User | undefined => {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-
-    if (!request.user) {
-      throw new Error('Authenticated user is not available on this request.');
-    }
 
     return request.user;
   },

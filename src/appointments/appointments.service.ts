@@ -18,6 +18,7 @@ import {
   parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
+import { CustomersService } from '../customers/customers.service';
 import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
@@ -120,6 +121,7 @@ export class AppointmentsService {
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
     private readonly mailService: MailService,
   ) {}
@@ -197,8 +199,11 @@ export class AppointmentsService {
     return availableSlots;
   }
 
-  async create(dto: CreateAppointmentDto): Promise<CreateAppointmentResponse> {
-    this.validateCreateDto(dto);
+  async create(
+    dto: CreateAppointmentDto,
+    authUserId?: string,
+  ): Promise<CreateAppointmentResponse> {
+    this.validateCreateDto(dto, authUserId);
 
     const tenant = await this.tenantsService.findById(dto.tenantId);
 
@@ -230,13 +235,21 @@ export class AppointmentsService {
     const primaryServiceId = booking.items[0].id;
     const loyaltyRewardId = dto.loyaltyRewardId?.trim() || null;
 
-    const { customer, isNew: isNewCustomer } =
-      await this.loyaltyService.findOrCreateCustomerForAppointment(
-        dto.tenantId,
-        dto.customerName,
-        dto.customerPhone,
-        dto.referralCode?.trim() || null,
-      );
+    const { customer, isNew: isNewCustomer } = authUserId
+      ? {
+          customer: await this.customersService.resolveForAuthenticatedBooking(
+            authUserId,
+            dto.tenantId,
+            dto.referralCode?.trim() || null,
+          ),
+          isNew: false,
+        }
+      : await this.loyaltyService.findOrCreateCustomerForAppointment(
+          dto.tenantId,
+          dto.customerName?.trim() || '',
+          dto.customerPhone?.trim() || '',
+          dto.referralCode?.trim() || null,
+        );
 
     if (loyaltyRewardId) {
       await this.loyaltyService.validateRewardForAppointmentBooking({
@@ -290,8 +303,8 @@ export class AppointmentsService {
         professional_id: dto.professionalId,
         service_id: primaryServiceId,
         customer_id: customer.id,
-        customer_name: dto.customerName.trim(),
-        customer_phone: dto.customerPhone.trim(),
+        customer_name: customer.name.trim(),
+        customer_phone: customer.phone.trim(),
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
         status: appointmentStatus,
@@ -1495,12 +1508,13 @@ export class AppointmentsService {
     return value === 'INTERNAL' ? 'INTERNAL' : 'PUBLIC';
   }
 
-  private validateCreateDto(dto: CreateAppointmentDto): void {
+  private validateCreateDto(
+    dto: CreateAppointmentDto,
+    authUserId?: string,
+  ): void {
     const requiredFields: (keyof CreateAppointmentDto)[] = [
       'tenantId',
       'professionalId',
-      'customerName',
-      'customerPhone',
       'startTime',
     ];
 
@@ -1510,6 +1524,15 @@ export class AppointmentsService {
 
     if (hasMissingField) {
       throw new BadRequestException('All appointment fields are required');
+    }
+
+    if (
+      !authUserId &&
+      (!dto.customerName?.trim() || !dto.customerPhone?.trim())
+    ) {
+      throw new BadRequestException(
+        'Autenticação ou dados do cliente são obrigatórios para agendar.',
+      );
     }
 
     if (normalizeServiceIds(dto).length === 0) {

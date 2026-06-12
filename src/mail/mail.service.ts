@@ -101,6 +101,36 @@ export class MailService {
     });
   }
 
+  async sendTeamInvite(params: {
+    recipientEmail: string;
+    tenantName: string;
+    inviteUrl: string;
+    roleLabel: string;
+  }): Promise<void> {
+    await this.sendMail({
+      to: params.recipientEmail,
+      subject: `Convite para a equipe - ${params.tenantName}`,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h1 style="font-size: 20px; margin-bottom: 12px;">Você foi convidado para o painel</h1>
+          <p style="margin: 0 0 16px;">
+            Você recebeu um convite para acessar <strong>${params.tenantName}</strong> como
+            <strong>${params.roleLabel}</strong>.
+          </p>
+          <p style="margin: 0 0 16px;">
+            Clique no botão abaixo e entre com sua conta Google para aceitar o convite.
+          </p>
+          <a
+            href="${params.inviteUrl}"
+            style="display: inline-block; background: #111827; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 12px; font-weight: 600;"
+          >
+            Aceitar convite
+          </a>
+        </div>
+      `,
+    });
+  }
+
   async sendReferralBonusEarned(params: {
     recipientEmail: string | null;
     recipientName: string;

@@ -15,3 +15,21 @@ export interface Customer {
   created_at: string;
   updated_at: string;
 }
+
+export interface CustomerMeResponse {
+  customer: Customer | null;
+  isProfileComplete: boolean;
+}
+
+export interface CustomerListItem {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  birthDate: string | null;
+  instagramHandle: string | null;
+  acquisitionSource: string | null;
+  profilePictureUrl: string | null;
+  pointsBalance: number;
+  createdAt: string;
+}

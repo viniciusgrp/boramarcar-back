@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -5,7 +6,13 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { User } from '@supabase/supabase-js';
+import { addDays } from 'date-fns';
+import { MailService } from '../mail/mail.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import type { AcceptTenantUserInviteDto } from './dto/accept-tenant-user-invite.dto';
+import type { CreateTenantUserInviteDto } from './dto/create-tenant-user-invite.dto';
 import type {
   TenantMembershipSummary,
   TenantUser,
@@ -14,6 +21,11 @@ import type {
 import type { UserRole } from './entities/user-role.type';
 import { normalizeUserRole } from './entities/user-role.type';
 import type { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
+import type {
+  TenantUserInvite,
+  TenantUserInvitePreview,
+} from './entities/tenant-user-invite.entity';
+import { USER_ROLE_LABELS } from './entities/user-role.type';
 
 interface TenantUserRow extends TenantUser {}
 
@@ -42,7 +54,11 @@ function mapMembershipSummary(tenantUser: TenantUser): TenantMembershipSummary {
 
 @Injectable()
 export class TenantUsersService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly mailService: MailService,
+    private readonly configService: ConfigService,
+  ) {}
 
   mapMembershipSummary(tenantUser: TenantUser): TenantMembershipSummary {
     return mapMembershipSummary(tenantUser);
@@ -93,6 +109,129 @@ export class TenantUsersService {
     }
 
     return items;
+  }
+
+  async createInviteForTenant(
+    tenantId: string,
+    tenantName: string,
+    invitedByUserId: string,
+    dto: CreateTenantUserInviteDto,
+  ): Promise<{ email: string; expiresAt: string }> {
+    const email = dto.email?.trim().toLowerCase();
+    const role = normalizeUserRole(dto.role);
+
+    if (!email) {
+      throw new BadRequestException('Informe o e-mail do convidado.');
+    }
+
+    if (role === 'OWNER') {
+      throw new BadRequestException(
+        'Não é possível convidar um novo dono por este fluxo.',
+      );
+    }
+
+    const professionalId = this.resolveProfessionalIdForRole(role, dto);
+    const token = randomBytes(24).toString('hex');
+    const expiresAt = addDays(new Date(), 7).toISOString();
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .upsert(
+        {
+          tenant_id: tenantId,
+          email,
+          role,
+          professional_id: professionalId,
+          token,
+          invited_by_user_id: invitedByUserId,
+          expires_at: expiresAt,
+          accepted_at: null,
+        },
+        { onConflict: 'tenant_id,email' },
+      );
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const inviteUrl = `${this.resolveFrontendOrigin()}/admin/login?invite=${encodeURIComponent(token)}`;
+
+    await this.mailService.sendTeamInvite({
+      recipientEmail: email,
+      tenantName,
+      inviteUrl,
+      roleLabel: USER_ROLE_LABELS[role],
+    });
+
+    return { email, expiresAt };
+  }
+
+  async previewInvite(token: string): Promise<TenantUserInvitePreview> {
+    const invite = await this.findInviteByToken(token.trim());
+
+    const { data: tenant, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('name')
+      .eq('id', invite.tenant_id)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return {
+      email: invite.email,
+      role: normalizeUserRole(invite.role),
+      tenantName: tenant?.name?.trim() || 'Estabelecimento',
+      expiresAt: invite.expires_at,
+    };
+  }
+
+  async acceptInvite(user: User, dto: AcceptTenantUserInviteDto): Promise<TenantUser> {
+    const invite = await this.findInviteByToken(dto.token?.trim() || '');
+    const userEmail = user.email?.trim().toLowerCase();
+
+    if (!userEmail || userEmail !== invite.email.trim().toLowerCase()) {
+      throw new ForbiddenException(
+        'O e-mail da conta autenticada não corresponde ao convite.',
+      );
+    }
+
+    const existingMembership = await this.findByUserId(user.id);
+
+    if (existingMembership) {
+      throw new BadRequestException(
+        'Esta conta já está vinculada a um estabelecimento.',
+      );
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .insert({
+        tenant_id: invite.tenant_id,
+        user_id: user.id,
+        role: normalizeUserRole(invite.role),
+        professional_id: invite.professional_id,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .update({
+        accepted_at: new Date().toISOString(),
+      })
+      .eq('id', invite.id);
+
+    return mapTenantUserRow(data as TenantUserRow);
   }
 
   async createOwnerMembership(
@@ -219,6 +358,46 @@ export class TenantUsersService {
     }
 
     return data.user?.email?.trim() || 'Usuário sem e-mail';
+  }
+
+  private async findInviteByToken(token: string): Promise<TenantUserInvite> {
+    if (!token) {
+      throw new BadRequestException('Token de convite inválido.');
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .select('*')
+      .eq('token', token)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Convite não encontrado.');
+    }
+
+    const invite = data as TenantUserInvite;
+
+    if (invite.accepted_at) {
+      throw new BadRequestException('Este convite já foi aceito.');
+    }
+
+    if (new Date(invite.expires_at).getTime() < Date.now()) {
+      throw new BadRequestException('Este convite expirou.');
+    }
+
+    return invite;
+  }
+
+  private resolveFrontendOrigin(): string {
+    return (
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      'http://localhost:5173'
+    );
   }
 
   private resolveProfessionalName(

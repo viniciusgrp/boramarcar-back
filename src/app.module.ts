@@ -8,6 +8,7 @@ import { SupabaseModule } from './supabase/supabase.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { BillingModule } from './billing/billing.module';
 import { FinanceModule } from './finance/finance.module';
+import { CustomersModule } from './customers/customers.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
 import { ProfessionalHoursModule } from './professional-hours/professional-hours.module';
@@ -37,6 +38,7 @@ import { UploadModule } from './upload/upload.module';
     ProfessionalHoursModule,
     BillingModule,
     FinanceModule,
+    CustomersModule,
     LoyaltyModule,
     NotificationsModule,
     UploadModule,

@@ -13,6 +13,9 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { OptionalCurrentUser } from '../auth/decorators/optional-current-user.decorator';
+import { OptionalAuthGuard } from '../auth/optional-auth.guard';
+import { resolveAuthUserId } from '../auth/utils/resolve-auth-user-id.util';
 import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
 import { Roles } from '../tenants/decorators/roles.decorator';
 import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
@@ -135,8 +138,15 @@ export class AppointmentsController {
   }
 
   @Post()
-  create(@Body() dto: CreateAppointmentDto): Promise<CreateAppointmentResponse> {
-    return this.appointmentsService.create(dto);
+  @UseGuards(OptionalAuthGuard)
+  create(
+    @Body() dto: CreateAppointmentDto,
+    @OptionalCurrentUser() user?: User,
+  ): Promise<CreateAppointmentResponse> {
+    return this.appointmentsService.create(
+      dto,
+      user ? resolveAuthUserId(user) : undefined,
+    );
   }
 
   private async resolveOwnerTenant(userId: string) {

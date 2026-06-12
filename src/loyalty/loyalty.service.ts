@@ -1088,7 +1088,12 @@ export class LoyaltyService {
   private mapCustomerRow(row: Customer): Customer {
     return {
       ...row,
+      auth_user_id: row.auth_user_id ?? null,
       email: row.email ?? null,
+      birth_date: row.birth_date ?? null,
+      instagram_handle: row.instagram_handle ?? null,
+      acquisition_source: row.acquisition_source ?? null,
+      profile_picture_url: row.profile_picture_url ?? null,
       referral_code: row.referral_code ?? null,
       referred_by_id: row.referred_by_id ?? null,
       points_balance: Number(row.points_balance ?? 0),

@@ -4,8 +4,8 @@ export class CreateAppointmentDto {
   /** @deprecated Use serviceIds. Kept for backward compatibility. */
   serviceId?: string;
   serviceIds?: string[];
-  customerName!: string;
-  customerPhone!: string;
+  customerName?: string;
+  customerPhone?: string;
   startTime!: string;
   loyaltyRewardId?: string;
   referralCode?: string;
