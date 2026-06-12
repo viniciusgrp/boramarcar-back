@@ -1,4 +1,5 @@
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
+import type { CalendarCardPreferences } from '../entities/calendar-card-preferences.type';
 
 export class UpdateTenantDto {
   name!: string;
@@ -16,4 +17,5 @@ export class UpdateTenantDto {
   addressState?: string | null;
   requireDeposit!: boolean;
   bookingAcceptanceType!: TenantBookingAcceptanceType;
+  calendarCardPreferences?: CalendarCardPreferences;
 }

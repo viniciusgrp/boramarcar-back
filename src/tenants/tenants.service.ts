@@ -21,6 +21,7 @@ import {
 } from './utils/slug.util';
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod } from './utils/trial-period.util';
+import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
 
 export interface TenantSubscriptionUpdatePayload {
   stripeCustomerId?: string | null;
@@ -65,6 +66,9 @@ function mapTenantRow(row: Tenant): Tenant {
     plan_tier: normalizePlanTier(row.plan_tier),
     booking_acceptance_type: normalizeTenantBookingAcceptanceType(
       row.booking_acceptance_type,
+    ),
+    calendar_card_preferences: normalizeCalendarCardPreferences(
+      row.calendar_card_preferences,
     ),
   };
 }
@@ -180,6 +184,9 @@ export class TenantsService {
         require_deposit: dto.requireDeposit,
         booking_acceptance_type: normalizeTenantBookingAcceptanceType(
           dto.bookingAcceptanceType,
+        ),
+        calendar_card_preferences: normalizeCalendarCardPreferences(
+          dto.calendarCardPreferences ?? tenant.calendar_card_preferences,
         ),
         updated_at: new Date().toISOString(),
       })

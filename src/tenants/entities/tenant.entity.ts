@@ -1,6 +1,7 @@
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from './plan-tier.type';
 import type { SubscriptionStatus } from './subscription-status.type';
+import type { CalendarCardPreferences } from './calendar-card-preferences.type';
 
 export interface Tenant {
   id: string;
@@ -28,6 +29,7 @@ export interface Tenant {
   trial_ends_at: string | null;
   pre_subscription_trial_ends_at: string | null;
   plan_tier: PlanTier;
+  calendar_card_preferences: CalendarCardPreferences;
   created_at: string;
   updated_at: string;
 }

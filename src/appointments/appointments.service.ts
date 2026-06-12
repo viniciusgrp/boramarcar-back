@@ -22,6 +22,7 @@ import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
+import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-card-preferences.type';
 import { calculateCommissionAmount } from '../professionals/utils/professional-commission.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -1378,6 +1379,7 @@ export class AppointmentsService {
       trial_ends_at: null,
       pre_subscription_trial_ends_at: null,
       plan_tier: 'SOLO',
+      calendar_card_preferences: { ...DEFAULT_CALENDAR_CARD_PREFERENCES },
       created_at: '',
       updated_at: '',
     };
