@@ -168,12 +168,13 @@ export class FinanceService {
     planTier: PlanTier,
     startDate: string,
     endDate: string,
+    scopedProfessionalId?: string,
   ): Promise<ProfessionalCommissionSummary[]> {
     this.assertFinanceAccess(planTier);
 
     const range = this.resolveDateRange(startDate, endDate);
 
-    const { data, error } = await this.supabaseService
+    let query = this.supabaseService
       .getClient()
       .from('appointments')
       .select(
@@ -183,6 +184,12 @@ export class FinanceService {
       .eq('status', 'COMPLETED')
       .gte('start_time', range.startIso)
       .lte('start_time', range.endIso);
+
+    if (scopedProfessionalId) {
+      query = query.eq('professional_id', scopedProfessionalId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       throw new InternalServerErrorException(error.message);

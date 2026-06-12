@@ -22,6 +22,10 @@ import {
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod } from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
+import { TenantUsersService } from './tenant-users.service';
+import type { TenantAccessContext } from './entities/tenant-access-context.entity';
+import type { TenantMeResponse } from './entities/tenant-me-response.entity';
+import type { TenantUser } from './entities/tenant-user.entity';
 
 export interface TenantSubscriptionUpdatePayload {
   stripeCustomerId?: string | null;
@@ -81,7 +85,10 @@ function normalizeTenantBookingAcceptanceType(
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly tenantUsersService: TenantUsersService,
+  ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
     const { data, error } = await this.supabaseService
@@ -96,6 +103,66 @@ export class TenantsService {
     }
 
     return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async findAccessContextByUserId(
+    userId: string,
+  ): Promise<TenantAccessContext | null> {
+    const tenantUser = await this.tenantUsersService.findByUserId(userId);
+
+    if (tenantUser) {
+      const tenant = await this.findById(tenantUser.tenant_id);
+
+      if (!tenant) {
+        return null;
+      }
+
+      return {
+        tenant,
+        tenantUser,
+      };
+    }
+
+    const legacyTenant = await this.findByOwnerId(userId);
+
+    if (!legacyTenant) {
+      return null;
+    }
+
+    return {
+      tenant: legacyTenant,
+      tenantUser: this.buildLegacyOwnerMembership(legacyTenant, userId),
+    };
+  }
+
+  async findMeResponse(userId: string): Promise<TenantMeResponse | null> {
+    const accessContext = await this.findAccessContextByUserId(userId);
+
+    if (!accessContext) {
+      return null;
+    }
+
+    return {
+      tenant: accessContext.tenant,
+      membership: this.tenantUsersService.mapMembershipSummary(
+        accessContext.tenantUser,
+      ),
+    };
+  }
+
+  private buildLegacyOwnerMembership(
+    tenant: Tenant,
+    userId: string,
+  ): TenantUser {
+    return {
+      id: `legacy-owner-${tenant.id}`,
+      tenant_id: tenant.id,
+      user_id: userId,
+      role: 'OWNER',
+      professional_id: null,
+      created_at: tenant.created_at,
+      updated_at: tenant.updated_at,
+    };
   }
 
   async findBySlug(slug: string): Promise<Tenant | null> {
@@ -132,13 +199,15 @@ export class TenantsService {
     ownerId: string,
     dto: UpdateTenantDto,
   ): Promise<Tenant> {
-    const tenant = await this.findByOwnerId(ownerId);
+    const accessContext = await this.findAccessContextByUserId(ownerId);
 
-    if (!tenant) {
+    if (!accessContext) {
       throw new NotFoundException(
         'No establishment linked to the authenticated user',
       );
     }
+
+    const tenant = accessContext.tenant;
 
     const slugToSave = resolveSlugForUpdate(tenant.slug, dto.slug);
     const slugWasEdited = slugToSave !== tenant.slug;
@@ -191,7 +260,6 @@ export class TenantsService {
         updated_at: new Date().toISOString(),
       })
       .eq('id', tenant.id)
-      .eq('owner_id', ownerId)
       .select('*')
       .single();
 
@@ -464,6 +532,8 @@ export class TenantsService {
         tenantError?.message ?? 'Não foi possível criar o estabelecimento.',
       );
     }
+
+    await this.tenantUsersService.createOwnerMembership(tenantData.id, ownerId);
 
     return mapTenantRow(tenantData as Tenant);
   }

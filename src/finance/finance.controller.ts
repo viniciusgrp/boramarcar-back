@@ -2,15 +2,16 @@ import {
   BadRequestException,
   Controller,
   Get,
-  NotFoundException,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
-import { TenantsService } from '../tenants/tenants.service';
+import { RolesGuard } from '../tenants/guards/roles.guard';
+import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import type { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { FinanceReportResponse } from './entities/finance-report.entity';
 import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
@@ -18,25 +19,23 @@ import { FinanceService } from './finance.service';
 
 @Controller('finance')
 export class FinanceController {
-  constructor(
-    private readonly financeService: FinanceService,
-    private readonly tenantsService: TenantsService,
-  ) {}
+  constructor(private readonly financeService: FinanceService) {}
 
   @Get('customers')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async listCustomersForFilter(@CurrentUser() user: User) {
-    const tenant = await this.resolveOwnerTenant(user.id);
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  async listCustomersForFilter(@CurrentTenantContext() context: TenantAccessContext) {
     return this.financeService.listCustomersForFilter(
-      tenant.id,
-      tenant.plan_tier,
+      context.tenant.id,
+      context.tenant.plan_tier,
     );
   }
 
   @Get('reports')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async getFinanceReports(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
     @Query('professional_id') professionalId?: string,
@@ -44,22 +43,25 @@ export class FinanceController {
     @Query('customer_id') customerId?: string,
     @Query('status') status?: string,
   ): Promise<FinanceReportResponse> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-
-    return this.financeService.getFinanceReports(tenant.id, tenant.plan_tier, {
-      startDate: startDate?.trim() || undefined,
-      endDate: endDate?.trim() || undefined,
-      professionalId: professionalId?.trim() || undefined,
-      serviceId: serviceId?.trim() || undefined,
-      customerId: customerId?.trim() || undefined,
-      status: status?.trim() as AppointmentStatus | undefined,
-    });
+    return this.financeService.getFinanceReports(
+      context.tenant.id,
+      context.tenant.plan_tier,
+      {
+        startDate: startDate?.trim() || undefined,
+        endDate: endDate?.trim() || undefined,
+        professionalId: professionalId?.trim() || undefined,
+        serviceId: serviceId?.trim() || undefined,
+        customerId: customerId?.trim() || undefined,
+        status: status?.trim() as AppointmentStatus | undefined,
+      },
+    );
   }
 
   @Get('commissions')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async getCommissionReport(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
   ): Promise<ProfessionalCommissionSummary[]> {
@@ -69,25 +71,16 @@ export class FinanceController {
       );
     }
 
-    const tenant = await this.resolveOwnerTenant(user.id);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
 
     return this.financeService.getCommissionReport(
-      tenant.id,
-      tenant.plan_tier,
+      context.tenant.id,
+      context.tenant.plan_tier,
       startDate.trim(),
       endDate.trim(),
+      scopedProfessionalId,
     );
-  }
-
-  private async resolveOwnerTenant(userId: string) {
-    const tenant = await this.tenantsService.findByOwnerId(userId);
-
-    if (!tenant) {
-      throw new NotFoundException(
-        'No establishment linked to the authenticated user',
-      );
-    }
-
-    return tenant;
   }
 }

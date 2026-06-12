@@ -37,16 +37,20 @@ export class TenantAccessGuard implements CanActivate {
       throw new UnauthorizedException('Missing authenticated user');
     }
 
-    const tenant = await this.tenantsService.findByOwnerId(request.user.id);
+    const tenantAccess = await this.tenantsService.findAccessContextByUserId(
+      request.user.id,
+    );
 
-    if (!tenant) {
+    if (!tenantAccess) {
       throw new ForbiddenException(TRIAL_EXPIRED_MESSAGE);
     }
 
-    if (hasTenantAdminAccess(tenant)) {
-      return true;
+    if (!hasTenantAdminAccess(tenantAccess.tenant)) {
+      throw new ForbiddenException(TRIAL_EXPIRED_MESSAGE);
     }
 
-    throw new ForbiddenException(TRIAL_EXPIRED_MESSAGE);
+    request.tenantAccess = tenantAccess;
+
+    return true;
   }
 }

@@ -12,11 +12,14 @@ import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { SkipTenantAccessCheck } from './decorators/skip-tenant-access-check.decorator';
+import { Roles } from './decorators/roles.decorator';
 import { TenantAccessGuard } from './guards/tenant-access.guard';
+import { RolesGuard } from './guards/roles.guard';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { TenantMeResponse } from './entities/tenant-me-response.entity';
 import { Tenant } from './entities/tenant.entity';
 import { TenantsService } from './tenants.service';
 
@@ -42,20 +45,21 @@ export class TenantsController {
   @Get('me')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
-  async findMine(@CurrentUser() user: User): Promise<Tenant> {
-    const tenant = await this.tenantsService.findByOwnerId(user.id);
+  async findMine(@CurrentUser() user: User): Promise<TenantMeResponse> {
+    const response = await this.tenantsService.findMeResponse(user.id);
 
-    if (!tenant) {
+    if (!response) {
       throw new NotFoundException(
         'No establishment linked to the authenticated user',
       );
     }
 
-    return tenant;
+    return response;
   }
 
   @Put('me')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async updateMine(
     @CurrentUser() user: User,
     @Body() dto: UpdateTenantDto,

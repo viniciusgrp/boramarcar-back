@@ -13,8 +13,13 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
+import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
@@ -31,8 +36,10 @@ export class AppointmentsController {
   ) {}
 
   @Get('admin')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   findAllByDate(
+    @CurrentTenantContext() context: TenantAccessContext,
     @Query('tenantId') tenantId?: string,
     @Query('date') date?: string,
   ): Promise<AdminAppointment[]> {
@@ -42,7 +49,19 @@ export class AppointmentsController {
       );
     }
 
-    return this.appointmentsService.findAllByDate(tenantId, date);
+    if (tenantId !== context.tenant.id) {
+      throw new BadRequestException('Tenant informado é inválido.');
+    }
+
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.findAllByDate(
+      context.tenant.id,
+      date,
+      scopedProfessionalId,
+    );
   }
 
   @Get('availability')
@@ -121,15 +140,17 @@ export class AppointmentsController {
   }
 
   private async resolveOwnerTenant(userId: string) {
-    const tenant = await this.tenantsService.findByOwnerId(userId);
+    const accessContext = await this.tenantsService.findAccessContextByUserId(
+      userId,
+    );
 
-    if (!tenant) {
+    if (!accessContext) {
       throw new NotFoundException(
         'No establishment linked to the authenticated user',
       );
     }
 
-    return tenant;
+    return accessContext.tenant;
   }
 }
 

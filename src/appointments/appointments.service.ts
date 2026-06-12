@@ -481,18 +481,24 @@ export class AppointmentsService {
   async findAllByDate(
     tenantId: string,
     date: string,
+    scopedProfessionalId?: string,
   ): Promise<AdminAppointment[]> {
     const dayStartIso = `${date}T00:00:00`;
     const dayEndIso = `${date}T23:59:59`;
 
-    const { data, error } = await this.supabaseService
+    let query = this.supabaseService
       .getClient()
       .from('appointments')
       .select(ADMIN_APPOINTMENT_SELECT)
       .eq('tenant_id', tenantId)
       .gte('start_time', dayStartIso)
-      .lte('start_time', dayEndIso)
-      .order('start_time', { ascending: true });
+      .lte('start_time', dayEndIso);
+
+    if (scopedProfessionalId) {
+      query = query.eq('professional_id', scopedProfessionalId);
+    }
+
+    const { data, error } = await query.order('start_time', { ascending: true });
 
     if (error) {
       throw new InternalServerErrorException(error.message);
