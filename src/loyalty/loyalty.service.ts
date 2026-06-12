@@ -576,6 +576,75 @@ export class LoyaltyService {
     });
   }
 
+  async reverseEarnedPointsForCompletedAppointment(params: {
+    tenantId: string;
+    appointmentId: string;
+  }): Promise<void> {
+    const { data: transactions, error } = await this.supabaseService
+      .getClient()
+      .from('loyalty_transactions')
+      .select('customer_id, points')
+      .eq('tenant_id', params.tenantId)
+      .eq('appointment_id', params.appointmentId)
+      .eq('type', 'EARNED');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const earnedRows = transactions ?? [];
+
+    if (earnedRows.length === 0) {
+      return;
+    }
+
+    const pointsByCustomer = new Map<string, number>();
+
+    for (const row of earnedRows) {
+      const customerId = row.customer_id as string;
+      const points = Number(row.points ?? 0);
+
+      if (!customerId || points <= 0) {
+        continue;
+      }
+
+      pointsByCustomer.set(
+        customerId,
+        (pointsByCustomer.get(customerId) ?? 0) + points,
+      );
+    }
+
+    for (const [customerId, pointsToReverse] of pointsByCustomer) {
+      const customer = await this.assertCustomerBelongsToTenant(
+        customerId,
+        params.tenantId,
+      );
+
+      const { error: updateError } = await this.supabaseService
+        .getClient()
+        .from('customers')
+        .update({
+          points_balance: Math.max(0, customer.points_balance - pointsToReverse),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', customerId)
+        .eq('tenant_id', params.tenantId);
+
+      if (updateError) {
+        throw new InternalServerErrorException(updateError.message);
+      }
+
+      await this.insertTransaction({
+        tenantId: params.tenantId,
+        customerId,
+        type: 'REDEEMED',
+        points: pointsToReverse,
+        description: 'Estorno — conclusão revertida',
+        appointmentId: params.appointmentId,
+      });
+    }
+  }
+
   async expirePointsForAllTenants(): Promise<void> {
     const { data: settingsRows, error } = await this.supabaseService
       .getClient()

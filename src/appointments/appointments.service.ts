@@ -614,7 +614,12 @@ export class AppointmentsService {
       commission_amount?: number;
     } = { status };
 
-    if (status === 'COMPLETED' && existing.status !== 'COMPLETED') {
+    const isCompletingAppointment =
+      status === 'COMPLETED' && existing.status !== 'COMPLETED';
+    const isRevertingCompletion =
+      existing.status === 'COMPLETED' && status !== 'COMPLETED';
+
+    if (isCompletingAppointment) {
       const { data: professional, error: professionalError } =
         await this.supabaseService
           .getClient()
@@ -637,6 +642,10 @@ export class AppointmentsService {
       );
     }
 
+    if (isRevertingCompletion) {
+      updatePayload.commission_amount = 0;
+    }
+
     const { error: updateError } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -648,11 +657,7 @@ export class AppointmentsService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    if (
-      status === 'COMPLETED' &&
-      existing.status !== 'COMPLETED' &&
-      !existing.loyalty_reward_id
-    ) {
+    if (isCompletingAppointment && !existing.loyalty_reward_id) {
       await this.loyaltyService.awardPointsForCompletedAppointment({
         tenantId,
         appointmentId,
@@ -660,6 +665,13 @@ export class AppointmentsService {
         customerName: existing.customer_name,
         customerPhone: existing.customer_phone,
         totalPrice: Number(existing.total_price ?? 0),
+      });
+    }
+
+    if (isRevertingCompletion && !existing.loyalty_reward_id) {
+      await this.loyaltyService.reverseEarnedPointsForCompletedAppointment({
+        tenantId,
+        appointmentId,
       });
     }
 
