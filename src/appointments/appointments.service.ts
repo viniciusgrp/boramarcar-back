@@ -808,12 +808,19 @@ export class AppointmentsService {
     const updatePayload: {
       status: UpdateAppointmentStatusDto['status'];
       commission_amount?: number;
+      cancellation_requested_at?: null;
     } = { status };
 
     const isCompletingAppointment =
       status === 'COMPLETED' && existing.status !== 'COMPLETED';
     const isRevertingCompletion =
       existing.status === 'COMPLETED' && status !== 'COMPLETED';
+    const isReactivatingCancelled =
+      existing.status === 'CANCELLED' && status === 'PENDING';
+
+    if (isReactivatingCancelled) {
+      updatePayload.cancellation_requested_at = null;
+    }
 
     if (isCompletingAppointment) {
       const { data: professional, error: professionalError } =
