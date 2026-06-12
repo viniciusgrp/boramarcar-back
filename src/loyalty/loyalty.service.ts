@@ -1031,9 +1031,9 @@ export class LoyaltyService {
   }
 
   private validateSettingsPayload(dto: UpdateLoyaltySettingsDto): void {
-    if (dto.pointsPerCurrency <= 0) {
+    if (dto.pointsPerCurrency < 0) {
       throw new BadRequestException(
-        'Field "pointsPerCurrency" must be greater than zero',
+        'Field "pointsPerCurrency" cannot be negative',
       );
     }
 
