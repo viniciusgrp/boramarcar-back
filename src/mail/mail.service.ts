@@ -101,6 +101,24 @@ export class MailService {
     });
   }
 
+  async sendAppointmentCancellationRequestOwner(
+    ownerEmail: string,
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Cliente solicitou cancelamento - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Cancelamento solicitado pelo cliente',
+        intro:
+          'Um cliente pediu o cancelamento do agendamento abaixo. Acesse o painel para confirmar o cancelamento ou entrar em contato.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
   async sendTeamInvite(params: {
     recipientEmail: string;
     tenantName: string;

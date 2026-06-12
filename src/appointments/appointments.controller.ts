@@ -27,6 +27,9 @@ import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
+import {
+  CustomerAppointment,
+} from './entities/customer-appointment.entity';
 import { CreateAppointmentResponse } from './entities/create-appointment-response.entity';
 import { AppointmentsService } from './appointments.service';
 import { parseServiceIdsQuery } from './utils/parse-service-ids.util';
@@ -86,6 +89,48 @@ export class AppointmentsController {
     return this.appointmentsService
       .getAvailability(tenantId, professionalId, resolvedServiceIds, date)
       .then((slots) => ({ slots }));
+  }
+
+  @Get('my')
+  @UseGuards(AuthGuard)
+  findMine(
+    @CurrentUser() user: User,
+    @Query('tenantId') tenantId?: string,
+    @Query('scope') scope?: 'upcoming' | 'past',
+  ): Promise<CustomerAppointment[]> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    if (scope !== 'upcoming' && scope !== 'past') {
+      throw new BadRequestException(
+        'Query parameter "scope" must be "upcoming" or "past"',
+      );
+    }
+
+    return this.appointmentsService.findForCustomer(
+      resolveAuthUserId(user),
+      tenantId.trim(),
+      scope,
+    );
+  }
+
+  @Patch(':id/request-cancellation')
+  @UseGuards(AuthGuard)
+  requestCancellation(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ): Promise<CustomerAppointment> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    return this.appointmentsService.requestCancellationForCustomer(
+      resolveAuthUserId(user),
+      tenantId.trim(),
+      id,
+    );
   }
 
   @Post('internal')

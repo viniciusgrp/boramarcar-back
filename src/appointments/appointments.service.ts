@@ -37,6 +37,10 @@ import type { BookingSource } from './entities/booking-source.type';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
 import {
+  CustomerAppointment,
+  CustomerAppointmentScope,
+} from './entities/customer-appointment.entity';
+import {
   APPOINTMENT_STATUSES,
   Appointment,
   AppointmentStatus,
@@ -100,6 +104,7 @@ const ADMIN_APPOINTMENT_SELECT = `
   total_duration_minutes,
   total_price,
   loyalty_reward_id,
+  cancellation_requested_at,
   professionals ( name ),
   services!service_id ( name, duration_minutes, price ),
   appointment_services (
@@ -109,6 +114,13 @@ const ADMIN_APPOINTMENT_SELECT = `
     services!service_id ( name )
   )
 `;
+
+const CUSTOMER_CANCELLABLE_STATUSES: AppointmentStatus[] = [
+  'PENDING',
+  'PENDING_PAYMENT',
+  'PENDING_APPROVAL',
+  'CONFIRMED',
+];
 
 @Injectable()
 export class AppointmentsService {
@@ -614,6 +626,140 @@ export class AppointmentsService {
     return appointment;
   }
 
+  async findForCustomer(
+    authUserId: string,
+    tenantId: string,
+    scope: CustomerAppointmentScope,
+  ): Promise<CustomerAppointment[]> {
+    const trimmedTenantId = tenantId.trim();
+
+    if (!trimmedTenantId) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    const customer = await this.customersService.getMe(authUserId, trimmedTenantId);
+
+    if (!customer.customer?.id || !customer.isProfileComplete) {
+      throw new BadRequestException(
+        'Complete seu perfil antes de visualizar agendamentos.',
+      );
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('tenant_id', trimmedTenantId)
+      .eq('customer_id', customer.customer.id);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as (SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    })[];
+
+    const now = new Date();
+    const filtered = rows.filter((row) =>
+      this.matchesCustomerAppointmentScope(row, scope, now),
+    );
+
+    filtered.sort((left, right) => {
+      const leftTime = new Date(left.start_time).getTime();
+      const rightTime = new Date(right.start_time).getTime();
+      return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
+    });
+
+    return filtered.map((row) => this.mapCustomerAppointmentRow(row, now));
+  }
+
+  async requestCancellationForCustomer(
+    authUserId: string,
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<CustomerAppointment> {
+    const trimmedTenantId = tenantId.trim();
+    const trimmedAppointmentId = appointmentId.trim();
+
+    if (!trimmedTenantId || !trimmedAppointmentId) {
+      throw new BadRequestException(
+        'Tenant and appointment identifiers are required.',
+      );
+    }
+
+    const customer = await this.customersService.getMe(authUserId, trimmedTenantId);
+
+    if (!customer.customer?.id || !customer.isProfileComplete) {
+      throw new BadRequestException(
+        'Complete seu perfil antes de solicitar cancelamento.',
+      );
+    }
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('id', trimmedAppointmentId)
+      .eq('tenant_id', trimmedTenantId)
+      .eq('customer_id', customer.customer.id)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (!existing) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const row = existing as SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    };
+    const now = new Date();
+
+    if (!this.canCustomerRequestCancellation(row, now)) {
+      if (row.cancellation_requested_at) {
+        throw new BadRequestException(
+          'O cancelamento deste agendamento já foi solicitado.',
+        );
+      }
+
+      throw new BadRequestException(
+        'Este agendamento não pode mais ser cancelado por aqui.',
+      );
+    }
+
+    const requestedAt = now.toISOString();
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({ cancellation_requested_at: requestedAt })
+      .eq('id', trimmedAppointmentId)
+      .eq('tenant_id', trimmedTenantId)
+      .eq('customer_id', customer.customer.id);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    const context = await this.loadAppointmentEmailContext(
+      trimmedTenantId,
+      trimmedAppointmentId,
+    );
+
+    this.dispatchCancellationRequestEmail(context);
+
+    return this.mapCustomerAppointmentRow(
+      {
+        ...row,
+        cancellation_requested_at: requestedAt,
+      },
+      now,
+    );
+  }
+
   async updateStatusForTenant(
     tenantId: string,
     appointmentId: string,
@@ -920,6 +1066,98 @@ export class AppointmentsService {
       const appointmentEnd = new Date(appointment.end_time);
       return startTime < appointmentEnd && endTime > appointmentStart;
     });
+  }
+
+  private mapCustomerAppointmentRow(
+    row: SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    },
+    now: Date,
+  ): CustomerAppointment {
+    const adminAppointment = this.mapAdminAppointmentRow(row);
+
+    return {
+      id: adminAppointment.id,
+      startTime: adminAppointment.startTime,
+      endTime: adminAppointment.endTime,
+      status: adminAppointment.status,
+      professionalName: adminAppointment.professionalName,
+      serviceName: adminAppointment.serviceName,
+      durationMinutes: adminAppointment.durationMinutes,
+      cancellationRequestedAt: row.cancellation_requested_at ?? null,
+      canRequestCancellation: this.canCustomerRequestCancellation(row, now),
+    };
+  }
+
+  private matchesCustomerAppointmentScope(
+    row: SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    },
+    scope: CustomerAppointmentScope,
+    now: Date,
+  ): boolean {
+    const isUpcoming = this.isUpcomingCustomerAppointment(row, now);
+    return scope === 'upcoming' ? isUpcoming : !isUpcoming;
+  }
+
+  private isUpcomingCustomerAppointment(
+    row: Pick<SupabaseAppointmentWithRelations, 'start_time' | 'status'>,
+    now: Date,
+  ): boolean {
+    if (!CUSTOMER_CANCELLABLE_STATUSES.includes(row.status as AppointmentStatus)) {
+      return false;
+    }
+
+    return !isAfter(now, parseISO(row.start_time));
+  }
+
+  private canCustomerRequestCancellation(
+    row: SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    },
+    now: Date,
+  ): boolean {
+    if (row.cancellation_requested_at) {
+      return false;
+    }
+
+    return this.isUpcomingCustomerAppointment(row, now);
+  }
+
+  private dispatchCancellationRequestEmail(context: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    void this.resolveTenantOwnerEmail(context.tenant.owner_id)
+      .then((ownerEmail) => {
+        if (!ownerEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentCancellationRequestOwner(
+          ownerEmail,
+          {
+            customerName: context.appointment.customer_name,
+            customerEmail: context.customer.email?.trim() ?? '',
+            serviceName: context.serviceName,
+            professionalName: context.professionalName,
+            startTime: context.appointment.start_time,
+          },
+          context.tenant,
+        );
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown cancellation request email error';
+        this.logger.error(
+          `Failed to send cancellation request for appointment ${context.appointment.id}: ${message}`,
+        );
+      });
   }
 
   private mapAdminAppointmentRow(
