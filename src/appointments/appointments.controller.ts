@@ -30,6 +30,7 @@ import { AdminAppointment } from './entities/admin-appointment.entity';
 import {
   CustomerAppointment,
 } from './entities/customer-appointment.entity';
+import type { CustomerAppointmentGroup } from './entities/customer-appointment-group.entity';
 import { CreateAppointmentResponse } from './entities/create-appointment-response.entity';
 import { AppointmentsService } from './appointments.service';
 import { parseServiceIdsQuery } from './utils/parse-service-ids.util';
@@ -119,6 +120,24 @@ export class AppointmentsController {
     return this.appointmentsService
       .getAvailability(tenantId, professionalId, resolvedServiceIds, date)
       .then((slots) => ({ slots }));
+  }
+
+  @Get('my/all')
+  @UseGuards(AuthGuard)
+  findMineAll(
+    @CurrentUser() user: User,
+    @Query('scope') scope?: 'upcoming' | 'past',
+  ): Promise<CustomerAppointmentGroup[]> {
+    if (scope !== 'upcoming' && scope !== 'past') {
+      throw new BadRequestException(
+        'Query parameter "scope" must be "upcoming" or "past"',
+      );
+    }
+
+    return this.appointmentsService.findAllForCustomer(
+      resolveAuthUserId(user),
+      scope,
+    );
   }
 
   @Get('my')

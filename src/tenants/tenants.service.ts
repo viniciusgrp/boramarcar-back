@@ -80,6 +80,9 @@ function mapTenantRow(row: Tenant): Tenant {
     enable_referral_program: Boolean(row.enable_referral_program),
     referrer_points_bonus: Number(row.referrer_points_bonus ?? 0),
     referee_points_bonus: Number(row.referee_points_bonus ?? 0),
+    require_customer_email_confirmation: Boolean(
+      row.require_customer_email_confirmation,
+    ),
   };
 }
 
@@ -257,6 +260,9 @@ export class TenantsService {
         address_city: this.normalizeOptionalText(dto.addressCity),
         address_state: this.normalizeState(dto.addressState),
         require_deposit: dto.requireDeposit,
+        require_customer_email_confirmation:
+          dto.requireCustomerEmailConfirmation ??
+          tenant.require_customer_email_confirmation,
         booking_acceptance_type: normalizeTenantBookingAcceptanceType(
           dto.bookingAcceptanceType,
         ),

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -8,7 +9,9 @@ import type { User } from '@supabase/supabase-js';
 import { ReferralService } from '../loyalty/referral.service';
 import { normalizePhoneKey } from '../loyalty/utils/loyalty-points.util';
 import { SupabaseService } from '../supabase/supabase.service';
+import { TenantsService } from '../tenants/tenants.service';
 import type { CompleteCustomerProfileDto } from './dto/complete-customer-profile.dto';
+import type { UpdateCustomerProfileDto } from './dto/update-customer-profile.dto';
 import type {
   Customer,
   CustomerListItem,
@@ -17,17 +20,84 @@ import type {
 import {
   isCustomerProfileComplete,
   normalizeAcquisitionSource,
+  normalizeCustomerDisplayName,
   normalizeInstagramHandle,
+  resolveCustomerDisplayName,
   resolveOAuthAvatarUrl,
   resolveOAuthDisplayName,
 } from './utils/customer-profile.util';
+
+export interface CustomerWithTenantSummary {
+  customer: Customer;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  isProfileComplete: boolean;
+}
 
 @Injectable()
 export class CustomersService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly referralService: ReferralService,
+    private readonly tenantsService: TenantsService,
   ) {}
+
+  async registerWithEmailPassword(
+    tenantId: string,
+    email: string,
+    password: string,
+  ): Promise<void> {
+    const normalizedTenantId = tenantId?.trim();
+
+    if (!normalizedTenantId) {
+      throw new BadRequestException('O campo "tenantId" é obrigatório.');
+    }
+
+    const tenant = await this.tenantsService.findById(normalizedTenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    if (tenant.require_customer_email_confirmation) {
+      throw new BadRequestException(
+        'Este estabelecimento exige confirmação de e-mail antes do primeiro acesso.',
+      );
+    }
+
+    const normalizedEmail = email?.trim().toLowerCase() ?? '';
+
+    if (!normalizedEmail) {
+      throw new BadRequestException('Informe um e-mail válido.');
+    }
+
+    if (!password || password.length < 8) {
+      throw new BadRequestException(
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      );
+    }
+
+    const { data: authData, error: authError } = await this.supabaseService
+      .getClient()
+      .auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+      });
+
+    if (authError || !authData.user) {
+      const message = authError?.message?.toLowerCase() ?? '';
+
+      if (message.includes('already') || message.includes('registered')) {
+        throw new ConflictException('Este e-mail já está cadastrado.');
+      }
+
+      throw new BadRequestException(
+        authError?.message ?? 'Não foi possível criar sua conta.',
+      );
+    }
+  }
 
   async getMe(authUserId: string, tenantId: string): Promise<CustomerMeResponse> {
     const customer = await this.findByAuthUserForTenant(tenantId, authUserId);
@@ -36,6 +106,101 @@ export class CustomersService {
       customer,
       isProfileComplete: isCustomerProfileComplete(customer),
     };
+  }
+
+  async findAllByAuthUserId(
+    authUserId: string,
+  ): Promise<CustomerWithTenantSummary[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('*, tenants ( id, name, slug )')
+      .eq('auth_user_id', authUserId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? [])
+      .map((row) => {
+        const tenantRelation = row.tenants as
+          | { id: string; name: string; slug: string }
+          | { id: string; name: string; slug: string }[]
+          | null;
+        const tenant = Array.isArray(tenantRelation)
+          ? tenantRelation[0]
+          : tenantRelation;
+
+        if (!tenant?.id || !tenant.name || !tenant.slug) {
+          return null;
+        }
+
+        const customer = this.mapCustomerRow(row as Customer);
+
+        return {
+          customer,
+          tenantId: tenant.id,
+          tenantName: tenant.name,
+          tenantSlug: tenant.slug,
+          isProfileComplete: isCustomerProfileComplete(customer),
+        };
+      })
+      .filter((context): context is CustomerWithTenantSummary => context !== null);
+  }
+
+  async updateProfile(
+    authUserId: string,
+    dto: UpdateCustomerProfileDto,
+  ): Promise<Customer> {
+    const tenantId = dto.tenantId?.trim();
+
+    if (!tenantId) {
+      throw new BadRequestException('O campo "tenantId" é obrigatório.');
+    }
+
+    const existing = await this.findByAuthUserForTenant(tenantId, authUserId);
+
+    if (!existing) {
+      throw new NotFoundException('Perfil não encontrado neste estabelecimento.');
+    }
+
+    const profilePictureUrl =
+      dto.profilePictureUrl === undefined
+        ? existing.profile_picture_url
+        : dto.profilePictureUrl?.trim() || null;
+    const displayName =
+      dto.name === undefined
+        ? existing.name
+        : normalizeCustomerDisplayName(dto.name) ?? existing.name;
+    const instagramHandle =
+      dto.instagramHandle === undefined
+        ? existing.instagram_handle
+        : normalizeInstagramHandle(dto.instagramHandle ?? undefined);
+    const birthDate =
+      dto.birthDate === undefined
+        ? existing.birth_date
+        : this.normalizeBirthDate(dto.birthDate ?? undefined);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .update({
+        name: displayName,
+        profile_picture_url: profilePictureUrl,
+        instagram_handle: instagramHandle,
+        birth_date: birthDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return this.mapCustomerRow(data as Customer);
   }
 
   async completeProfile(
@@ -53,7 +218,12 @@ export class CustomersService {
     }
 
     const normalizedPhoneKey = normalizePhoneKey(phone);
-    const displayName = resolveOAuthDisplayName(user);
+    const displayName = resolveCustomerDisplayName(user, dto.name);
+
+    if (!displayName) {
+      throw new BadRequestException('Informe seu nome completo.');
+    }
+
     const email = user.email?.trim().toLowerCase() || null;
     const profilePictureUrl = resolveOAuthAvatarUrl(user);
     const birthDate = this.normalizeBirthDate(dto.birthDate);

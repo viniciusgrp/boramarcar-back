@@ -20,6 +20,7 @@ export interface Tenant {
   primary_color: string;
   contact_phone: string | null;
   require_deposit: boolean;
+  require_customer_email_confirmation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   owner_id: string | null;
   stripe_customer_id: string | null;

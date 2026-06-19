@@ -17,6 +17,7 @@ export class UpdateTenantDto {
   addressCity?: string | null;
   addressState?: string | null;
   requireDeposit!: boolean;
+  requireCustomerEmailConfirmation?: boolean;
   bookingAcceptanceType!: TenantBookingAcceptanceType;
   calendarCardPreferences?: CalendarCardPreferences;
   enablePayoutControl?: boolean;

@@ -40,6 +40,7 @@ import {
   CustomerAppointment,
   CustomerAppointmentScope,
 } from './entities/customer-appointment.entity';
+import type { CustomerAppointmentGroup } from './entities/customer-appointment-group.entity';
 import {
   APPOINTMENT_STATUSES,
   Appointment,
@@ -94,6 +95,7 @@ const APPOINTMENT_EMAIL_CONTEXT_SELECT = `
 
 const ADMIN_APPOINTMENT_SELECT = `
   id,
+  customer_id,
   professional_id,
   customer_name,
   customer_phone,
@@ -690,6 +692,12 @@ export class AppointmentsService {
       );
     }
 
+    const tenant = await this.tenantsService.findById(trimmedTenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -716,7 +724,109 @@ export class AppointmentsService {
       return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
     });
 
-    return filtered.map((row) => this.mapCustomerAppointmentRow(row, now));
+    return filtered.map((row) =>
+      this.mapCustomerAppointmentRow(row, now, {
+        id: tenant.id,
+        slug: tenant.slug,
+      }),
+    );
+  }
+
+  async findAllForCustomer(
+    authUserId: string,
+    scope: CustomerAppointmentScope,
+  ): Promise<CustomerAppointmentGroup[]> {
+    const customerContexts =
+      await this.customersService.findAllByAuthUserId(authUserId);
+
+    const eligibleCustomers = customerContexts.filter(
+      (context) => context.isProfileComplete,
+    );
+
+    if (eligibleCustomers.length === 0) {
+      return [];
+    }
+
+    const customerIds = eligibleCustomers.map((context) => context.customer.id);
+    const tenantByCustomerId = new Map(
+      eligibleCustomers.map((context) => [
+        context.customer.id,
+        {
+          id: context.tenantId,
+          name: context.tenantName,
+          slug: context.tenantSlug,
+        },
+      ]),
+    );
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .in('customer_id', customerIds);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as (SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+      customer_id?: string;
+    })[];
+
+    const now = new Date();
+    const grouped = new Map<string, CustomerAppointmentGroup>();
+
+    for (const row of rows) {
+      if (!this.matchesCustomerAppointmentScope(row, scope, now)) {
+        continue;
+      }
+
+      const customerId = row.customer_id as string | undefined;
+      const tenant = customerId ? tenantByCustomerId.get(customerId) : undefined;
+
+      if (!tenant) {
+        continue;
+      }
+
+      const existingGroup = grouped.get(tenant.id) ?? {
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        tenantSlug: tenant.slug,
+        appointments: [],
+      };
+
+      existingGroup.appointments.push(
+        this.mapCustomerAppointmentRow(row, now, {
+          id: tenant.id,
+          slug: tenant.slug,
+        }),
+      );
+      grouped.set(tenant.id, existingGroup);
+    }
+
+    const groups = Array.from(grouped.values());
+
+    for (const group of groups) {
+      group.appointments.sort((left, right) => {
+        const leftTime = new Date(left.startTime).getTime();
+        const rightTime = new Date(right.startTime).getTime();
+        return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
+      });
+    }
+
+    groups.sort((left, right) => {
+      const leftTime = left.appointments[0]
+        ? new Date(left.appointments[0].startTime).getTime()
+        : 0;
+      const rightTime = right.appointments[0]
+        ? new Date(right.appointments[0].startTime).getTime()
+        : 0;
+
+      return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
+    });
+
+    return groups;
   }
 
   async requestCancellationForCustomer(
@@ -796,12 +906,20 @@ export class AppointmentsService {
 
     this.dispatchCancellationRequestEmail(context);
 
+    const tenant = await this.tenantsService.findById(trimmedTenantId);
+
     return this.mapCustomerAppointmentRow(
       {
         ...row,
         cancellation_requested_at: requestedAt,
       },
       now,
+      tenant
+        ? {
+            id: tenant.id,
+            slug: tenant.slug,
+          }
+        : undefined,
     );
   }
 
@@ -1125,6 +1243,7 @@ export class AppointmentsService {
       cancellation_requested_at?: string | null;
     },
     now: Date,
+    tenant?: { id: string; slug: string },
   ): CustomerAppointment {
     const adminAppointment = this.mapAdminAppointmentRow(row);
 
@@ -1138,6 +1257,8 @@ export class AppointmentsService {
       durationMinutes: adminAppointment.durationMinutes,
       cancellationRequestedAt: row.cancellation_requested_at ?? null,
       canRequestCancellation: this.canCustomerRequestCancellation(row, now),
+      tenantId: tenant?.id ?? '',
+      tenantSlug: tenant?.slug ?? '',
     };
   }
 
@@ -1742,6 +1863,7 @@ export class AppointmentsService {
       primary_color: '#111827',
       contact_phone: null,
       require_deposit: false,
+      require_customer_email_confirmation: false,
       booking_acceptance_type: 'AUTOMATIC',
       owner_id: null,
       stripe_customer_id: null,

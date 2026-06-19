@@ -5,6 +5,50 @@ export function isCustomerProfileComplete(customer: Customer | null): boolean {
   return Boolean(customer?.phone?.trim());
 }
 
+export function hasOAuthIdentity(user: User): boolean {
+  return Boolean(
+    user.identities?.some(
+      (identity) =>
+        identity.provider === 'google' || identity.provider === 'facebook',
+    ),
+  );
+}
+
+export function resolveOAuthProviderDisplayName(user: User): string | null {
+  if (!hasOAuthIdentity(user)) {
+    return null;
+  }
+
+  const metadataName = user.user_metadata?.full_name;
+  const metadataNameText =
+    typeof metadataName === 'string' ? metadataName.trim() : '';
+
+  return metadataNameText.length >= 2 ? metadataNameText : null;
+}
+
+export function normalizeCustomerDisplayName(value?: string): string | null {
+  const trimmed = value?.trim();
+
+  if (!trimmed || trimmed.length < 2) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+export function resolveCustomerDisplayName(
+  user: User,
+  providedName?: string,
+): string | null {
+  const oauthName = resolveOAuthProviderDisplayName(user);
+
+  if (oauthName) {
+    return oauthName;
+  }
+
+  return normalizeCustomerDisplayName(providedName);
+}
+
 export function resolveOAuthDisplayName(user: User): string {
   const metadataName = user.user_metadata?.full_name;
   const metadataNameText =

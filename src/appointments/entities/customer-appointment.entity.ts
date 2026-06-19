@@ -12,4 +12,6 @@ export interface CustomerAppointment {
   durationMinutes: number;
   cancellationRequestedAt: string | null;
   canRequestCancellation: boolean;
+  tenantId: string;
+  tenantSlug: string;
 }

@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -19,6 +20,8 @@ import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { RolesGuard } from '../tenants/guards/roles.guard';
 import { CustomersService } from './customers.service';
 import { CompleteCustomerProfileDto } from './dto/complete-customer-profile.dto';
+import { RegisterCustomerDto } from './dto/register-customer.dto';
+import { UpdateCustomerProfileDto } from './dto/update-customer-profile.dto';
 import type {
   Customer,
   CustomerListItem,
@@ -28,6 +31,15 @@ import type {
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
+
+  @Post('auth/signup')
+  registerWithEmail(
+    @Body() dto: RegisterCustomerDto,
+  ): Promise<{ success: true }> {
+    return this.customersService
+      .registerWithEmailPassword(dto.tenantId, dto.email, dto.password)
+      .then(() => ({ success: true }));
+  }
 
   @Get('me')
   @UseGuards(AuthGuard)
@@ -49,6 +61,15 @@ export class CustomersController {
     @Body() dto: CompleteCustomerProfileDto,
   ): Promise<Customer> {
     return this.customersService.completeProfile(resolveAuthUserId(user), user, dto);
+  }
+
+  @Patch('profile')
+  @UseGuards(AuthGuard)
+  updateProfile(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateCustomerProfileDto,
+  ): Promise<Customer> {
+    return this.customersService.updateProfile(resolveAuthUserId(user), dto);
   }
 
   @Get()
