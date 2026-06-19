@@ -19,3 +19,14 @@ export interface TenantUserInvitePreview {
   tenantName: string;
   expiresAt: string;
 }
+
+export interface TenantUserInviteListItem {
+  id: string;
+  email: string;
+  role: UserRole;
+  professionalId: string | null;
+  professionalName: string | null;
+  expiresAt: string;
+  createdAt: string;
+  isExpired: boolean;
+}

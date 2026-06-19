@@ -23,6 +23,7 @@ import { normalizeUserRole } from './entities/user-role.type';
 import type { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
 import type {
   TenantUserInvite,
+  TenantUserInviteListItem,
   TenantUserInvitePreview,
 } from './entities/tenant-user-invite.entity';
 import { USER_ROLE_LABELS } from './entities/user-role.type';
@@ -30,6 +31,19 @@ import { USER_ROLE_LABELS } from './entities/user-role.type';
 interface TenantUserRow extends TenantUser {}
 
 interface TenantUserListRow extends TenantUser {
+  professionals:
+    | { name: string }
+    | { name: string }[]
+    | null;
+}
+
+interface TenantUserInviteListRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  professional_id: string | null;
+  expires_at: string;
+  created_at: string;
   professionals:
     | { name: string }
     | { name: string }[]
@@ -109,6 +123,45 @@ export class TenantUsersService {
     }
 
     return items;
+  }
+
+  async listPendingInvitesForTenant(
+    tenantId: string,
+    roleFilter?: UserRole,
+  ): Promise<TenantUserInviteListItem[]> {
+    let query = this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .select(
+        'id, email, role, professional_id, expires_at, created_at, professionals(name)',
+      )
+      .eq('tenant_id', tenantId)
+      .is('accepted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (roleFilter) {
+      query = query.eq('role', roleFilter);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as TenantUserInviteListRow[];
+    const now = Date.now();
+
+    return rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      role: normalizeUserRole(row.role),
+      professionalId: row.professional_id,
+      professionalName: this.resolveProfessionalName(row.professionals),
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      isExpired: new Date(row.expires_at).getTime() < now,
+    }));
   }
 
   async createInviteForTenant(

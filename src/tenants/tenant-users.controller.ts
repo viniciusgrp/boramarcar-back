@@ -22,7 +22,12 @@ import { AcceptTenantUserInviteDto } from './dto/accept-tenant-user-invite.dto';
 import { CreateTenantUserInviteDto } from './dto/create-tenant-user-invite.dto';
 import { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
 import type { TenantUser } from './entities/tenant-user.entity';
-import type { TenantUserInvitePreview } from './entities/tenant-user-invite.entity';
+import type {
+  TenantUserInviteListItem,
+  TenantUserInvitePreview,
+} from './entities/tenant-user-invite.entity';
+import { normalizeUserRole } from './entities/user-role.type';
+import type { UserRole } from './entities/user-role.type';
 import { TenantUsersService } from './tenant-users.service';
 
 @Controller('tenant-users')
@@ -51,6 +56,24 @@ export class TenantUsersController {
       context.tenant.name,
       user.id,
       dto,
+    );
+  }
+
+  @Get('invites/pending')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  listPendingInvites(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Query('role') role?: string,
+  ): Promise<TenantUserInviteListItem[]> {
+    const roleFilter =
+      role?.trim() && ['ADMIN', 'PROFESSIONAL'].includes(role.trim())
+        ? normalizeUserRole(role.trim() as UserRole)
+        : undefined;
+
+    return this.tenantUsersService.listPendingInvitesForTenant(
+      context.tenant.id,
+      roleFilter,
     );
   }
 
