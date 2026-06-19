@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -19,6 +20,7 @@ import type { FinanceReportResponse } from './entities/finance-report.entity';
 import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
 import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
+import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
 import { SettlePayoutsDto } from './dto/settle-payouts.dto';
 import { OpenCashRegisterDto } from './dto/open-cash-register.dto';
 import { CloseCashRegisterDto } from './dto/close-cash-register.dto';
@@ -207,6 +209,24 @@ export class FinanceController {
       context.tenant.id,
       context.tenant.plan_tier,
       dto,
+    );
+  }
+
+  @Get('payouts/pending/:professionalId/services')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  async getPendingPayoutServices(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('professionalId') professionalId: string,
+  ): Promise<PendingPayoutServicesResponse> {
+    if (!professionalId?.trim()) {
+      throw new BadRequestException('O identificador do profissional é obrigatório.');
+    }
+
+    return this.financeService.getPendingPayoutServicesForProfessional(
+      context.tenant.id,
+      context.tenant.plan_tier,
+      professionalId.trim(),
     );
   }
 

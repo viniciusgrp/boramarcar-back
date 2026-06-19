@@ -23,3 +23,21 @@ export interface PayoutSummaryResponse {
   payoutFrequency: string;
   professionals: PayoutSummaryItem[];
 }
+
+export interface PendingPayoutServiceItem {
+  payoutId: string;
+  appointmentId: string | null;
+  serviceName: string;
+  customerName: string | null;
+  appointmentDate: string | null;
+  commissionAmount: number;
+  totalPrice: number | null;
+  createdAt: string;
+}
+
+export interface PendingPayoutServicesResponse {
+  professionalId: string;
+  professionalName: string;
+  totalPendingAmount: number;
+  items: PendingPayoutServiceItem[];
+}

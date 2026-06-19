@@ -15,6 +15,7 @@ import type {
 import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
 import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
+import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
 import { normalizePayoutFrequency } from '../tenants/entities/payout-frequency.type';
 import {
   buildFinanceReportSummary,
@@ -32,6 +33,17 @@ interface CompletedAppointmentRow {
   professionals:
     | { name: string }
     | { name: string }[]
+    | null;
+}
+
+interface PendingPayoutRow {
+  id: string;
+  amount: number | string | null;
+  created_at: string;
+  appointment_id: string | null;
+  appointments:
+    | Parameters<typeof mapFinanceReportAppointmentRow>[0]
+    | Parameters<typeof mapFinanceReportAppointmentRow>[0][]
     | null;
 }
 
@@ -276,6 +288,97 @@ export class FinanceService {
       enablePayoutControl: tenant.enable_payout_control,
       payoutFrequency: tenant.payout_frequency,
       professionals,
+    };
+  }
+
+  async getPendingPayoutServicesForProfessional(
+    tenantId: string,
+    planTier: PlanTier,
+    professionalId: string,
+  ): Promise<PendingPayoutServicesResponse> {
+    this.assertFinanceAccess(planTier);
+
+    const tenant = await this.loadTenantFinanceSettings(tenantId);
+
+    if (!tenant.enable_payout_control) {
+      throw new BadRequestException(
+        'O controle de repasse de funcionários não está ativo para este estabelecimento.',
+      );
+    }
+
+    const { data: professional, error: professionalError } =
+      await this.supabaseService
+        .getClient()
+        .from('professionals')
+        .select('id, name')
+        .eq('tenant_id', tenantId)
+        .eq('id', professionalId)
+        .maybeSingle();
+
+    if (professionalError) {
+      throw new InternalServerErrorException(professionalError.message);
+    }
+
+    if (!professional) {
+      throw new BadRequestException('Profissional não encontrado.');
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .select(
+        `
+        id,
+        amount,
+        created_at,
+        appointment_id,
+        appointments (
+          id,
+          professional_id,
+          service_id,
+          customer_id,
+          customer_name,
+          customer_phone,
+          start_time,
+          end_time,
+          status,
+          total_price,
+          commission_amount,
+          booking_source,
+          professionals ( name ),
+          services ( name, price ),
+          appointment_services (
+            sort_order,
+            service_id,
+            duration_minutes,
+            price,
+            services ( name )
+          )
+        )
+      `,
+      )
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .eq('status', 'PENDING')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const items = (data ?? []).map((row) =>
+      this.mapPendingPayoutServiceItem(row as PendingPayoutRow),
+    );
+
+    const totalPendingAmount = this.roundCurrency(
+      items.reduce((sum, item) => sum + item.commissionAmount, 0),
+    );
+
+    return {
+      professionalId,
+      professionalName: (professional.name as string)?.trim() || 'Profissional',
+      totalPendingAmount,
+      items,
     };
   }
 
@@ -607,6 +710,41 @@ export class FinanceService {
     return {
       startIso: startOfDay(parsedStart).toISOString(),
       endIso: endOfDay(parsedEnd).toISOString(),
+    };
+  }
+
+  private mapPendingPayoutServiceItem(
+    row: PendingPayoutRow,
+  ): PendingPayoutServicesResponse['items'][number] {
+    const appointmentRelation = row.appointments;
+    const appointment = Array.isArray(appointmentRelation)
+      ? appointmentRelation[0]
+      : appointmentRelation;
+
+    if (appointment) {
+      const mapped = mapFinanceReportAppointmentRow(appointment);
+
+      return {
+        payoutId: row.id,
+        appointmentId: row.appointment_id,
+        serviceName: mapped.serviceName,
+        customerName: mapped.customerName,
+        appointmentDate: mapped.startTime,
+        commissionAmount: this.roundCurrency(Number(row.amount ?? 0)),
+        totalPrice: mapped.totalPrice,
+        createdAt: row.created_at,
+      };
+    }
+
+    return {
+      payoutId: row.id,
+      appointmentId: row.appointment_id,
+      serviceName: 'Atendimento sem vínculo',
+      customerName: null,
+      appointmentDate: null,
+      commissionAmount: this.roundCurrency(Number(row.amount ?? 0)),
+      totalPrice: null,
+      createdAt: row.created_at,
     };
   }
 
