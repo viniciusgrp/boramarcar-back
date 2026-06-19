@@ -14,6 +14,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { resolveAuthUserId } from '../auth/utils/resolve-auth-user-id.util';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { CreateLoyaltyRewardDto } from './dto/create-loyalty-reward.dto';
@@ -102,6 +103,22 @@ export class LoyaltyController {
 
     return this.loyaltyService.getBookingLoyaltyFeedbackByAppointmentId(
       appointmentId.trim(),
+    );
+  }
+
+  @Get('customer/profile')
+  @UseGuards(AuthGuard)
+  getCustomerProfile(
+    @CurrentUser() user: User,
+    @Query('tenantId') tenantId?: string,
+  ): Promise<LoyaltyPublicProfile> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    return this.loyaltyService.getProfileForAuthCustomer(
+      tenantId.trim(),
+      resolveAuthUserId(user),
     );
   }
 

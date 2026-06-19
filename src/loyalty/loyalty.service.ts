@@ -297,8 +297,23 @@ export class LoyaltyService {
     tenantId: string,
     phone: string,
   ): Promise<LoyaltyPublicProfile> {
-    const settings = await this.getSettingsForTenant(tenantId);
     const customer = await this.findCustomerByPhone(tenantId, phone);
+    return this.buildPublicProfile(tenantId, customer);
+  }
+
+  async getProfileForAuthCustomer(
+    tenantId: string,
+    authUserId: string,
+  ): Promise<LoyaltyPublicProfile> {
+    const customer = await this.findCustomerByAuthUser(tenantId, authUserId);
+    return this.buildPublicProfile(tenantId, customer);
+  }
+
+  private async buildPublicProfile(
+    tenantId: string,
+    customer: Customer | null,
+  ): Promise<LoyaltyPublicProfile> {
+    const settings = await this.getSettingsForTenant(tenantId);
 
     const rewards = settings.is_active
       ? await this.findActiveRewardsByTenant(tenantId)
@@ -910,6 +925,25 @@ export class LoyaltyService {
     );
 
     return match ? this.mapCustomerRow(match) : null;
+  }
+
+  private async findCustomerByAuthUser(
+    tenantId: string,
+    authUserId: string,
+  ): Promise<Customer | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ? this.mapCustomerRow(data as Customer) : null;
   }
 
   private async findActiveRewardsByTenant(
