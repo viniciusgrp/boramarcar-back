@@ -41,6 +41,36 @@ export class AppointmentsController {
     private readonly tenantsService: TenantsService,
   ) {}
 
+  @Get('admin/customer/:customerId')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  findByCustomerForAdmin(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('customerId') customerId: string,
+    @Query('tenantId') tenantId?: string,
+    @Query('scope') scope?: 'upcoming' | 'past',
+  ): Promise<AdminAppointment[]> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    if (tenantId !== context.tenant.id) {
+      throw new BadRequestException('Tenant informado é inválido.');
+    }
+
+    if (scope !== 'upcoming' && scope !== 'past') {
+      throw new BadRequestException(
+        'Query parameter "scope" must be "upcoming" or "past"',
+      );
+    }
+
+    return this.appointmentsService.findByCustomerForTenant(
+      context.tenant.id,
+      customerId.trim(),
+      scope,
+    );
+  }
+
   @Get('admin')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')

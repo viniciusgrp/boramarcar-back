@@ -626,6 +626,51 @@ export class AppointmentsService {
     return appointment;
   }
 
+  async findByCustomerForTenant(
+    tenantId: string,
+    customerId: string,
+    scope: CustomerAppointmentScope,
+  ): Promise<AdminAppointment[]> {
+    const trimmedTenantId = tenantId.trim();
+    const trimmedCustomerId = customerId.trim();
+
+    if (!trimmedTenantId || !trimmedCustomerId) {
+      throw new BadRequestException(
+        'Tenant and customer identifiers are required.',
+      );
+    }
+
+    await this.customersService.findByIdForTenant(
+      trimmedTenantId,
+      trimmedCustomerId,
+    );
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('tenant_id', trimmedTenantId)
+      .eq('customer_id', trimmedCustomerId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
+    const now = new Date();
+    const filtered = rows.filter((row) =>
+      this.matchesCustomerAppointmentScope(row, scope, now),
+    );
+
+    filtered.sort((left, right) => {
+      const leftTime = new Date(left.start_time).getTime();
+      const rightTime = new Date(right.start_time).getTime();
+      return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
+    });
+
+    return filtered.map((row) => this.mapAdminAppointmentRow(row));
+  }
+
   async findForCustomer(
     authUserId: string,
     tenantId: string,
