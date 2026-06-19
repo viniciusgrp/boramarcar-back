@@ -1713,6 +1713,9 @@ export class AppointmentsService {
       enable_referral_program: false,
       referrer_points_bonus: 0,
       referee_points_bonus: 0,
+      initial_setup_completed_at: null,
+      initial_setup_version: null,
+      initial_setup_settings_visited_at: null,
       created_at: '',
       updated_at: '',
     };

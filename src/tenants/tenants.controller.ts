@@ -21,11 +21,16 @@ import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantMeResponse } from './entities/tenant-me-response.entity';
 import { Tenant } from './entities/tenant.entity';
+import type { InitialSetupStatus } from './entities/initial-setup-status.entity';
+import { InitialSetupService } from './initial-setup.service';
 import { TenantsService } from './tenants.service';
 
 @Controller('tenants')
 export class TenantsController {
-  constructor(private readonly tenantsService: TenantsService) {}
+  constructor(
+    private readonly tenantsService: TenantsService,
+    private readonly initialSetupService: InitialSetupService,
+  ) {}
 
   @Post('register')
   async register(
@@ -55,6 +60,22 @@ export class TenantsController {
     }
 
     return response;
+  }
+
+  @Get('me/initial-setup')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  getInitialSetup(@CurrentUser() user: User): Promise<InitialSetupStatus> {
+    return this.initialSetupService.getStatusForUser(user.id);
+  }
+
+  @Post('me/initial-setup/settings-visited')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  markInitialSetupSettingsVisited(
+    @CurrentUser() user: User,
+  ): Promise<InitialSetupStatus> {
+    return this.initialSetupService.markSettingsVisitedForUser(user.id);
   }
 
   @Put('me')

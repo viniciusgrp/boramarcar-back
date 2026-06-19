@@ -36,6 +36,9 @@ export interface Tenant {
   enable_referral_program: boolean;
   referrer_points_bonus: number;
   referee_points_bonus: number;
+  initial_setup_completed_at: string | null;
+  initial_setup_version: number | null;
+  initial_setup_settings_visited_at: string | null;
   created_at: string;
   updated_at: string;
 }

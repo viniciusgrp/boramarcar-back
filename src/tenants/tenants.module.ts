@@ -7,11 +7,12 @@ import { TenantAccessGuard } from './guards/tenant-access.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { TenantsService } from './tenants.service';
 import { TenantUsersService } from './tenant-users.service';
+import { InitialSetupService } from './initial-setup.service';
 
 @Module({
   imports: [AuthModule, MailModule],
   controllers: [TenantsController, TenantUsersController],
-  providers: [TenantsService, TenantUsersService, TenantAccessGuard, RolesGuard],
-  exports: [TenantsService, TenantUsersService, TenantAccessGuard, RolesGuard],
+  providers: [TenantsService, TenantUsersService, InitialSetupService, TenantAccessGuard, RolesGuard],
+  exports: [TenantsService, TenantUsersService, InitialSetupService, TenantAccessGuard, RolesGuard],
 })
 export class TenantsModule {}
