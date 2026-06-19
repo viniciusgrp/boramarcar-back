@@ -45,25 +45,6 @@ export class BillingController {
     return this.billingService.syncTenantSubscription(tenant.id);
   }
 
-  @Post('change-plan')
-  @SkipTenantAccessCheck()
-  @UseGuards(AuthGuard)
-  async changePlan(
-    @CurrentUser() user: User,
-    @Body() dto: CreateCheckoutDto,
-  ): Promise<Tenant> {
-    if (!dto.planTier) {
-      throw new BadRequestException('Field "planTier" is required');
-    }
-
-    const tenant = await this.resolveOwnerTenant(user.id);
-
-    return this.billingService.changeSubscriptionPlan(
-      tenant.id,
-      normalizePlanTier(dto.planTier),
-    );
-  }
-
   @Post('portal')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
