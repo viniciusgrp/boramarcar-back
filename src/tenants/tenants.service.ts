@@ -20,7 +20,7 @@ import {
   resolveSlugForUpdate,
 } from './utils/slug.util';
 import { normalizePlanTier } from './utils/plan-tier.util';
-import { buildTrialPeriod } from './utils/trial-period.util';
+import { buildTrialPeriod, TRIAL_DEFAULT_PLAN_TIER } from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
 import { normalizePayoutFrequency } from './entities/payout-frequency.type';
 import { TenantUsersService } from './tenant-users.service';
@@ -534,6 +534,7 @@ export class TenantsService {
         require_deposit: false,
         owner_id: ownerId,
         subscription_status: 'INACTIVE',
+        plan_tier: TRIAL_DEFAULT_PLAN_TIER,
         trial_starts_at: trialStartsAt,
         trial_ends_at: trialEndsAt,
       })

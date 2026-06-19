@@ -1,6 +1,8 @@
 import { addDays } from 'date-fns';
+import type { PlanTier } from '../entities/plan-tier.type';
 
 export const TRIAL_DURATION_DAYS = 14;
+export const TRIAL_DEFAULT_PLAN_TIER: PlanTier = 'PRO';
 
 export interface TrialPeriod {
   trialStartsAt: string;
