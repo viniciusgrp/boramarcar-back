@@ -309,6 +309,11 @@ export class AppointmentsService {
         isNewCustomer,
       );
 
+    // Checkout do Stripe expira em 30 min; após isso o slot é liberado pelo cron.
+    const holdExpiresAt = requiresDepositPayment
+      ? addMinutes(new Date(), 30).toISOString()
+      : null;
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -328,6 +333,7 @@ export class AppointmentsService {
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: appointmentTotalPrice,
         loyalty_reward_id: loyaltyRewardId,
+        hold_expires_at: holdExpiresAt,
       })
       .select('*')
       .single();
@@ -1571,6 +1577,27 @@ export class AppointmentsService {
         );
       }
     }
+  }
+
+  async expireAbandonedDepositHolds(): Promise<number> {
+    const now = new Date().toISOString();
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({ status: 'CANCELLED' })
+      .eq('status', 'PENDING_PAYMENT')
+      .not('hold_expires_at', 'is', null)
+      .lt('hold_expires_at', now)
+      .select('id');
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `Deposit hold expiration failed: ${error.message}`,
+      );
+    }
+
+    return (data ?? []).length;
   }
 
   private dispatchAppointmentEmails(params: {

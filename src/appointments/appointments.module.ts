@@ -8,6 +8,7 @@ import { MailModule } from '../mail/mail.module';
 import { ProfessionalHoursModule } from '../professional-hours/professional-hours.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { AppointmentReminderCron } from './appointment-reminder.cron';
+import { DepositHoldExpirationCron } from './deposit-hold-expiration.cron';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
 
@@ -23,7 +24,7 @@ import { AppointmentsService } from './appointments.service';
     MailModule,
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsService, AppointmentReminderCron],
+  providers: [AppointmentsService, AppointmentReminderCron, DepositHoldExpirationCron],
   exports: [AppointmentsService],
 })
 export class AppointmentsModule {}
