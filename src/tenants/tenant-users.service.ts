@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -13,6 +14,7 @@ import { MailService } from '../mail/mail.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { AcceptTenantUserInviteDto } from './dto/accept-tenant-user-invite.dto';
 import type { CreateTenantUserInviteDto } from './dto/create-tenant-user-invite.dto';
+import type { SignupTenantUserInviteDto } from './dto/signup-tenant-user-invite.dto';
 import type {
   TenantMembershipSummary,
   TenantUser,
@@ -253,6 +255,60 @@ export class TenantUsersService {
       tenantName: tenant?.name?.trim() || 'Estabelecimento',
       expiresAt: invite.expires_at,
     };
+  }
+
+  async signupViaInvite(
+    dto: SignupTenantUserInviteDto,
+  ): Promise<{ email: string }> {
+    const invite = await this.findInviteByToken(dto.token?.trim() || '');
+    const email = invite.email.trim().toLowerCase();
+    const password = dto.password ?? '';
+
+    if (password.length < 8) {
+      throw new BadRequestException(
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      );
+    }
+
+    if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException(
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      );
+    }
+
+    const existingUser = await this.findAuthUserByEmail(email);
+
+    if (existingUser) {
+      throw new ConflictException(
+        'Este e-mail já está cadastrado. Entre com sua senha.',
+      );
+    }
+
+    await this.assertEmailCanReceiveInvite(invite.tenant_id, email);
+
+    const { data: authData, error: authError } = await this.supabaseService
+      .getClient()
+      .auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (authError || !authData.user) {
+      const message = authError?.message?.toLowerCase() ?? '';
+
+      if (message.includes('already') || message.includes('registered')) {
+        throw new ConflictException(
+          'Este e-mail já está cadastrado. Entre com sua senha.',
+        );
+      }
+
+      throw new BadRequestException(
+        authError?.message ?? 'Não foi possível criar sua conta.',
+      );
+    }
+
+    return { email };
   }
 
   async acceptInvite(user: User, dto: AcceptTenantUserInviteDto): Promise<TenantUser> {

@@ -20,6 +20,7 @@ import { TenantAccessGuard } from './guards/tenant-access.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { AcceptTenantUserInviteDto } from './dto/accept-tenant-user-invite.dto';
 import { CreateTenantUserInviteDto } from './dto/create-tenant-user-invite.dto';
+import { SignupTenantUserInviteDto } from './dto/signup-tenant-user-invite.dto';
 import { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
 import type { TenantUser } from './entities/tenant-user.entity';
 import type {
@@ -86,6 +87,13 @@ export class TenantUsersController {
     }
 
     return this.tenantUsersService.previewInvite(token.trim());
+  }
+
+  @Post('invites/signup')
+  signupViaInvite(
+    @Body() dto: SignupTenantUserInviteDto,
+  ): Promise<{ email: string }> {
+    return this.tenantUsersService.signupViaInvite(dto);
   }
 
   @Post('invites/accept')
