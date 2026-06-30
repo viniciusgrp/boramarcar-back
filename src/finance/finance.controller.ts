@@ -17,7 +17,7 @@ import { RolesGuard } from '../tenants/guards/roles.guard';
 import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import type { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { FinanceReportResponse } from './entities/finance-report.entity';
-import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
+import type { CommissionReportResponse } from './entities/professional-commission-summary.entity';
 import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
 import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
@@ -259,7 +259,7 @@ export class FinanceController {
     @CurrentTenantContext() context: TenantAccessContext,
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
-  ): Promise<ProfessionalCommissionSummary[]> {
+  ): Promise<CommissionReportResponse> {
     if (!startDate?.trim() || !endDate?.trim()) {
       throw new BadRequestException(
         'Query parameters "start_date" and "end_date" are required (YYYY-MM-DD).',

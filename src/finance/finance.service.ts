@@ -4,7 +4,13 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { endOfDay, isAfter, parseISO, startOfDay } from 'date-fns';
+import {
+  differenceInMinutes,
+  endOfDay,
+  isAfter,
+  parseISO,
+  startOfDay,
+} from 'date-fns';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import { canConfigureCommissions } from '../professionals/utils/professional-commission.util';
@@ -12,7 +18,11 @@ import type {
   FinanceReportFilters,
   FinanceReportResponse,
 } from './entities/finance-report.entity';
-import type { ProfessionalCommissionSummary } from './entities/professional-commission-summary.entity';
+import type {
+  CommissionAppointmentItem,
+  CommissionReportResponse,
+  ProfessionalCommissionSummary,
+} from './entities/professional-commission-summary.entity';
 import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
 import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
@@ -26,14 +36,10 @@ import { buildAppointmentCommissionServiceLines } from '../appointments/utils/ap
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { CashRegisterService } from './cash-register.service';
 
-interface CompletedAppointmentRow {
-  professional_id: string;
-  total_price: number | null;
-  commission_amount: number | null;
-  professionals:
-    | { name: string }
-    | { name: string }[]
-    | null;
+interface EmployeePayoutStatusRow {
+  appointment_id: string | null;
+  status: 'PENDING' | 'PAID';
+  paid_at: string | null;
 }
 
 interface PendingPayoutRow {
@@ -254,7 +260,10 @@ export class FinanceService {
       const professionalId = row.professional_id as string;
       const amount = Number(row.amount ?? 0);
       const professionalName = this.resolveProfessionalName(
-        row.professionals as CompletedAppointmentRow['professionals'],
+        row.professionals as
+          | { name: string }
+          | { name: string }[]
+          | null,
       );
       const existing = grouped.get(professionalId);
 
@@ -551,21 +560,44 @@ export class FinanceService {
     startDate: string,
     endDate: string,
     scopedProfessionalId?: string,
-  ): Promise<ProfessionalCommissionSummary[]> {
+  ): Promise<CommissionReportResponse> {
     this.assertFinanceAccess(planTier);
 
     const range = this.resolveDateRange(startDate, endDate);
+    const tenantSettings = await this.loadTenantFinanceSettings(tenantId);
 
     let query = this.supabaseService
       .getClient()
       .from('appointments')
       .select(
-        'professional_id, total_price, commission_amount, professionals(name)',
+        `
+        id,
+        professional_id,
+        service_id,
+        customer_id,
+        customer_name,
+        customer_phone,
+        start_time,
+        end_time,
+        status,
+        total_price,
+        commission_amount,
+        professionals ( name ),
+        services!service_id ( name, price ),
+        appointment_services (
+          service_id,
+          sort_order,
+          duration_minutes,
+          price,
+          services!service_id ( name )
+        )
+      `,
       )
       .eq('tenant_id', tenantId)
       .eq('status', 'COMPLETED')
       .gte('start_time', range.startIso)
-      .lte('start_time', range.endIso);
+      .lte('start_time', range.endIso)
+      .order('start_time', { ascending: false });
 
     if (scopedProfessionalId) {
       query = query.eq('professional_id', scopedProfessionalId);
@@ -577,15 +609,28 @@ export class FinanceService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const rows = (data ?? []) as CompletedAppointmentRow[];
+    const rows = (data ?? []) as Parameters<
+      typeof mapFinanceReportAppointmentRow
+    >[0][];
+    const appointmentIds = rows.map((row) => row.id);
+    const payoutStatusByAppointment = tenantSettings.enable_payout_control
+      ? await this.loadPayoutStatusByAppointment(tenantId, appointmentIds)
+      : new Map<string, EmployeePayoutStatusRow>();
+
     const grouped = new Map<string, ProfessionalCommissionSummary>();
 
     for (const row of rows) {
-      const professionalName = this.resolveProfessionalName(row.professionals);
-      const existing = grouped.get(row.professional_id);
+      const mapped = mapFinanceReportAppointmentRow(row);
+      const payout = payoutStatusByAppointment.get(mapped.id);
+      const commissionItem = this.mapCommissionAppointmentItem(
+        mapped,
+        payout,
+        tenantSettings.enable_payout_control,
+      );
 
-      const revenue = Number(row.total_price ?? 0);
-      const commission = Number(row.commission_amount ?? 0);
+      const existing = grouped.get(row.professional_id);
+      const revenue = commissionItem.totalPrice;
+      const commission = commissionItem.commissionAmount;
 
       if (existing) {
         existing.totalRevenue = this.roundCurrency(
@@ -594,20 +639,36 @@ export class FinanceService {
         existing.totalCommissionDue = this.roundCurrency(
           existing.totalCommissionDue + commission,
         );
+        existing.appointmentCount += 1;
+        existing.items.push(commissionItem);
         continue;
       }
 
       grouped.set(row.professional_id, {
         professionalId: row.professional_id,
-        professionalName,
+        professionalName: mapped.professionalName,
         totalRevenue: this.roundCurrency(revenue),
         totalCommissionDue: this.roundCurrency(commission),
+        appointmentCount: 1,
+        items: [commissionItem],
       });
     }
 
-    return [...grouped.values()].sort((left, right) =>
-      left.professionalName.localeCompare(right.professionalName, 'pt-BR'),
-    );
+    const professionals = [...grouped.values()]
+      .map((summary) => ({
+        ...summary,
+        items: [...summary.items].sort((left, right) =>
+          right.startTime.localeCompare(left.startTime),
+        ),
+      }))
+      .sort((left, right) =>
+        left.professionalName.localeCompare(right.professionalName, 'pt-BR'),
+      );
+
+    return {
+      enablePayoutControl: tenantSettings.enable_payout_control,
+      professionals,
+    };
   }
 
   private mapFinanceReportAppointmentWithCommission(
@@ -748,8 +809,74 @@ export class FinanceService {
     };
   }
 
+  private mapCommissionAppointmentItem(
+    appointment: ReturnType<typeof mapFinanceReportAppointmentRow>,
+    payout: EmployeePayoutStatusRow | undefined,
+    enablePayoutControl: boolean,
+  ): CommissionAppointmentItem {
+    const durationMinutes = Math.max(
+      0,
+      differenceInMinutes(
+        parseISO(appointment.endTime),
+        parseISO(appointment.startTime),
+      ),
+    );
+
+    return {
+      appointmentId: appointment.id,
+      serviceName: appointment.serviceName,
+      customerName: appointment.customerName,
+      customerPhone: appointment.customerPhone,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
+      durationMinutes,
+      totalPrice: this.roundCurrency(appointment.totalPrice),
+      commissionAmount: this.roundCurrency(appointment.commissionAmount),
+      payoutStatus:
+        enablePayoutControl && payout
+          ? payout.status
+          : null,
+      paidAt: enablePayoutControl && payout ? payout.paid_at : null,
+    };
+  }
+
+  private async loadPayoutStatusByAppointment(
+    tenantId: string,
+    appointmentIds: string[],
+  ): Promise<Map<string, EmployeePayoutStatusRow>> {
+    if (appointmentIds.length === 0) {
+      return new Map();
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .select('appointment_id, status, paid_at')
+      .eq('tenant_id', tenantId)
+      .in('appointment_id', appointmentIds);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const map = new Map<string, EmployeePayoutStatusRow>();
+
+    for (const row of (data ?? []) as EmployeePayoutStatusRow[]) {
+      if (!row.appointment_id) {
+        continue;
+      }
+
+      map.set(row.appointment_id, row);
+    }
+
+    return map;
+  }
+
   private resolveProfessionalName(
-    relation: CompletedAppointmentRow['professionals'],
+    relation:
+      | { name: string }
+      | { name: string }[]
+      | null,
   ): string {
     if (!relation) {
       return 'Profissional';
