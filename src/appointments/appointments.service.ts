@@ -15,6 +15,8 @@ import {
   addMinutes,
   format,
   isAfter,
+  isToday,
+  parse,
   parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
@@ -191,6 +193,8 @@ export class AppointmentsService {
       'start_time' | 'end_time'
     >[];
 
+    const dayBase = parse(date, 'yyyy-MM-dd', new Date());
+    const now = new Date();
     const availableSlots: string[] = [];
     let slotStart = businessOpen;
 
@@ -203,7 +207,9 @@ export class AppointmentsService {
         return slotStart < appointmentEnd && slotEnd > appointmentStart;
       });
 
-      if (!hasConflict) {
+      const isFutureSlot = !isToday(dayBase) || isAfter(slotStart, now);
+
+      if (!hasConflict && isFutureSlot) {
         availableSlots.push(format(slotStart, 'HH:mm'));
       }
 

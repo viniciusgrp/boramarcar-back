@@ -61,6 +61,10 @@ export class ProfessionalHoursService {
       throw new InternalServerErrorException(deleteError.message);
     }
 
+    if (hours.length === 0) {
+      return [];
+    }
+
     const rows = hours.map((item) => ({
       tenant_id: tenantId,
       professional_id: professionalId,
@@ -218,7 +222,15 @@ export class ProfessionalHoursService {
   }
 
   private validateHoursPayload(hours: ProfessionalHourItemDto[]): void {
-    if (!Array.isArray(hours) || hours.length !== 7) {
+    if (!Array.isArray(hours)) {
+      throw new BadRequestException('Field "hours" must be an array.');
+    }
+
+    if (hours.length === 0) {
+      return;
+    }
+
+    if (hours.length !== 7) {
       throw new BadRequestException(
         'Field "hours" must contain exactly 7 days (0–6).',
       );
