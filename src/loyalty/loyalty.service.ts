@@ -227,6 +227,16 @@ export class LoyaltyService {
     };
   }
 
+  resolveCustomerReferralCodeForAppointment(
+    tenantId: string,
+    customerId: string,
+  ): Promise<string | null> {
+    return this.referralService.resolveCustomerReferralCodeForAppointment(
+      tenantId,
+      customerId,
+    );
+  }
+
   async getBookingLoyaltyFeedbackByAppointmentId(
     appointmentId: string,
   ): Promise<BookingLoyaltyFeedback> {

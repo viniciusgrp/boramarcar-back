@@ -206,6 +206,12 @@ export class ReferralService {
     tenantId: string,
     customerId: string,
   ): Promise<string | null> {
+    const tenantSettings = await this.loadTenantReferralSettings(tenantId);
+
+    if (!tenantSettings.enable_referral_program) {
+      return null;
+    }
+
     const customer = await this.loadCustomer(tenantId, customerId);
     const withCode = await this.ensureReferralCodeForCustomer(tenantId, customer);
 

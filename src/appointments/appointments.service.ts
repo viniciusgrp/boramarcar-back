@@ -380,7 +380,11 @@ export class AppointmentsService {
       return {
         appointment,
         loyaltyFeedback,
-        customerReferralCode: customer.referral_code,
+        customerReferralCode:
+          await this.loyaltyService.resolveCustomerReferralCodeForAppointment(
+            dto.tenantId,
+            customer.id,
+          ),
       };
     }
 
@@ -396,7 +400,11 @@ export class AppointmentsService {
       appointment,
       checkoutUrl,
       loyaltyFeedback,
-      customerReferralCode: customer.referral_code,
+      customerReferralCode:
+        await this.loyaltyService.resolveCustomerReferralCodeForAppointment(
+          dto.tenantId,
+          customer.id,
+        ),
     };
   }
 
