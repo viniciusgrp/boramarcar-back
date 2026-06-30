@@ -308,6 +308,8 @@ export class TenantUsersService {
       );
     }
 
+    await this.fulfillInviteMembership(invite, authData.user.id);
+
     return { email };
   }
 
@@ -324,36 +326,16 @@ export class TenantUsersService {
     const existingMembership = await this.findByUserId(user.id);
 
     if (existingMembership) {
+      if (existingMembership.tenant_id === invite.tenant_id) {
+        return existingMembership;
+      }
+
       throw new BadRequestException(
         'Esta conta já está vinculada a um estabelecimento.',
       );
     }
 
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('tenant_users')
-      .insert({
-        tenant_id: invite.tenant_id,
-        user_id: user.id,
-        role: normalizeUserRole(invite.role),
-        professional_id: invite.professional_id,
-      })
-      .select('*')
-      .single();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    await this.supabaseService
-      .getClient()
-      .from('tenant_user_invites')
-      .update({
-        accepted_at: new Date().toISOString(),
-      })
-      .eq('id', invite.id);
-
-    return mapTenantUserRow(data as TenantUserRow);
+    return this.fulfillInviteMembership(invite, user.id);
   }
 
   async createOwnerMembership(
@@ -591,6 +573,37 @@ export class TenantUsersService {
     }
 
     return data.user?.email?.trim() || 'Usuário sem e-mail';
+  }
+
+  private async fulfillInviteMembership(
+    invite: TenantUserInvite,
+    userId: string,
+  ): Promise<TenantUser> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .insert({
+        tenant_id: invite.tenant_id,
+        user_id: userId,
+        role: normalizeUserRole(invite.role),
+        professional_id: invite.professional_id,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .update({
+        accepted_at: new Date().toISOString(),
+      })
+      .eq('id', invite.id);
+
+    return mapTenantUserRow(data as TenantUserRow);
   }
 
   private async findInviteByToken(token: string): Promise<TenantUserInvite> {
