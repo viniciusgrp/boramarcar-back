@@ -26,6 +26,7 @@ import type { Customer } from './entities/customer.entity';
 import type { LoyaltyPublicProfile } from './entities/loyalty-public-profile.entity';
 import type { LoyaltyReward } from './entities/loyalty-reward.entity';
 import type { LoyaltySettings } from './entities/loyalty-settings.entity';
+import type { LoyaltyRedemptionHistoryItem } from './entities/loyalty-redemption-history.entity';
 import type { LoyaltyTransaction } from './entities/loyalty-transaction.entity';
 import { LoyaltyService } from './loyalty.service';
 
@@ -58,6 +59,15 @@ export class LoyaltyController {
   async findManagedRewards(@CurrentUser() user: User): Promise<LoyaltyReward[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.loyaltyService.findRewardsManagedByTenant(tenant.id);
+  }
+
+  @Get('redemptions/managed')
+  @UseGuards(AuthGuard, TenantAccessGuard)
+  async findManagedRedemptions(
+    @CurrentUser() user: User,
+  ): Promise<LoyaltyRedemptionHistoryItem[]> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.loyaltyService.findRedemptionHistoryForTenant(tenant.id);
   }
 
   @Post('rewards')

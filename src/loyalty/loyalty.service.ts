@@ -12,6 +12,7 @@ import { UpdateLoyaltySettingsDto } from './dto/update-loyalty-settings.dto';
 import type { BookingLoyaltyFeedback } from './entities/booking-loyalty-feedback.entity';
 import type { Customer } from './entities/customer.entity';
 import type { LoyaltyPublicProfile } from './entities/loyalty-public-profile.entity';
+import type { LoyaltyRedemptionHistoryItem } from './entities/loyalty-redemption-history.entity';
 import type { LoyaltyReward } from './entities/loyalty-reward.entity';
 import type { LoyaltySettings } from './entities/loyalty-settings.entity';
 import type { LoyaltyTransaction } from './entities/loyalty-transaction.entity';
@@ -23,6 +24,10 @@ import {
   calculateEarnedPoints,
   normalizePhoneKey,
 } from './utils/loyalty-points.util';
+import {
+  parseRewardTitleFromRedemptionDescription,
+  resolveRedemptionSource,
+} from './utils/loyalty-redemption-description.util';
 import { ReferralService } from './referral.service';
 
 @Injectable()
@@ -93,6 +98,41 @@ export class LoyaltyService {
     }
 
     return (data ?? []).map((row) => this.mapRewardRow(row as LoyaltyReward));
+  }
+
+  async findRedemptionHistoryForTenant(
+    tenantId: string,
+  ): Promise<LoyaltyRedemptionHistoryItem[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('loyalty_transactions')
+      .select(
+        `
+        id,
+        customer_id,
+        points,
+        description,
+        appointment_id,
+        created_at,
+        customers ( name, phone ),
+        appointments ( start_time )
+      `,
+      )
+      .eq('tenant_id', tenantId)
+      .eq('type', 'REDEEMED')
+      .ilike('description', 'Resgate%')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? []).map((row) =>
+      this.mapRedemptionHistoryRow(
+        row as Parameters<typeof this.mapRedemptionHistoryRow>[0],
+      ),
+    );
   }
 
   async createRewardForTenant(
@@ -1141,6 +1181,47 @@ export class LoyaltyService {
       referral_code: row.referral_code ?? null,
       referred_by_id: row.referred_by_id ?? null,
       points_balance: Number(row.points_balance ?? 0),
+    };
+  }
+
+  private mapRedemptionHistoryRow(row: {
+    id: string;
+    customer_id: string;
+    points: number | string;
+    description: string;
+    appointment_id: string | null;
+    created_at: string;
+    customers:
+      | { name: string; phone: string }
+      | { name: string; phone: string }[]
+      | null;
+    appointments:
+      | { start_time: string }
+      | { start_time: string }[]
+      | null;
+  }): LoyaltyRedemptionHistoryItem {
+    const customerRelation = row.customers;
+    const customer = Array.isArray(customerRelation)
+      ? customerRelation[0]
+      : customerRelation;
+
+    const appointmentRelation = row.appointments;
+    const appointment = Array.isArray(appointmentRelation)
+      ? appointmentRelation[0]
+      : appointmentRelation;
+
+    return {
+      id: row.id,
+      customer_id: row.customer_id,
+      customer_name: customer?.name?.trim() || 'Cliente',
+      customer_phone: customer?.phone?.trim() || '',
+      reward_title: parseRewardTitleFromRedemptionDescription(row.description),
+      points: Number(row.points ?? 0),
+      description: row.description,
+      appointment_id: row.appointment_id,
+      appointment_start_time: appointment?.start_time ?? null,
+      created_at: row.created_at,
+      source: resolveRedemptionSource(row.description),
     };
   }
 
