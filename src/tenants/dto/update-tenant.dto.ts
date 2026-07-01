@@ -18,6 +18,7 @@ export class UpdateTenantDto {
   addressState?: string | null;
   requireDeposit!: boolean;
   requireCustomerEmailConfirmation?: boolean;
+  allowCustomerSelfCancellation?: boolean;
   bookingAcceptanceType!: TenantBookingAcceptanceType;
   calendarCardPreferences?: CalendarCardPreferences;
   enablePayoutControl?: boolean;

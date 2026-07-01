@@ -748,6 +748,7 @@ export class AppointmentsService {
       this.mapCustomerAppointmentRow(row, now, {
         id: tenant.id,
         slug: tenant.slug,
+        allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
       }),
     );
   }
@@ -775,6 +776,7 @@ export class AppointmentsService {
           id: context.tenantId,
           name: context.tenantName,
           slug: context.tenantSlug,
+          allowCustomerSelfCancellation: context.allowCustomerSelfCancellation,
         },
       ]),
     );
@@ -820,6 +822,7 @@ export class AppointmentsService {
         this.mapCustomerAppointmentRow(row, now, {
           id: tenant.id,
           slug: tenant.slug,
+          allowCustomerSelfCancellation: tenant.allowCustomerSelfCancellation,
         }),
       );
       grouped.set(tenant.id, existingGroup);
@@ -871,6 +874,12 @@ export class AppointmentsService {
       );
     }
 
+    const tenant = await this.tenantsService.findById(trimmedTenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
     const { data: existing, error: fetchError } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -905,6 +914,50 @@ export class AppointmentsService {
       );
     }
 
+    if (tenant.allow_customer_self_cancellation) {
+      await this.updateStatusForTenant(
+        trimmedTenantId,
+        trimmedAppointmentId,
+        'CANCELLED',
+      );
+
+      const { data: updated, error: reloadError } = await this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select(ADMIN_APPOINTMENT_SELECT)
+        .eq('id', trimmedAppointmentId)
+        .eq('tenant_id', trimmedTenantId)
+        .eq('customer_id', customer.customer.id)
+        .maybeSingle();
+
+      if (reloadError) {
+        throw new InternalServerErrorException(reloadError.message);
+      }
+
+      if (!updated) {
+        throw new NotFoundException('Agendamento não encontrado.');
+      }
+
+      const context = await this.loadAppointmentEmailContext(
+        trimmedTenantId,
+        trimmedAppointmentId,
+      );
+
+      this.dispatchCustomerCancelledEmail(context);
+
+      return this.mapCustomerAppointmentRow(
+        updated as SupabaseAppointmentWithRelations & {
+          cancellation_requested_at?: string | null;
+        },
+        now,
+        {
+          id: tenant.id,
+          slug: tenant.slug,
+          allowCustomerSelfCancellation: true,
+        },
+      );
+    }
+
     const requestedAt = now.toISOString();
 
     const { error: updateError } = await this.supabaseService
@@ -926,20 +979,17 @@ export class AppointmentsService {
 
     this.dispatchCancellationRequestEmail(context);
 
-    const tenant = await this.tenantsService.findById(trimmedTenantId);
-
     return this.mapCustomerAppointmentRow(
       {
         ...row,
         cancellation_requested_at: requestedAt,
       },
       now,
-      tenant
-        ? {
-            id: tenant.id,
-            slug: tenant.slug,
-          }
-        : undefined,
+      {
+        id: tenant.id,
+        slug: tenant.slug,
+        allowCustomerSelfCancellation: false,
+      },
     );
   }
 
@@ -1263,7 +1313,11 @@ export class AppointmentsService {
       cancellation_requested_at?: string | null;
     },
     now: Date,
-    tenant?: { id: string; slug: string },
+    tenant?: {
+      id: string;
+      slug: string;
+      allowCustomerSelfCancellation?: boolean;
+    },
   ): CustomerAppointment {
     const adminAppointment = this.mapAdminAppointmentRow(row);
 
@@ -1277,6 +1331,7 @@ export class AppointmentsService {
       durationMinutes: adminAppointment.durationMinutes,
       cancellationRequestedAt: row.cancellation_requested_at ?? null,
       canRequestCancellation: this.canCustomerRequestCancellation(row, now),
+      allowsAutomaticCancellation: Boolean(tenant?.allowCustomerSelfCancellation),
       tenantId: tenant?.id ?? '',
       tenantSlug: tenant?.slug ?? '',
     };
@@ -1349,6 +1404,42 @@ export class AppointmentsService {
             : 'Unknown cancellation request email error';
         this.logger.error(
           `Failed to send cancellation request for appointment ${context.appointment.id}: ${message}`,
+        );
+      });
+  }
+
+  private dispatchCustomerCancelledEmail(context: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    void this.resolveTenantOwnerEmail(context.tenant.owner_id)
+      .then((ownerEmail) => {
+        if (!ownerEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentCancelledByCustomerOwner(
+          ownerEmail,
+          {
+            customerName: context.appointment.customer_name,
+            customerEmail: context.customer.email?.trim() ?? '',
+            serviceName: context.serviceName,
+            professionalName: context.professionalName,
+            startTime: context.appointment.start_time,
+          },
+          context.tenant,
+        );
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown customer cancellation email error';
+        this.logger.error(
+          `Failed to send customer cancellation for appointment ${context.appointment.id}: ${message}`,
         );
       });
   }
@@ -1905,6 +1996,7 @@ export class AppointmentsService {
       contact_phone: null,
       require_deposit: false,
       require_customer_email_confirmation: false,
+      allow_customer_self_cancellation: false,
       booking_acceptance_type: 'AUTOMATIC',
       owner_id: null,
       stripe_customer_id: null,

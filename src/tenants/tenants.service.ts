@@ -83,6 +83,9 @@ function mapTenantRow(row: Tenant): Tenant {
     require_customer_email_confirmation: Boolean(
       row.require_customer_email_confirmation,
     ),
+    allow_customer_self_cancellation: Boolean(
+      row.allow_customer_self_cancellation,
+    ),
   };
 }
 
@@ -263,6 +266,9 @@ export class TenantsService {
         require_customer_email_confirmation:
           dto.requireCustomerEmailConfirmation ??
           tenant.require_customer_email_confirmation,
+        allow_customer_self_cancellation:
+          dto.allowCustomerSelfCancellation ??
+          tenant.allow_customer_self_cancellation,
         booking_acceptance_type: normalizeTenantBookingAcceptanceType(
           dto.bookingAcceptanceType,
         ),

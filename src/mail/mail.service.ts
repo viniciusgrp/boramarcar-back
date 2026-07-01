@@ -119,6 +119,24 @@ export class MailService {
     });
   }
 
+  async sendAppointmentCancelledByCustomerOwner(
+    ownerEmail: string,
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Agendamento cancelado pelo cliente - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Agendamento cancelado pelo cliente',
+        intro:
+          'Um cliente cancelou o agendamento abaixo. O horário já foi liberado na agenda.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
   async sendTeamInvite(params: {
     recipientEmail: string;
     tenantName: string;
