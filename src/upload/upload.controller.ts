@@ -16,6 +16,7 @@ import { resolveAuthUserId } from '../auth/utils/resolve-auth-user-id.util';
 import { CustomersService } from '../customers/customers.service';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
+import { MAX_FILE_SIZE_BYTES } from './upload.constants';
 import { UploadService, type UploadedImageFile } from './upload.service';
 
 @Controller('upload')
@@ -30,7 +31,7 @@ export class UploadController {
   @UseGuards(AuthGuard)
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
     }),
   )
   async uploadCustomerImage(
@@ -68,7 +69,7 @@ export class UploadController {
   @UseGuards(AuthGuard, TenantAccessGuard)
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
     }),
   )
   async uploadImage(
