@@ -64,12 +64,17 @@ export function extractLoyaltyPointsEarnedFromRelation(
 export function calculateAppointmentLoyaltyPoints(
   serviceLines: AppointmentLoyaltyServiceLine[],
   pointsPerCurrency: number,
+  defaultServicePoints: number,
 ): number {
   if (serviceLines.length === 0) {
     return 0;
   }
 
   let totalPoints = 0;
+  const safeDefaultServicePoints =
+    Number.isFinite(defaultServicePoints) && defaultServicePoints > 0
+      ? Math.floor(defaultServicePoints)
+      : 0;
 
   for (const line of serviceLines) {
     if (hasServiceSpecificLoyaltyPoints(line.loyaltyPointsEarned)) {
@@ -77,7 +82,10 @@ export function calculateAppointmentLoyaltyPoints(
       continue;
     }
 
-    totalPoints += calculateEarnedPoints(line.price, pointsPerCurrency);
+    totalPoints +=
+      pointsPerCurrency > 0
+        ? calculateEarnedPoints(line.price, pointsPerCurrency)
+        : safeDefaultServicePoints;
   }
 
   return totalPoints;

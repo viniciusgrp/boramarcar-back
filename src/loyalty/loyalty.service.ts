@@ -66,6 +66,7 @@ export class LoyaltyService {
       tenant_id: tenantId,
       is_active: dto.isActive,
       points_per_currency: dto.pointsPerCurrency,
+      default_service_points: dto.defaultServicePoints ?? 0,
       expiration_days: dto.expirationDays ?? null,
       welcome_bonus: dto.welcomeBonus,
       updated_at: new Date().toISOString(),
@@ -79,6 +80,18 @@ export class LoyaltyService {
       .single();
 
     if (error) {
+      if (error.message.includes('loyalty_settings_points_per_currency_check')) {
+        throw new BadRequestException(
+          'A regra por valor deve ser maior que zero. Para pontuar por serviço, selecione o modo "Por serviço".',
+        );
+      }
+
+      if (error.message.includes('default_service_points')) {
+        throw new BadRequestException(
+          'Os pontos padrão por serviço devem ser maiores ou iguais a zero.',
+        );
+      }
+
       throw new InternalServerErrorException(error.message);
     }
 
@@ -671,6 +684,7 @@ export class LoyaltyService {
       ? calculateAppointmentLoyaltyPoints(
           params.serviceLines,
           settings.points_per_currency,
+          settings.default_service_points,
         )
       : calculateEarnedPoints(
           params.totalPrice,
@@ -1115,15 +1129,25 @@ export class LoyaltyService {
   }
 
   private validateSettingsPayload(dto: UpdateLoyaltySettingsDto): void {
-    if (dto.pointsPerCurrency < 0) {
+    if (!Number.isFinite(dto.pointsPerCurrency) || dto.pointsPerCurrency < 0) {
       throw new BadRequestException(
-        'Field "pointsPerCurrency" cannot be negative',
+        'Field "pointsPerCurrency" must be greater than or equal to zero',
       );
     }
 
-    if (dto.welcomeBonus < 0) {
+    if (!Number.isInteger(dto.welcomeBonus) || dto.welcomeBonus < 0) {
       throw new BadRequestException(
-        'Field "welcomeBonus" cannot be negative',
+        'Field "welcomeBonus" must be an integer greater than or equal to zero',
+      );
+    }
+
+    if (
+      dto.defaultServicePoints !== undefined &&
+      (!Number.isInteger(dto.defaultServicePoints) ||
+        dto.defaultServicePoints < 0)
+    ) {
+      throw new BadRequestException(
+        'Field "defaultServicePoints" must be an integer greater than or equal to zero',
       );
     }
 
@@ -1143,6 +1167,7 @@ export class LoyaltyService {
       tenant_id: tenantId,
       is_active: false,
       points_per_currency: 1,
+      default_service_points: 0,
       expiration_days: null,
       welcome_bonus: 0,
       updated_at: new Date().toISOString(),
@@ -1153,6 +1178,7 @@ export class LoyaltyService {
     return {
       ...row,
       points_per_currency: Number(row.points_per_currency),
+      default_service_points: Number(row.default_service_points ?? 0),
       expiration_days:
         row.expiration_days === null || row.expiration_days === undefined
           ? null
