@@ -410,6 +410,95 @@ export class TenantUsersService {
     return mapTenantUserRow(data as TenantUserRow);
   }
 
+  async linkOwnerProfessionalMembership(
+    tenantId: string,
+    userId: string,
+    professionalId: string,
+  ): Promise<TenantUser> {
+    await this.assertProfessionalNotLinkedToMember(tenantId, professionalId);
+
+    const existing = await this.findByUserId(userId);
+
+    if (existing) {
+      if (existing.tenant_id !== tenantId) {
+        throw new BadRequestException(
+          'Esta conta está vinculada a outro estabelecimento.',
+        );
+      }
+
+      if (existing.role !== 'OWNER') {
+        throw new ForbiddenException(
+          'Somente o dono pode vincular um perfil de atendimento.',
+        );
+      }
+
+      if (existing.professional_id) {
+        throw new BadRequestException(
+          'Você já possui um perfil de atendimento vinculado.',
+        );
+      }
+
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('tenant_users')
+        .update({
+          professional_id: professionalId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+        .eq('tenant_id', tenantId)
+        .select('*')
+        .single();
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      return mapTenantUserRow(data as TenantUserRow);
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .insert({
+        tenant_id: tenantId,
+        user_id: userId,
+        role: 'OWNER',
+        professional_id: professionalId,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return mapTenantUserRow(data as TenantUserRow);
+  }
+
+  private async assertProfessionalNotLinkedToMember(
+    tenantId: string,
+    professionalId: string,
+  ): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (data) {
+      throw new BadRequestException(
+        'Este profissional já está vinculado a outro membro da equipe.',
+      );
+    }
+  }
+
   async updateRoleForTenant(
     tenantId: string,
     tenantUserId: string,

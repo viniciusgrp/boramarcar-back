@@ -20,11 +20,13 @@ import type { TenantAccessContext } from '../tenants/entities/tenant-access-cont
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
-import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
+import { resolveLinkedProfessionalId, resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
+import { LinkOwnerProfessionalDto } from './dto/link-owner-professional.dto';
 import { UpdateProfessionalSelfDto } from './dto/update-professional-self.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
+import type { OwnerProfessionalMembershipResponse } from './entities/owner-professional-membership-response.entity';
 import { ProfessionalsService } from './professionals.service';
 
 @Controller('professionals')
@@ -74,40 +76,69 @@ export class ProfessionalsController {
   async findMyProfile(
     @CurrentTenantContext() context: TenantAccessContext,
   ): Promise<Professional | null> {
-    const scopedProfessionalId = resolveScopedProfessionalId(
+    const linkedProfessionalId = resolveLinkedProfessionalId(
       context.tenantUser,
     );
 
-    if (!scopedProfessionalId) {
+    if (!linkedProfessionalId) {
       return null;
     }
 
     return this.professionalsService.findOneWithServices(
-      scopedProfessionalId,
+      linkedProfessionalId,
       context.tenant.id,
     );
   }
 
   @Put('me')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('PROFESSIONAL')
+  @Roles('OWNER', 'PROFESSIONAL')
   async updateMyProfile(
     @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: UpdateProfessionalSelfDto,
   ): Promise<Professional> {
-    const scopedProfessionalId = resolveScopedProfessionalId(
+    const linkedProfessionalId = resolveLinkedProfessionalId(
       context.tenantUser,
     );
+
+    if (!linkedProfessionalId) {
+      throw new BadRequestException(
+        'Cadastre-se como profissional antes de editar o perfil de atendimento.',
+      );
+    }
 
     return this.professionalsService.updateForTenant(
       context.tenant.id,
       context.tenant.plan_tier,
-      scopedProfessionalId!,
+      linkedProfessionalId,
       {
         name: dto.name,
         avatarUrl: dto.avatarUrl,
         contactPhone: dto.contactPhone,
       },
+    );
+  }
+
+  @Post('me/register')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  async registerOwnerAsProfessional(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Body() dto: CreateProfessionalDto,
+  ): Promise<OwnerProfessionalMembershipResponse> {
+    return this.professionalsService.registerOwnerAsProfessional(context, dto);
+  }
+
+  @Post('me/link')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  async linkOwnerToExistingProfessional(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Body() dto: LinkOwnerProfessionalDto,
+  ): Promise<OwnerProfessionalMembershipResponse> {
+    return this.professionalsService.linkOwnerToExistingProfessional(
+      context,
+      dto.professionalId,
     );
   }
 

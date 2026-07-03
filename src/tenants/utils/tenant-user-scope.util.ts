@@ -1,6 +1,14 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { TenantUser } from '../entities/tenant-user.entity';
 
+export function resolveLinkedProfessionalId(
+  tenantUser: TenantUser,
+): string | null {
+  const professionalId = tenantUser.professional_id?.trim();
+
+  return professionalId ? professionalId : null;
+}
+
 export function resolveScopedProfessionalId(
   tenantUser: TenantUser,
 ): string | undefined {

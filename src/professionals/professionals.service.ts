@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
+import { TenantUsersService } from '../tenants/tenant-users.service';
 import {
   canAddActiveProfessional,
   getProfessionalLimitMessage,
@@ -14,6 +17,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
+import type { OwnerProfessionalMembershipResponse } from './entities/owner-professional-membership-response.entity';
 import { resolveProfessionalCommissionPercent } from './utils/professional-commission.util';
 
 const PROFESSIONAL_WITH_SERVICES_SELECT =
@@ -21,7 +25,10 @@ const PROFESSIONAL_WITH_SERVICES_SELECT =
 
 @Injectable()
 export class ProfessionalsService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly tenantUsersService: TenantUsersService,
+  ) {}
 
   async findAllByTenant(tenantId: string): Promise<Professional[]> {
     const { data, error } = await this.supabaseService
@@ -287,6 +294,86 @@ export class ProfessionalsService {
     }
 
     return this.mapProfessionalRow(data as Professional);
+  }
+
+  async registerOwnerAsProfessional(
+    accessContext: TenantAccessContext,
+    dto: CreateProfessionalDto,
+  ): Promise<OwnerProfessionalMembershipResponse> {
+    this.assertOwnerCanLinkProfessional(accessContext);
+
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('Field "name" is required');
+    }
+
+    const professional = await this.createForTenant(
+      accessContext.tenant.id,
+      accessContext.tenant.plan_tier,
+      dto,
+    );
+
+    const updatedMembership =
+      await this.tenantUsersService.linkOwnerProfessionalMembership(
+        accessContext.tenant.id,
+        accessContext.tenantUser.user_id,
+        professional.id,
+      );
+
+    return {
+      professional,
+      membership: this.tenantUsersService.mapMembershipSummary(updatedMembership),
+    };
+  }
+
+  async linkOwnerToExistingProfessional(
+    accessContext: TenantAccessContext,
+    professionalId: string,
+  ): Promise<OwnerProfessionalMembershipResponse> {
+    this.assertOwnerCanLinkProfessional(accessContext);
+
+    const trimmedProfessionalId = professionalId.trim();
+
+    if (!trimmedProfessionalId) {
+      throw new BadRequestException('Field "professionalId" is required');
+    }
+
+    await this.assertProfessionalBelongsToTenant(
+      trimmedProfessionalId,
+      accessContext.tenant.id,
+    );
+
+    const professional = await this.findOneWithServices(
+      trimmedProfessionalId,
+      accessContext.tenant.id,
+    );
+
+    const updatedMembership =
+      await this.tenantUsersService.linkOwnerProfessionalMembership(
+        accessContext.tenant.id,
+        accessContext.tenantUser.user_id,
+        professional.id,
+      );
+
+    return {
+      professional,
+      membership: this.tenantUsersService.mapMembershipSummary(updatedMembership),
+    };
+  }
+
+  private assertOwnerCanLinkProfessional(
+    accessContext: TenantAccessContext,
+  ): void {
+    if (accessContext.tenantUser.role !== 'OWNER') {
+      throw new ForbiddenException(
+        'Somente o dono pode se cadastrar como profissional.',
+      );
+    }
+
+    if (accessContext.tenantUser.professional_id) {
+      throw new BadRequestException(
+        'Você já está cadastrado como profissional.',
+      );
+    }
   }
 
   private mapProfessionalRow(row: Professional): Professional {
