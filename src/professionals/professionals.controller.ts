@@ -22,6 +22,7 @@ import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
+import { UpdateProfessionalSelfDto } from './dto/update-professional-self.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
 import { ProfessionalsService } from './professionals.service';
@@ -64,6 +65,49 @@ export class ProfessionalsController {
 
     return activeProfessionals.filter(
       (item) => item.id === scopedProfessionalId,
+    );
+  }
+
+  @Get('me')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'PROFESSIONAL')
+  async findMyProfile(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<Professional | null> {
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    if (!scopedProfessionalId) {
+      return null;
+    }
+
+    return this.professionalsService.findOneWithServices(
+      scopedProfessionalId,
+      context.tenant.id,
+    );
+  }
+
+  @Put('me')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('PROFESSIONAL')
+  async updateMyProfile(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Body() dto: UpdateProfessionalSelfDto,
+  ): Promise<Professional> {
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.professionalsService.updateForTenant(
+      context.tenant.id,
+      context.tenant.plan_tier,
+      scopedProfessionalId!,
+      {
+        name: dto.name,
+        avatarUrl: dto.avatarUrl,
+        contactPhone: dto.contactPhone,
+      },
     );
   }
 

@@ -46,3 +46,18 @@ export function assertProfessionalScopeForMutation(
     );
   }
 }
+
+export function assertProfessionalSelfScope(
+  scopedProfessionalId: string | undefined,
+  resourceProfessionalId: string,
+): void {
+  if (!scopedProfessionalId) {
+    return;
+  }
+
+  if (resourceProfessionalId !== scopedProfessionalId) {
+    throw new ForbiddenException(
+      'Você só pode alterar o seu próprio perfil.',
+    );
+  }
+}
