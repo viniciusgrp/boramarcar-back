@@ -125,15 +125,34 @@ export class AppointmentsController {
   getAvailability(
     @Query('tenantId') tenantId?: string,
     @Query('professionalId') professionalId?: string,
+    @Query('anyProfessional') anyProfessional?: string,
     @Query('serviceId') serviceId?: string,
     @Query('serviceIds') serviceIds?: string,
     @Query('date') date?: string,
   ): Promise<{ slots: string[] }> {
     const resolvedServiceIds = parseServiceIdsQuery(serviceId, serviceIds);
+    const useAnyProfessional =
+      anyProfessional === 'true' || professionalId?.trim() === 'any';
 
-    if (!tenantId || !professionalId || !date || resolvedServiceIds.length === 0) {
+    if (!tenantId || !date || resolvedServiceIds.length === 0) {
       throw new BadRequestException(
-        'Query parameters "tenantId", "professionalId", "date" and at least one service id ("serviceIds" or "serviceId") are required',
+        'Query parameters "tenantId", "date" and at least one service id ("serviceIds" or "serviceId") are required',
+      );
+    }
+
+    if (useAnyProfessional) {
+      return this.appointmentsService
+        .getAvailabilityForAnyProfessional(
+          tenantId,
+          resolvedServiceIds,
+          date,
+        )
+        .then((slots) => ({ slots }));
+    }
+
+    if (!professionalId?.trim()) {
+      throw new BadRequestException(
+        'Query parameter "professionalId" is required unless "anyProfessional" is true',
       );
     }
 

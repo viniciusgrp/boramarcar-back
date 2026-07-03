@@ -8,6 +8,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
+import { randomInt } from 'crypto';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
@@ -32,6 +33,7 @@ import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
 import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/professional-absence-range.dto';
+import { ProfessionalsService } from '../professionals/professionals.service';
 import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -141,6 +143,7 @@ export class AppointmentsService {
     private readonly supabaseService: SupabaseService,
     private readonly professionalHoursService: ProfessionalHoursService,
     private readonly professionalAbsencesService: ProfessionalAbsencesService,
+    private readonly professionalsService: ProfessionalsService,
     private readonly tenantsService: TenantsService,
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
@@ -157,7 +160,67 @@ export class AppointmentsService {
     date: string,
   ): Promise<string[]> {
     const booking = await this.resolveBookingServices(tenantId, serviceIds);
-    const durationMinutes = booking.totalDurationMinutes;
+    const tenant = await this.tenantsService.findById(tenantId);
+    const slotIntervalMinutes = normalizeBookingSlotIntervalMinutes(
+      tenant?.booking_slot_interval_minutes,
+    );
+
+    return this.computeAvailableSlotsForProfessional(
+      tenantId,
+      professionalId,
+      date,
+      booking.totalDurationMinutes,
+      slotIntervalMinutes,
+    );
+  }
+
+  async getAvailabilityForAnyProfessional(
+    tenantId: string,
+    serviceIds: string[],
+    date: string,
+  ): Promise<string[]> {
+    const professionals =
+      await this.professionalsService.findActivePerformingAllServices(
+        tenantId,
+        serviceIds,
+      );
+
+    if (professionals.length === 0) {
+      return [];
+    }
+
+    const booking = await this.resolveBookingServices(tenantId, serviceIds);
+    const tenant = await this.tenantsService.findById(tenantId);
+    const slotIntervalMinutes = normalizeBookingSlotIntervalMinutes(
+      tenant?.booking_slot_interval_minutes,
+    );
+
+    const slotSet = new Set<string>();
+
+    for (const professional of professionals) {
+      const slots = await this.computeAvailableSlotsForProfessional(
+        tenantId,
+        professional.id,
+        date,
+        booking.totalDurationMinutes,
+        slotIntervalMinutes,
+      );
+
+      for (const slot of slots) {
+        slotSet.add(slot);
+      }
+    }
+
+    return [...slotSet].sort((left, right) => left.localeCompare(right));
+  }
+
+  private async computeAvailableSlotsForProfessional(
+    tenantId: string,
+    professionalId: string,
+    date: string,
+    durationMinutes: number,
+    slotIntervalMinutes: number,
+  ): Promise<string[]> {
     const schedule =
       await this.professionalHoursService.getEffectiveScheduleForDate(
         tenantId,
@@ -171,10 +234,6 @@ export class AppointmentsService {
 
     const businessOpen = schedule.openAt;
     const businessClose = schedule.closeAt;
-    const tenant = await this.tenantsService.findById(tenantId);
-    const slotIntervalMinutes = normalizeBookingSlotIntervalMinutes(
-      tenant?.booking_slot_interval_minutes,
-    );
 
     const dayStartIso = `${date}T00:00:00`;
     const dayEndIso = `${date}T23:59:59`;
@@ -263,9 +322,30 @@ export class AppointmentsService {
     const startTime = parseISO(dto.startTime);
     const endTime = addMinutes(startTime, booking.totalDurationMinutes);
 
+    let professionalId = dto.professionalId?.trim() ?? '';
+
+    if (dto.assignAnyProfessional) {
+      professionalId = await this.assignRandomAvailableProfessional(
+        dto.tenantId,
+        serviceIds,
+        startTime,
+        endTime,
+      );
+    } else {
+      if (!professionalId) {
+        throw new BadRequestException('Field "professionalId" is required');
+      }
+
+      await this.professionalsService.assertProfessionalPerformsAllServices(
+        dto.tenantId,
+        professionalId,
+        serviceIds,
+      );
+    }
+
     const hasConflict = await this.hasBookingConflict(
       dto.tenantId,
-      dto.professionalId,
+      professionalId,
       startTime,
       endTime,
     );
@@ -279,7 +359,7 @@ export class AppointmentsService {
     const hasAbsenceConflict =
       await this.professionalAbsencesService.hasAbsenceOverlap(
         dto.tenantId,
-        dto.professionalId,
+        professionalId,
         startTime,
         endTime,
       );
@@ -340,7 +420,7 @@ export class AppointmentsService {
     const professionalBookingSettings =
       await this.resolveProfessionalBookingSettings(
         dto.tenantId,
-        dto.professionalId,
+        professionalId,
       );
     const effectiveBookingAcceptance = resolveEffectiveBookingAcceptance(
       tenant.booking_acceptance_type,
@@ -373,7 +453,7 @@ export class AppointmentsService {
       .from('appointments')
       .insert({
         tenant_id: dto.tenantId,
-        professional_id: dto.professionalId,
+        professional_id: professionalId,
         service_id: primaryServiceId,
         customer_id: customer.id,
         customer_name: customer.name.trim(),
@@ -2247,11 +2327,7 @@ export class AppointmentsService {
     dto: CreateAppointmentDto,
     authUserId?: string,
   ): void {
-    const requiredFields: (keyof CreateAppointmentDto)[] = [
-      'tenantId',
-      'professionalId',
-      'startTime',
-    ];
+    const requiredFields: (keyof CreateAppointmentDto)[] = ['tenantId', 'startTime'];
 
     const hasMissingField = requiredFields.some(
       (field) => !dto[field]?.toString().trim(),
@@ -2259,6 +2335,12 @@ export class AppointmentsService {
 
     if (hasMissingField) {
       throw new BadRequestException('All appointment fields are required');
+    }
+
+    if (!dto.assignAnyProfessional && !dto.professionalId?.trim()) {
+      throw new BadRequestException(
+        'Field "professionalId" is required unless "assignAnyProfessional" is true',
+      );
     }
 
     if (
@@ -2275,6 +2357,80 @@ export class AppointmentsService {
         'At least one service must be provided via "serviceIds" or "serviceId"',
       );
     }
+  }
+
+  private async assignRandomAvailableProfessional(
+    tenantId: string,
+    serviceIds: string[],
+    startTime: Date,
+    endTime: Date,
+  ): Promise<string> {
+    const professionals =
+      await this.professionalsService.findActivePerformingAllServices(
+        tenantId,
+        serviceIds,
+      );
+
+    if (professionals.length === 0) {
+      throw new BadRequestException(
+        'Nenhum profissional disponível para os serviços selecionados.',
+      );
+    }
+
+    const dateKey = format(startTime, 'yyyy-MM-dd');
+    const availableProfessionalIds: string[] = [];
+
+    for (const professional of professionals) {
+      const schedule =
+        await this.professionalHoursService.getEffectiveScheduleForDate(
+          tenantId,
+          professional.id,
+          dateKey,
+        );
+
+      if (!schedule || schedule.isClosed) {
+        continue;
+      }
+
+      if (startTime < schedule.openAt || endTime > schedule.closeAt) {
+        continue;
+      }
+
+      const hasConflict = await this.hasBookingConflict(
+        tenantId,
+        professional.id,
+        startTime,
+        endTime,
+      );
+
+      if (hasConflict) {
+        continue;
+      }
+
+      const hasAbsenceConflict =
+        await this.professionalAbsencesService.hasAbsenceOverlap(
+          tenantId,
+          professional.id,
+          startTime,
+          endTime,
+        );
+
+      if (hasAbsenceConflict) {
+        continue;
+      }
+
+      availableProfessionalIds.push(professional.id);
+    }
+
+    if (availableProfessionalIds.length === 0) {
+      throw new ConflictException(
+        'Este horário não está mais disponível. Escolha outro horário.',
+      );
+    }
+
+    return availableProfessionalIds[
+      randomInt(availableProfessionalIds.length)
+    ] as string;
   }
 
   private assertAppointmentProfessionalScope(

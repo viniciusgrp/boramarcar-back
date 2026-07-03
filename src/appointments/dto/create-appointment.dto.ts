@@ -1,6 +1,6 @@
 export class CreateAppointmentDto {
   tenantId!: string;
-  professionalId!: string;
+  professionalId?: string;
   /** @deprecated Use serviceIds. Kept for backward compatibility. */
   serviceId?: string;
   serviceIds?: string[];
@@ -9,4 +9,5 @@ export class CreateAppointmentDto {
   startTime!: string;
   loyaltyRewardId?: string;
   referralCode?: string;
+  assignAnyProfessional?: boolean;
 }

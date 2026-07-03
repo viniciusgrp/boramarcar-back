@@ -7,6 +7,7 @@ import { FinanceModule } from '../finance/finance.module';
 import { MailModule } from '../mail/mail.module';
 import { ProfessionalHoursModule } from '../professional-hours/professional-hours.module';
 import { ProfessionalAbsencesModule } from '../professional-absences/professional-absences.module';
+import { ProfessionalsModule } from '../professionals/professionals.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { AppointmentReminderCron } from './appointment-reminder.cron';
 import { DepositHoldExpirationCron } from './deposit-hold-expiration.cron';
@@ -17,6 +18,7 @@ import { AppointmentsService } from './appointments.service';
   imports: [
     AuthModule,
     TenantsModule,
+    ProfessionalsModule,
     ProfessionalHoursModule,
     forwardRef(() => ProfessionalAbsencesModule),
     forwardRef(() => BillingModule),

@@ -19,6 +19,7 @@ import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
 import type { OwnerProfessionalMembershipResponse } from './entities/owner-professional-membership-response.entity';
 import { resolveProfessionalCommissionPercent } from './utils/professional-commission.util';
+import { professionalPerformsAllServices } from './utils/professional-service-links.util';
 
 const PROFESSIONAL_WITH_SERVICES_SELECT =
   '*, professional_services(service_id)';
@@ -29,6 +30,44 @@ export class ProfessionalsService {
     private readonly supabaseService: SupabaseService,
     private readonly tenantUsersService: TenantUsersService,
   ) {}
+
+  async findActivePerformingAllServices(
+    tenantId: string,
+    serviceIds: string[],
+  ): Promise<Professional[]> {
+    if (serviceIds.length === 0) {
+      return [];
+    }
+
+    const professionals = await this.findAllByTenant(tenantId);
+
+    return professionals.filter((professional) =>
+      professionalPerformsAllServices(professional, serviceIds),
+    );
+  }
+
+  async assertProfessionalPerformsAllServices(
+    tenantId: string,
+    professionalId: string,
+    serviceIds: string[],
+  ): Promise<void> {
+    const professional = await this.findOneWithServices(
+      professionalId,
+      tenantId,
+    );
+
+    if (!professional.is_active) {
+      throw new BadRequestException(
+        'O profissional selecionado não está disponível para agendamento.',
+      );
+    }
+
+    if (!professionalPerformsAllServices(professional, serviceIds)) {
+      throw new BadRequestException(
+        'O profissional selecionado não realiza todos os serviços escolhidos.',
+      );
+    }
+  }
 
   async findAllByTenant(tenantId: string): Promise<Professional[]> {
     const { data, error } = await this.supabaseService
