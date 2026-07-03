@@ -30,6 +30,8 @@ import { calculateAppointmentCommissionAmount } from '../services/utils/service-
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
+import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
+import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/professional-absence-range.dto';
 import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -138,6 +140,7 @@ export class AppointmentsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly professionalHoursService: ProfessionalHoursService,
+    private readonly professionalAbsencesService: ProfessionalAbsencesService,
     private readonly tenantsService: TenantsService,
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
@@ -201,6 +204,13 @@ export class AppointmentsService {
       'start_time' | 'end_time'
     >[];
 
+    const dayAbsences =
+      await this.professionalAbsencesService.findOverlappingForProfessionalOnDate(
+        tenantId,
+        professionalId,
+        date,
+      );
+
     const dayBase = parse(date, 'yyyy-MM-dd', new Date());
     const now = new Date();
     const availableSlots: string[] = [];
@@ -215,9 +225,15 @@ export class AppointmentsService {
         return slotStart < appointmentEnd && slotEnd > appointmentStart;
       });
 
+      const hasAbsenceConflict = dayAbsences.some((absence) => {
+        const absenceStart = new Date(absence.startsAt);
+        const absenceEnd = new Date(absence.endsAt);
+        return slotStart < absenceEnd && slotEnd > absenceStart;
+      });
+
       const isFutureSlot = !isToday(dayBase) || isAfter(slotStart, now);
 
-      if (!hasConflict && isFutureSlot) {
+      if (!hasConflict && !hasAbsenceConflict && isFutureSlot) {
         availableSlots.push(format(slotStart, 'HH:mm'));
       }
 
@@ -257,6 +273,20 @@ export class AppointmentsService {
     if (hasConflict) {
       throw new ConflictException(
         'Este horário não está mais disponível. Escolha outro horário.',
+      );
+    }
+
+    const hasAbsenceConflict =
+      await this.professionalAbsencesService.hasAbsenceOverlap(
+        dto.tenantId,
+        dto.professionalId,
+        startTime,
+        endTime,
+      );
+
+    if (hasAbsenceConflict) {
+      throw new ConflictException(
+        'Este horário não está disponível. O profissional estará ausente.',
       );
     }
 
@@ -531,6 +561,20 @@ export class AppointmentsService {
       );
     }
 
+    const hasAbsenceConflict =
+      await this.professionalAbsencesService.hasAbsenceOverlap(
+        tenantId,
+        dto.professionalId,
+        startTime,
+        endTime,
+      );
+
+    if (hasAbsenceConflict) {
+      throw new BadRequestException(
+        'O profissional estará ausente neste horário.',
+      );
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -585,6 +629,37 @@ export class AppointmentsService {
     }
 
     const { data, error } = await query.order('start_time', { ascending: true });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
+
+    return rows.map((row) => this.mapAdminAppointmentRow(row));
+  }
+
+  async findConflictingAppointmentsForAbsenceRange(
+    tenantId: string,
+    professionalId: string,
+    dto: ProfessionalAbsenceRangeDto,
+    scopedProfessionalId?: string,
+  ): Promise<AdminAppointment[]> {
+    assertProfessionalScope(scopedProfessionalId, professionalId);
+
+    const { startsAt, endsAt } =
+      this.professionalAbsencesService.parseAndValidateRange(dto);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .in('status', [...CUSTOMER_CANCELLABLE_STATUSES])
+      .lt('start_time', endsAt.toISOString())
+      .gt('end_time', startsAt.toISOString())
+      .order('start_time', { ascending: true });
 
     if (error) {
       throw new InternalServerErrorException(error.message);

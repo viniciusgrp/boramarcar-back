@@ -15,6 +15,7 @@ import { UsersModule } from './users/users.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
 import { ProfessionalHoursModule } from './professional-hours/professional-hours.module';
+import { ProfessionalAbsencesModule } from './professional-absences/professional-absences.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
 import { ServicesModule } from './services/services.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -51,6 +52,7 @@ import { UploadModule } from './upload/upload.module';
     AppointmentsModule,
     BusinessHoursModule,
     ProfessionalHoursModule,
+    ProfessionalAbsencesModule,
     BillingModule,
     FinanceModule,
     CustomersModule,

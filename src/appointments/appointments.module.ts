@@ -6,6 +6,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { FinanceModule } from '../finance/finance.module';
 import { MailModule } from '../mail/mail.module';
 import { ProfessionalHoursModule } from '../professional-hours/professional-hours.module';
+import { ProfessionalAbsencesModule } from '../professional-absences/professional-absences.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { AppointmentReminderCron } from './appointment-reminder.cron';
 import { DepositHoldExpirationCron } from './deposit-hold-expiration.cron';
@@ -17,6 +18,7 @@ import { AppointmentsService } from './appointments.service';
     AuthModule,
     TenantsModule,
     ProfessionalHoursModule,
+    forwardRef(() => ProfessionalAbsencesModule),
     forwardRef(() => BillingModule),
     CustomersModule,
     LoyaltyModule,

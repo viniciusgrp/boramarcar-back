@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { parse, setHours, setMinutes } from 'date-fns';
 import { BusinessHoursService } from '../business-hours/business-hours.service';
+import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   DayScheduleWindow,
@@ -22,6 +23,7 @@ export class ProfessionalHoursService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly businessHoursService: BusinessHoursService,
+    private readonly professionalAbsencesService: ProfessionalAbsencesService,
   ) {}
 
   async findAllByProfessional(
@@ -132,6 +134,18 @@ export class ProfessionalHoursService {
     professionalId: string,
     date: string,
   ): Promise<DayScheduleWindow | null> {
+    const isFullyAbsent =
+      await this.professionalAbsencesService.isDateFullyAbsent(
+        tenantId,
+        professionalId,
+        date,
+      );
+
+    if (isFullyAbsent) {
+      const dayBase = parse(date, 'yyyy-MM-dd', new Date());
+      return { isClosed: true, openAt: dayBase, closeAt: dayBase };
+    }
+
     const business = await this.businessHoursService.getScheduleForDate(
       tenantId,
       date,
