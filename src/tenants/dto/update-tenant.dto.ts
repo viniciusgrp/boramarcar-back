@@ -9,6 +9,8 @@ export class UpdateTenantDto {
   contactPhone?: string | null;
   logoUrl?: string | null;
   bannerUrl?: string | null;
+  bannerOverlayColor?: string | null;
+  bannerOverlayOpacity?: number;
   addressCep?: string | null;
   addressStreet?: string | null;
   addressNumber?: string | null;

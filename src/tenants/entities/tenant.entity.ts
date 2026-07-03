@@ -10,6 +10,8 @@ export interface Tenant {
   slug: string;
   logo_url: string | null;
   banner_url: string | null;
+  banner_overlay_color: string;
+  banner_overlay_opacity: number;
   address_cep: string | null;
   address_street: string | null;
   address_number: string | null;

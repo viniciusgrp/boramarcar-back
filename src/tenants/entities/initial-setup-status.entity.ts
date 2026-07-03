@@ -4,5 +4,6 @@ export interface InitialSetupStatus {
   isPersistedComplete: boolean;
   hasProfessional: boolean;
   hasService: boolean;
+  hasBranding: boolean;
   hasVisitedSettings: boolean;
 }

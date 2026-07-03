@@ -61,6 +61,8 @@ function mapTenantRow(row: Tenant): Tenant {
   return {
     ...row,
     pre_subscription_trial_ends_at: row.pre_subscription_trial_ends_at ?? null,
+    banner_overlay_color: normalizeOverlayColor(row.banner_overlay_color),
+    banner_overlay_opacity: normalizeOverlayOpacity(row.banner_overlay_opacity),
     subscription_status:
       subscriptionStatus === 'ACTIVE' ||
       subscriptionStatus === 'INACTIVE' ||
@@ -93,6 +95,29 @@ function normalizeTenantBookingAcceptanceType(
   value: TenantBookingAcceptanceType | null | undefined,
 ): TenantBookingAcceptanceType {
   return value === 'MANUAL' ? 'MANUAL' : 'AUTOMATIC';
+}
+
+const DEFAULT_BANNER_OVERLAY_COLOR = '#000000';
+
+function normalizeOverlayColor(value: string | null | undefined): string {
+  if (typeof value !== 'string') {
+    return DEFAULT_BANNER_OVERLAY_COLOR;
+  }
+
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed)
+    ? trimmed.toLowerCase()
+    : DEFAULT_BANNER_OVERLAY_COLOR;
+}
+
+function normalizeOverlayOpacity(value: number | null | undefined): number {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, Math.round(parsed * 100) / 100));
 }
 
 @Injectable()
@@ -255,6 +280,14 @@ export class TenantsService {
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         logo_url: this.normalizeOptionalText(dto.logoUrl),
         banner_url: this.normalizeOptionalText(dto.bannerUrl),
+        banner_overlay_color:
+          dto.bannerOverlayColor !== undefined
+            ? normalizeOverlayColor(dto.bannerOverlayColor)
+            : tenant.banner_overlay_color,
+        banner_overlay_opacity:
+          dto.bannerOverlayOpacity !== undefined
+            ? normalizeOverlayOpacity(dto.bannerOverlayOpacity)
+            : tenant.banner_overlay_opacity,
         address_cep: this.normalizeCep(dto.addressCep),
         address_street: this.normalizeOptionalText(dto.addressStreet),
         address_number: this.normalizeOptionalText(dto.addressNumber),

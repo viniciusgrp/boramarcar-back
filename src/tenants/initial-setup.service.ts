@@ -74,6 +74,7 @@ export class InitialSetupService {
         isPersistedComplete: true,
         hasProfessional: true,
         hasService: true,
+        hasBranding: true,
         hasVisitedSettings: true,
       };
     }
@@ -82,8 +83,10 @@ export class InitialSetupService {
       this.tenantHasProfessionals(tenant.id),
       this.tenantHasServices(tenant.id),
     ]);
+    const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
     const hasVisitedSettings = Boolean(tenant.initial_setup_settings_visited_at);
-    const isComplete = hasProfessional && hasService && hasVisitedSettings;
+    const isComplete =
+      hasProfessional && hasService && hasBranding && hasVisitedSettings;
 
     if (isComplete) {
       await this.persistCompletion(tenant.id);
@@ -95,6 +98,7 @@ export class InitialSetupService {
       isPersistedComplete: false,
       hasProfessional,
       hasService,
+      hasBranding,
       hasVisitedSettings,
     };
   }
