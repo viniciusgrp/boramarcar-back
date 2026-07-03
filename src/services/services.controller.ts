@@ -14,7 +14,11 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -44,6 +48,15 @@ export class ServicesController {
   async findManaged(@CurrentUser() user: User): Promise<Service[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.servicesService.findAllManagedByTenant(tenant.id);
+  }
+
+  @Get('agenda')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  findForAgenda(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<Service[]> {
+    return this.servicesService.findAllByTenant(context.tenant.id);
   }
 
   @Post()
