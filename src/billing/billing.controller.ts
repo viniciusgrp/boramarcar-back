@@ -20,6 +20,7 @@ import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { BillingService } from './billing.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
+import type { StripeConnectStatusResponse } from './entities/stripe-connect-status.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 
 @Controller('billing')
@@ -76,6 +77,43 @@ export class BillingController {
       ownerEmail: user.email,
       planTier: normalizePlanTier(dto.planTier),
     });
+  }
+
+  @Post('connect/status')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async getConnectStatus(@CurrentUser() user: User) {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.getConnectStatus(tenant.id);
+  }
+
+  @Post('connect/onboard')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async createConnectOnboarding(
+    @CurrentUser() user: User,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+
+    if (!user.email?.trim()) {
+      throw new BadRequestException(
+        'Your account must have an email address to connect Stripe',
+      );
+    }
+
+    return this.billingService.createConnectOnboardingLink(
+      tenant.id,
+      user.email,
+    );
+  }
+
+  @Post('connect/sync')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async syncConnectStatus(@CurrentUser() user: User) {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    await this.billingService.syncConnectAccountFromStripe(tenant.id);
+    return this.billingService.getConnectStatus(tenant.id);
   }
 
   private async resolveOwnerTenant(userId: string) {

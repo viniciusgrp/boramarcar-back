@@ -297,6 +297,16 @@ export class AppointmentsService {
       booking.requiresDeposit &&
       booking.totalDepositAmount > 0;
 
+    if (
+      requiresDepositPayment &&
+      (!tenant.stripe_connect_account_id?.trim() ||
+        !tenant.stripe_connect_charges_enabled)
+    ) {
+      throw new BadRequestException(
+        'Este estabelecimento ainda não configurou a conta Stripe para receber sinais.',
+      );
+    }
+
     const professionalBookingSettings =
       await this.resolveProfessionalBookingSettings(
         dto.tenantId,
@@ -2100,6 +2110,9 @@ export class AppointmentsService {
       owner_id: null,
       stripe_customer_id: null,
       stripe_subscription_id: null,
+      stripe_connect_account_id: null,
+      stripe_connect_charges_enabled: false,
+      stripe_connect_details_submitted: false,
       subscription_status: 'INACTIVE',
       subscription_expires_at: null,
       trial_starts_at: null,

@@ -16,4 +16,9 @@ export type StripeSubscription = Extract<
   { object: 'subscription' }
 >;
 
+export type StripeAccount = Extract<
+  StripeEvent['data']['object'],
+  { object: 'account' }
+>;
+
 export type StripeSubscriptionStatus = StripeSubscription['status'];

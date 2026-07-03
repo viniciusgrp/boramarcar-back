@@ -95,6 +95,10 @@ function mapTenantRow(row: Tenant): Tenant {
     booking_slot_interval_minutes: normalizeBookingSlotIntervalMinutes(
       row.booking_slot_interval_minutes,
     ),
+    stripe_connect_charges_enabled: Boolean(row.stripe_connect_charges_enabled),
+    stripe_connect_details_submitted: Boolean(
+      row.stripe_connect_details_submitted,
+    ),
   };
 }
 
@@ -632,6 +636,64 @@ export class TenantsService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+  }
+
+  async updateStripeConnectStatus(
+    tenantId: string,
+    payload: {
+      stripeConnectAccountId?: string | null;
+      stripeConnectChargesEnabled?: boolean;
+      stripeConnectDetailsSubmitted?: boolean;
+    },
+  ): Promise<Tenant | null> {
+    const updatePayload: Record<string, string | boolean | null> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (payload.stripeConnectAccountId !== undefined) {
+      updatePayload.stripe_connect_account_id = payload.stripeConnectAccountId;
+    }
+
+    if (payload.stripeConnectChargesEnabled !== undefined) {
+      updatePayload.stripe_connect_charges_enabled =
+        payload.stripeConnectChargesEnabled;
+    }
+
+    if (payload.stripeConnectDetailsSubmitted !== undefined) {
+      updatePayload.stripe_connect_details_submitted =
+        payload.stripeConnectDetailsSubmitted;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update(updatePayload)
+      .eq('id', tenantId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async findByStripeConnectAccountId(
+    stripeConnectAccountId: string,
+  ): Promise<Tenant | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('*')
+      .eq('stripe_connect_account_id', stripeConnectAccountId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ? mapTenantRow(data as Tenant) : null;
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {

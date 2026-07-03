@@ -29,6 +29,9 @@ export interface Tenant {
   owner_id: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  stripe_connect_account_id: string | null;
+  stripe_connect_charges_enabled: boolean;
+  stripe_connect_details_submitted: boolean;
   subscription_status: SubscriptionStatus;
   subscription_expires_at: string | null;
   trial_starts_at: string | null;

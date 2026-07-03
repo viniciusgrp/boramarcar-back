@@ -6,4 +6,6 @@ export interface InitialSetupStatus {
   hasService: boolean;
   hasBranding: boolean;
   hasVisitedSettings: boolean;
+  hasStripeConnect: boolean;
+  requiresStripeConnect: boolean;
 }

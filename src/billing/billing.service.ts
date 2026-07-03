@@ -16,8 +16,10 @@ import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
+import type { StripeConnectStatusResponse } from './entities/stripe-connect-status.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 import type {
+  StripeAccount,
   StripeCheckoutSession,
   StripeEvent,
   StripeSubscription,
@@ -140,6 +142,9 @@ export class BillingService {
       case 'customer.subscription.deleted':
         await this.handleSubscriptionDeleted(event.data.object);
         break;
+      case 'account.updated':
+        await this.handleConnectAccountUpdated(event.data.object);
+        break;
       default:
         this.logger.debug(`Unhandled Stripe event type: ${event.type}`);
     }
@@ -232,11 +237,29 @@ export class BillingService {
       throw new BadRequestException('Deposit amount must be greater than zero');
     }
 
+    const tenant = await this.tenantsService.findById(params.tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${params.tenantId}" was not found`,
+      );
+    }
+
+    const connectAccountId = tenant.stripe_connect_account_id?.trim();
+
+    if (!connectAccountId || !tenant.stripe_connect_charges_enabled) {
+      throw new BadRequestException(
+        'Este estabelecimento ainda não configurou a conta Stripe para receber sinais.',
+      );
+    }
+
     const successBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_SUCCESS_URL');
     const cancelUrl = this.getRequiredUrl('STRIPE_DEPOSIT_CANCEL_URL');
     const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}`;
 
     const unitAmountCents = Math.round(params.depositAmountBrl * 100);
+    const applicationFeeAmount =
+      this.resolveConnectApplicationFeeAmount(unitAmountCents);
 
     try {
       const session = await this.stripe.checkout.sessions.create({
@@ -254,6 +277,19 @@ export class BillingService {
             },
           },
         ],
+        payment_intent_data: {
+          ...(applicationFeeAmount > 0
+            ? { application_fee_amount: applicationFeeAmount }
+            : {}),
+          transfer_data: {
+            destination: connectAccountId,
+          },
+          metadata: {
+            checkout_type: 'appointment_deposit',
+            appointment_id: params.appointmentId,
+            tenant_id: params.tenantId,
+          },
+        },
         success_url: successUrl,
         cancel_url: cancelUrl,
         metadata: {
@@ -771,5 +807,179 @@ export class BillingService {
     }
 
     return value;
+  }
+
+  buildStripeConnectStatus(tenant: Tenant): StripeConnectStatusResponse {
+    const accountId = tenant.stripe_connect_account_id?.trim() || null;
+    const chargesEnabled = Boolean(tenant.stripe_connect_charges_enabled);
+    const detailsSubmitted = Boolean(tenant.stripe_connect_details_submitted);
+
+    return {
+      accountId,
+      chargesEnabled,
+      detailsSubmitted,
+      isReady: Boolean(accountId && chargesEnabled),
+      onboardingRequired: !accountId || !chargesEnabled,
+    };
+  }
+
+  async getConnectStatus(tenantId: string): Promise<StripeConnectStatusResponse> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    const accountId = tenant.stripe_connect_account_id?.trim();
+
+    if (!accountId) {
+      return this.buildStripeConnectStatus(tenant);
+    }
+
+    const syncedTenant = await this.syncConnectAccountFromStripe(tenantId);
+
+    return this.buildStripeConnectStatus(syncedTenant ?? tenant);
+  }
+
+  async createConnectOnboardingLink(
+    tenantId: string,
+    ownerEmail: string,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    const normalizedEmail = ownerEmail.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      throw new BadRequestException(
+        'Sua conta precisa ter um e-mail para conectar o Stripe.',
+      );
+    }
+
+    let connectAccountId = tenant.stripe_connect_account_id?.trim() || null;
+
+    if (!connectAccountId) {
+      const account = await this.stripe.accounts.create({
+        type: 'express',
+        country: 'BR',
+        email: normalizedEmail,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        business_type: 'individual',
+        metadata: {
+          tenant_id: tenantId,
+        },
+      });
+
+      connectAccountId = account.id;
+
+      await this.tenantsService.updateStripeConnectStatus(tenantId, {
+        stripeConnectAccountId: connectAccountId,
+        stripeConnectChargesEnabled: false,
+        stripeConnectDetailsSubmitted: false,
+      });
+    }
+
+    const returnUrl = this.getRequiredUrl(
+      'STRIPE_CONNECT_ONBOARDING_RETURN_URL',
+    );
+    const refreshUrl = this.getRequiredUrl(
+      'STRIPE_CONNECT_ONBOARDING_REFRESH_URL',
+    );
+
+    const accountLink = await this.stripe.accountLinks.create({
+      account: connectAccountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: 'account_onboarding',
+    });
+
+    if (!accountLink.url) {
+      throw new InternalServerErrorException(
+        'Stripe did not return an onboarding URL',
+      );
+    }
+
+    return { url: accountLink.url };
+  }
+
+  async syncConnectAccountFromStripe(tenantId: string): Promise<Tenant | null> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    const connectAccountId = tenant.stripe_connect_account_id?.trim();
+
+    if (!connectAccountId) {
+      return tenant;
+    }
+
+    const account = await this.stripe.accounts.retrieve(connectAccountId);
+
+    return this.tenantsService.updateStripeConnectStatus(tenantId, {
+      stripeConnectChargesEnabled: Boolean(account.charges_enabled),
+      stripeConnectDetailsSubmitted: Boolean(account.details_submitted),
+    });
+  }
+
+  private async handleConnectAccountUpdated(
+    account: StripeAccount,
+  ): Promise<void> {
+    const connectAccountId = account.id?.trim();
+
+    if (!connectAccountId) {
+      return;
+    }
+
+    const tenant =
+      await this.tenantsService.findByStripeConnectAccountId(connectAccountId);
+
+    if (!tenant) {
+      this.logger.debug(
+        `Stripe Connect account.updated without tenant match: ${connectAccountId}`,
+      );
+      return;
+    }
+
+    await this.tenantsService.updateStripeConnectStatus(tenant.id, {
+      stripeConnectChargesEnabled: Boolean(account.charges_enabled),
+      stripeConnectDetailsSubmitted: Boolean(account.details_submitted),
+    });
+
+    this.logger.log(
+      `Stripe Connect synced: tenant=${tenant.id} charges_enabled=${Boolean(account.charges_enabled)}`,
+    );
+  }
+
+  private resolveConnectApplicationFeeAmount(unitAmountCents: number): number {
+    const rawPercent = this.configService.get<string>(
+      'STRIPE_CONNECT_APPLICATION_FEE_PERCENT',
+    );
+    const percent = rawPercent ? Number.parseFloat(rawPercent) : 0;
+
+    if (!Number.isFinite(percent) || percent <= 0) {
+      return 0;
+    }
+
+    if (percent > 100) {
+      throw new InternalServerErrorException(
+        'STRIPE_CONNECT_APPLICATION_FEE_PERCENT must be between 0 and 100',
+      );
+    }
+
+    return Math.round(unitAmountCents * (percent / 100));
   }
 }

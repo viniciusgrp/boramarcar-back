@@ -8,6 +8,7 @@ import type { InitialSetupStatus } from './entities/initial-setup-status.entity'
 import type { Tenant } from './entities/tenant.entity';
 import { INITIAL_SETUP_CHECKLIST_VERSION } from './initial-setup.constants';
 import { TenantsService } from './tenants.service';
+import { normalizePlanTier } from './utils/plan-tier.util';
 
 @Injectable()
 export class InitialSetupService {
@@ -67,6 +68,8 @@ export class InitialSetupService {
   }
 
   private async getStatusForTenant(tenant: Tenant): Promise<InitialSetupStatus> {
+    const requiresStripeConnect = normalizePlanTier(tenant.plan_tier) === 'ELITE';
+
     if (this.isPersistedCompleteForCurrentVersion(tenant)) {
       return {
         checklistVersion: INITIAL_SETUP_CHECKLIST_VERSION,
@@ -76,6 +79,8 @@ export class InitialSetupService {
         hasService: true,
         hasBranding: true,
         hasVisitedSettings: true,
+        hasStripeConnect: true,
+        requiresStripeConnect,
       };
     }
 
@@ -85,8 +90,13 @@ export class InitialSetupService {
     ]);
     const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
     const hasVisitedSettings = Boolean(tenant.initial_setup_settings_visited_at);
+    const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
     const isComplete =
-      hasProfessional && hasService && hasBranding && hasVisitedSettings;
+      hasProfessional &&
+      hasService &&
+      hasBranding &&
+      hasVisitedSettings &&
+      (!requiresStripeConnect || hasStripeConnect);
 
     if (isComplete) {
       await this.persistCompletion(tenant.id);
@@ -100,6 +110,8 @@ export class InitialSetupService {
       hasService,
       hasBranding,
       hasVisitedSettings,
+      hasStripeConnect,
+      requiresStripeConnect,
     };
   }
 
