@@ -5,7 +5,7 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   OWNER: 'Dono',
   ADMIN: 'Administrador',
-  PROFESSIONAL: 'Profissional',
+  PROFESSIONAL: 'Colaborador',
 };
 
 export function isUserRole(value: string): value is UserRole {

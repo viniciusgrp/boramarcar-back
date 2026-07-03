@@ -584,7 +584,7 @@ export class TenantUsersService {
 
     if (!professionalId) {
       throw new BadRequestException(
-        'Informe o profissional vinculado para a função de barbeiro.',
+        'Informe o profissional vinculado para a função de colaborador.',
       );
     }
 
