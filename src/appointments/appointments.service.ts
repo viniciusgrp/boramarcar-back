@@ -585,6 +585,32 @@ export class AppointmentsService {
     return rows.map((row) => this.mapAdminAppointmentRow(row));
   }
 
+  async findPendingApprovalForAdmin(
+    tenantId: string,
+    scopedProfessionalId?: string,
+  ): Promise<AdminAppointment[]> {
+    let query = this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'PENDING_APPROVAL');
+
+    if (scopedProfessionalId) {
+      query = query.eq('professional_id', scopedProfessionalId);
+    }
+
+    const { data, error } = await query.order('start_time', { ascending: true });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
+
+    return rows.map((row) => this.mapAdminAppointmentRow(row));
+  }
+
   async approveAppointmentForTenant(
     tenantId: string,
     appointmentId: string,

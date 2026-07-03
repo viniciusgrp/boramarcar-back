@@ -67,6 +67,31 @@ export class AppointmentsController {
     );
   }
 
+  @Get('admin/pending-approval')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  findPendingApprovalForAdmin(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Query('tenantId') tenantId?: string,
+  ): Promise<AdminAppointment[]> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    if (tenantId !== context.tenant.id) {
+      throw new BadRequestException('Tenant informado é inválido.');
+    }
+
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.findPendingApprovalForAdmin(
+      context.tenant.id,
+      scopedProfessionalId,
+    );
+  }
+
   @Get('admin')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
