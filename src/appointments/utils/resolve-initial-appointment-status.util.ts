@@ -10,10 +10,7 @@ export function resolveInitialAppointmentStatus(params: {
     return 'PENDING_PAYMENT';
   }
 
-  if (
-    params.bookingAcceptanceType === 'MANUAL' &&
-    !params.isPaidWithPoints
-  ) {
+  if (params.bookingAcceptanceType === 'MANUAL') {
     return 'PENDING_APPROVAL';
   }
 

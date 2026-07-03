@@ -4,4 +4,5 @@ export class UpdateLoyaltySettingsDto {
   defaultServicePoints?: number;
   expirationDays?: number | null;
   welcomeBonus!: number;
+  refundPointsOnNoShow?: boolean;
 }

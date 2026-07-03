@@ -69,6 +69,7 @@ export class LoyaltyService {
       default_service_points: dto.defaultServicePoints ?? 0,
       expiration_days: dto.expirationDays ?? null,
       welcome_bonus: dto.welcomeBonus,
+      refund_points_on_no_show: dto.refundPointsOnNoShow ?? false,
       updated_at: new Date().toISOString(),
     };
 
@@ -793,6 +794,153 @@ export class LoyaltyService {
     }
   }
 
+  async refundRedeemedPointsForAppointment(params: {
+    tenantId: string;
+    appointmentId: string;
+  }): Promise<void> {
+    const state = await this.getAppointmentRedemptionState(
+      params.tenantId,
+      params.appointmentId,
+    );
+
+    if (!state || state.netChargedPoints <= 0) {
+      return;
+    }
+
+    const customer = await this.assertCustomerBelongsToTenant(
+      state.customerId,
+      params.tenantId,
+    );
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .update({
+        points_balance: customer.points_balance + state.netChargedPoints,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', state.customerId)
+      .eq('tenant_id', params.tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    await this.insertTransaction({
+      tenantId: params.tenantId,
+      customerId: state.customerId,
+      type: 'EARNED',
+      points: state.netChargedPoints,
+      description: 'Estorno de resgate: agendamento cancelado',
+      appointmentId: params.appointmentId,
+    });
+  }
+
+  async restoreRedeemedPointsForAppointment(params: {
+    tenantId: string;
+    appointmentId: string;
+  }): Promise<void> {
+    const state = await this.getAppointmentRedemptionState(
+      params.tenantId,
+      params.appointmentId,
+    );
+
+    if (!state || state.baseRedeemedPoints <= 0 || state.netChargedPoints > 0) {
+      return;
+    }
+
+    const customer = await this.assertCustomerBelongsToTenant(
+      state.customerId,
+      params.tenantId,
+    );
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .update({
+        points_balance: Math.max(
+          0,
+          customer.points_balance - state.baseRedeemedPoints,
+        ),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', state.customerId)
+      .eq('tenant_id', params.tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    await this.insertTransaction({
+      tenantId: params.tenantId,
+      customerId: state.customerId,
+      type: 'REDEEMED',
+      points: state.baseRedeemedPoints,
+      description: 'Resgate reaplicado: agendamento reativado',
+      appointmentId: params.appointmentId,
+    });
+  }
+
+  private async getAppointmentRedemptionState(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<{
+    customerId: string;
+    baseRedeemedPoints: number;
+    netChargedPoints: number;
+  } | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('loyalty_transactions')
+      .select('customer_id, points, type, description')
+      .eq('tenant_id', tenantId)
+      .eq('appointment_id', appointmentId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as {
+      customer_id: string | null;
+      points: number | string;
+      type: string;
+      description: string | null;
+    }[];
+
+    let customerId: string | null = null;
+    let baseRedeemedPoints = 0;
+    let redeemedPoints = 0;
+    let refundedPoints = 0;
+
+    for (const row of rows) {
+      const points = Number(row.points ?? 0);
+      const description = row.description ?? '';
+
+      if (row.type === 'REDEEMED' && description.startsWith('Resgate')) {
+        redeemedPoints += points;
+        customerId = customerId ?? row.customer_id;
+
+        if (description.startsWith('Resgate no agendamento')) {
+          baseRedeemedPoints += points;
+        }
+      }
+
+      if (row.type === 'EARNED' && description.startsWith('Estorno de resgate')) {
+        refundedPoints += points;
+      }
+    }
+
+    if (!customerId || redeemedPoints <= 0) {
+      return null;
+    }
+
+    return {
+      customerId,
+      baseRedeemedPoints,
+      netChargedPoints: redeemedPoints - refundedPoints,
+    };
+  }
+
   async expirePointsForAllTenants(): Promise<void> {
     const { data: settingsRows, error } = await this.supabaseService
       .getClient()
@@ -1170,6 +1318,7 @@ export class LoyaltyService {
       default_service_points: 0,
       expiration_days: null,
       welcome_bonus: 0,
+      refund_points_on_no_show: false,
       updated_at: new Date().toISOString(),
     };
   }
@@ -1184,6 +1333,7 @@ export class LoyaltyService {
           ? null
           : Number(row.expiration_days),
       welcome_bonus: Number(row.welcome_bonus ?? 0),
+      refund_points_on_no_show: Boolean(row.refund_points_on_no_show),
     };
   }
 

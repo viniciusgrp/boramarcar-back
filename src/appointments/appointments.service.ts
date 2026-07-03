@@ -688,6 +688,13 @@ export class AppointmentsService {
       throw new InternalServerErrorException(updateError.message);
     }
 
+    if (context.appointment.loyalty_reward_id) {
+      await this.loyaltyService.refundRedeemedPointsForAppointment({
+        tenantId,
+        appointmentId,
+      });
+    }
+
     this.dispatchAppointmentRejectionEmail(context);
 
     const appointment = await this.findAdminById(tenantId, appointmentId);
@@ -1109,6 +1116,12 @@ export class AppointmentsService {
       existing.status === 'COMPLETED' && status !== 'COMPLETED';
     const isReactivatingCancelled =
       existing.status === 'CANCELLED' && status === 'PENDING';
+    const isCancelling =
+      status === 'CANCELLED' && existing.status !== 'CANCELLED';
+    const isMarkingNoShow =
+      status === 'NO_SHOW' && existing.status !== 'NO_SHOW';
+    const isReactivatingFromCancelled =
+      existing.status === 'CANCELLED' && status !== 'CANCELLED';
 
     if (isReactivatingCancelled) {
       updatePayload.cancellation_requested_at = null;
@@ -1202,6 +1215,30 @@ export class AppointmentsService {
         tenantId,
         appointmentId,
       });
+    }
+
+    if (existing.loyalty_reward_id) {
+      if (isCancelling) {
+        await this.loyaltyService.refundRedeemedPointsForAppointment({
+          tenantId,
+          appointmentId,
+        });
+      } else if (isMarkingNoShow) {
+        const loyaltySettings =
+          await this.loyaltyService.getSettingsForTenant(tenantId);
+
+        if (loyaltySettings.refund_points_on_no_show) {
+          await this.loyaltyService.refundRedeemedPointsForAppointment({
+            tenantId,
+            appointmentId,
+          });
+        }
+      } else if (isReactivatingFromCancelled) {
+        await this.loyaltyService.restoreRedeemedPointsForAppointment({
+          tenantId,
+          appointmentId,
+        });
+      }
     }
 
     const appointment = await this.findAdminById(tenantId, appointmentId);
