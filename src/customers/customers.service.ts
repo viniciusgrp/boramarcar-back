@@ -359,7 +359,19 @@ export class CustomersService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []).map((row) => this.mapCustomerListItem(row as Customer));
+    const rows = (data ?? []) as Customer[];
+    const lastAppointmentByCustomer =
+      await this.fetchLastAppointmentAtByCustomerIds(
+        tenantId,
+        rows.map((row) => row.id),
+      );
+
+    return rows.map((row) =>
+      this.mapCustomerListItem(
+        row,
+        lastAppointmentByCustomer.get(row.id) ?? null,
+      ),
+    );
   }
 
   async findByIdForTenant(
@@ -382,7 +394,14 @@ export class CustomersService {
       throw new NotFoundException('Cliente não encontrado.');
     }
 
-    return this.mapCustomerRow(data as Customer);
+    const customer = this.mapCustomerRow(data as Customer);
+    const lastAppointmentByCustomer =
+      await this.fetchLastAppointmentAtByCustomerIds(tenantId, [customerId]);
+
+    return {
+      ...customer,
+      last_appointment_at: lastAppointmentByCustomer.get(customerId) ?? null,
+    };
   }
 
   private async updateCustomerProfile(
@@ -506,7 +525,53 @@ export class CustomersService {
     };
   }
 
-  private mapCustomerListItem(row: Customer): CustomerListItem {
+  private async fetchLastAppointmentAtByCustomerIds(
+    tenantId: string,
+    customerIds: string[],
+  ): Promise<Map<string, string>> {
+    if (customerIds.length === 0) {
+      return new Map();
+    }
+
+    const nowIso = new Date().toISOString();
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select('customer_id, start_time')
+      .eq('tenant_id', tenantId)
+      .in('customer_id', customerIds)
+      .lt('start_time', nowIso)
+      .not('status', 'eq', 'CANCELLED');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const lastAppointmentByCustomer = new Map<string, string>();
+
+    for (const row of data ?? []) {
+      const customerId = row.customer_id as string | undefined;
+      const startTime = row.start_time as string | undefined;
+
+      if (!customerId || !startTime) {
+        continue;
+      }
+
+      const existing = lastAppointmentByCustomer.get(customerId);
+
+      if (!existing || startTime > existing) {
+        lastAppointmentByCustomer.set(customerId, startTime);
+      }
+    }
+
+    return lastAppointmentByCustomer;
+  }
+
+  private mapCustomerListItem(
+    row: Customer,
+    lastAppointmentAt: string | null,
+  ): CustomerListItem {
     return {
       id: row.id,
       name: row.name,
@@ -518,6 +583,7 @@ export class CustomersService {
       profilePictureUrl: row.profile_picture_url,
       pointsBalance: Number(row.points_balance ?? 0),
       createdAt: row.created_at,
+      lastAppointmentAt,
     };
   }
 }

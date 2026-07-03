@@ -14,6 +14,7 @@ export interface Customer {
   points_balance: number;
   created_at: string;
   updated_at: string;
+  last_appointment_at?: string | null;
 }
 
 export interface CustomerMeResponse {
@@ -32,4 +33,5 @@ export interface CustomerListItem {
   profilePictureUrl: string | null;
   pointsBalance: number;
   createdAt: string;
+  lastAppointmentAt: string | null;
 }
