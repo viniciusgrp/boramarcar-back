@@ -356,7 +356,7 @@ export class TenantUsersService {
   }
 
   async acceptInvite(user: User, dto: AcceptTenantUserInviteDto): Promise<TenantUser> {
-    const invite = await this.findInviteByToken(dto.token?.trim() || '');
+    const invite = await this.findInviteByTokenRaw(dto.token?.trim() || '');
     const userEmail = user.email?.trim().toLowerCase();
 
     if (!userEmail || userEmail !== invite.email.trim().toLowerCase()) {
@@ -375,6 +375,14 @@ export class TenantUsersService {
       throw new BadRequestException(
         'Esta conta já está vinculada a um estabelecimento.',
       );
+    }
+
+    if (invite.accepted_at) {
+      throw new BadRequestException('Este convite já foi utilizado.');
+    }
+
+    if (new Date(invite.expires_at).getTime() < Date.now()) {
+      throw new BadRequestException('Este convite expirou.');
     }
 
     return this.fulfillInviteMembership(invite, user.id);
@@ -677,7 +685,7 @@ export class TenantUsersService {
     return invite;
   }
 
-  private async findInviteByToken(token: string): Promise<TenantUserInvite> {
+  private async findInviteByTokenRaw(token: string): Promise<TenantUserInvite> {
     if (!token) {
       throw new BadRequestException('Token de convite inválido.');
     }
@@ -697,7 +705,11 @@ export class TenantUsersService {
       throw new NotFoundException('Convite não encontrado.');
     }
 
-    const invite = data as TenantUserInvite;
+    return data as TenantUserInvite;
+  }
+
+  private async findInviteByToken(token: string): Promise<TenantUserInvite> {
+    const invite = await this.findInviteByTokenRaw(token);
 
     if (invite.accepted_at) {
       throw new BadRequestException('Este convite já foi aceito.');
