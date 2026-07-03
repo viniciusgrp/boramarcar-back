@@ -14,8 +14,13 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
+import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
@@ -37,6 +42,29 @@ export class ProfessionalsController {
     }
 
     return this.professionalsService.findAllByTenant(tenantId);
+  }
+
+  @Get('agenda')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  async findForAgenda(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<Professional[]> {
+    const professionals = await this.professionalsService.findAllByTenant(
+      context.tenant.id,
+    );
+    const activeProfessionals = professionals.filter((item) => item.is_active);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    if (!scopedProfessionalId) {
+      return activeProfessionals;
+    }
+
+    return activeProfessionals.filter(
+      (item) => item.id === scopedProfessionalId,
+    );
   }
 
   @Get('managed')

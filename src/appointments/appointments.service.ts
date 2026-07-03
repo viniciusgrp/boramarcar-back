@@ -32,6 +32,10 @@ import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
+import {
+  assertProfessionalScope,
+  assertProfessionalScopeForMutation,
+} from '../tenants/utils/tenant-user-scope.util';
 import { FinanceService } from '../finance/finance.service';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -431,6 +435,7 @@ export class AppointmentsService {
   async createInternal(
     tenantId: string,
     dto: CreateInternalAppointmentDto,
+    scopedProfessionalId?: string,
   ): Promise<AdminAppointment> {
     const serviceIds = normalizeServiceIds(dto);
 
@@ -439,6 +444,12 @@ export class AppointmentsService {
         'Fields "professionalId" and "startTime" are required',
       );
     }
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      dto.professionalId.trim(),
+      true,
+    );
 
     if (serviceIds.length === 0) {
       throw new BadRequestException(
@@ -573,10 +584,16 @@ export class AppointmentsService {
   async approveAppointmentForTenant(
     tenantId: string,
     appointmentId: string,
+    scopedProfessionalId?: string,
   ): Promise<AdminAppointment> {
     const context = await this.loadAppointmentEmailContext(
       tenantId,
       appointmentId,
+    );
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      context.appointment.professional_id,
     );
 
     if (context.appointment.status !== 'PENDING_APPROVAL') {
@@ -612,10 +629,16 @@ export class AppointmentsService {
   async rejectAppointmentForTenant(
     tenantId: string,
     appointmentId: string,
+    scopedProfessionalId?: string,
   ): Promise<AdminAppointment> {
     const context = await this.loadAppointmentEmailContext(
       tenantId,
       appointmentId,
+    );
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      context.appointment.professional_id,
     );
 
     if (context.appointment.status !== 'PENDING_APPROVAL') {
@@ -997,6 +1020,7 @@ export class AppointmentsService {
     tenantId: string,
     appointmentId: string,
     status: UpdateAppointmentStatusDto['status'],
+    scopedProfessionalId?: string,
   ): Promise<AdminAppointment> {
     if (!APPOINTMENT_STATUSES.includes(status)) {
       throw new BadRequestException('Invalid appointment status');
@@ -1037,6 +1061,11 @@ export class AppointmentsService {
         `Appointment with id "${appointmentId}" was not found for this tenant`,
       );
     }
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      existing.professional_id,
+    );
 
     const updatePayload: {
       status: UpdateAppointmentStatusDto['status'];
@@ -2090,5 +2119,21 @@ export class AppointmentsService {
         'At least one service must be provided via "serviceIds" or "serviceId"',
       );
     }
+  }
+
+  private assertAppointmentProfessionalScope(
+    scopedProfessionalId: string | undefined,
+    resourceProfessionalId: string,
+    forMutation = false,
+  ): void {
+    if (forMutation) {
+      assertProfessionalScopeForMutation(
+        scopedProfessionalId,
+        resourceProfessionalId,
+      );
+      return;
+    }
+
+    assertProfessionalScope(scopedProfessionalId, resourceProfessionalId);
   }
 }

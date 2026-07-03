@@ -12,9 +12,14 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
-import { ProfessionalsService } from '../professionals/professionals.service';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
+import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
+import { ProfessionalsService } from '../professionals/professionals.service';
 import { ProfessionalDayStatusDto } from './dto/professional-day-status.dto';
 import { UpdateProfessionalHoursDto } from './dto/update-professional-hours.dto';
 import { ProfessionalHour } from './entities/professional-hour.entity';
@@ -29,25 +34,32 @@ export class ProfessionalHoursController {
   ) {}
 
   @Get('day-status')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async getDayStatus(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Query('date') date?: string,
   ): Promise<ProfessionalDayStatusDto[]> {
     if (!date?.trim()) {
       throw new BadRequestException('Query parameter "date" is required');
     }
 
-    const tenant = await this.resolveOwnerTenant(user.id);
     const professionals = await this.professionalsService.findAllManagedByTenant(
-      tenant.id,
+      context.tenant.id,
     );
-    const activeIds = professionals
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+    let activeIds = professionals
       .filter((item) => item.is_active)
       .map((item) => item.id);
 
+    if (scopedProfessionalId) {
+      activeIds = activeIds.filter((id) => id === scopedProfessionalId);
+    }
+
     return this.professionalHoursService.getDayStatusForTenant(
-      tenant.id,
+      context.tenant.id,
       date.trim(),
       activeIds,
     );

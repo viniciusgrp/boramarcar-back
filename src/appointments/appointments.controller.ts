@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Get,
-  NotFoundException,
   Param,
   Patch,
   Post,
@@ -21,7 +20,6 @@ import { Roles } from '../tenants/decorators/roles.decorator';
 import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { RolesGuard } from '../tenants/guards/roles.guard';
-import { TenantsService } from '../tenants/tenants.service';
 import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -37,10 +35,7 @@ import { parseServiceIdsQuery } from './utils/parse-service-ids.util';
 
 @Controller('appointments')
 export class AppointmentsController {
-  constructor(
-    private readonly appointmentsService: AppointmentsService,
-    private readonly tenantsService: TenantsService,
-  ) {}
+  constructor(private readonly appointmentsService: AppointmentsService) {}
 
   @Get('admin/customer/:customerId')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
@@ -183,39 +178,64 @@ export class AppointmentsController {
   }
 
   @Post('internal')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async createInternal(
-    @CurrentUser() user: User,
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  createInternal(
+    @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: CreateInternalAppointmentDto,
   ): Promise<AdminAppointment> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.appointmentsService.createInternal(tenant.id, dto);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.createInternal(
+      context.tenant.id,
+      dto,
+      scopedProfessionalId,
+    );
   }
 
   @Patch(':id/approve')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async approve(
-    @CurrentUser() user: User,
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  approve(
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
   ): Promise<AdminAppointment> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.appointmentsService.approveAppointmentForTenant(tenant.id, id);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.approveAppointmentForTenant(
+      context.tenant.id,
+      id,
+      scopedProfessionalId,
+    );
   }
 
   @Patch(':id/reject')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async reject(
-    @CurrentUser() user: User,
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  reject(
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
   ): Promise<AdminAppointment> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.appointmentsService.rejectAppointmentForTenant(tenant.id, id);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.rejectAppointmentForTenant(
+      context.tenant.id,
+      id,
+      scopedProfessionalId,
+    );
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async updateStatus(
-    @CurrentUser() user: User,
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  updateStatus(
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
     @Body() dto: UpdateAppointmentStatusDto,
   ): Promise<AdminAppointment> {
@@ -223,11 +243,15 @@ export class AppointmentsController {
       throw new BadRequestException('Field "status" is required');
     }
 
-    const tenant = await this.resolveOwnerTenant(user.id);
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
     return this.appointmentsService.updateStatusForTenant(
-      tenant.id,
+      context.tenant.id,
       id,
       dto.status,
+      scopedProfessionalId,
     );
   }
 
@@ -241,20 +265,6 @@ export class AppointmentsController {
       dto,
       user ? resolveAuthUserId(user) : undefined,
     );
-  }
-
-  private async resolveOwnerTenant(userId: string) {
-    const accessContext = await this.tenantsService.findAccessContextByUserId(
-      userId,
-    );
-
-    if (!accessContext) {
-      throw new NotFoundException(
-        'No establishment linked to the authenticated user',
-      );
-    }
-
-    return accessContext.tenant;
   }
 }
 
