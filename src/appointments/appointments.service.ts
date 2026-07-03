@@ -30,6 +30,7 @@ import { calculateAppointmentCommissionAmount } from '../services/utils/service-
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
+import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import {
@@ -167,7 +168,10 @@ export class AppointmentsService {
 
     const businessOpen = schedule.openAt;
     const businessClose = schedule.closeAt;
-    const slotIntervalMinutes = 15;
+    const tenant = await this.tenantsService.findById(tenantId);
+    const slotIntervalMinutes = normalizeBookingSlotIntervalMinutes(
+      tenant?.booking_slot_interval_minutes,
+    );
 
     const dayStartIso = `${date}T00:00:00`;
     const dayEndIso = `${date}T23:59:59`;
@@ -2029,6 +2033,7 @@ export class AppointmentsService {
       require_customer_email_confirmation: false,
       allow_customer_self_cancellation: false,
       booking_acceptance_type: 'AUTOMATIC',
+      booking_slot_interval_minutes: 15,
       owner_id: null,
       stripe_customer_id: null,
       stripe_subscription_id: null,

@@ -10,6 +10,10 @@ import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import type { TenantBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
+import {
+  assertBookingSlotIntervalMinutes,
+  normalizeBookingSlotIntervalMinutes,
+} from '../booking/utils/booking-slot-interval.util';
 import type { PlanTier } from './entities/plan-tier.type';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
@@ -87,6 +91,9 @@ function mapTenantRow(row: Tenant): Tenant {
     ),
     allow_customer_self_cancellation: Boolean(
       row.allow_customer_self_cancellation,
+    ),
+    booking_slot_interval_minutes: normalizeBookingSlotIntervalMinutes(
+      row.booking_slot_interval_minutes,
     ),
   };
 }
@@ -305,6 +312,10 @@ export class TenantsService {
         booking_acceptance_type: normalizeTenantBookingAcceptanceType(
           dto.bookingAcceptanceType,
         ),
+        booking_slot_interval_minutes:
+          dto.bookingSlotIntervalMinutes !== undefined
+            ? assertBookingSlotIntervalMinutes(dto.bookingSlotIntervalMinutes)
+            : tenant.booking_slot_interval_minutes,
         calendar_card_preferences: normalizeCalendarCardPreferences(
           dto.calendarCardPreferences ?? tenant.calendar_card_preferences,
         ),

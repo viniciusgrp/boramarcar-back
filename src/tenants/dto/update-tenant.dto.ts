@@ -22,6 +22,7 @@ export class UpdateTenantDto {
   requireCustomerEmailConfirmation?: boolean;
   allowCustomerSelfCancellation?: boolean;
   bookingAcceptanceType!: TenantBookingAcceptanceType;
+  bookingSlotIntervalMinutes?: number;
   calendarCardPreferences?: CalendarCardPreferences;
   enablePayoutControl?: boolean;
   payoutFrequency?: PayoutFrequency;

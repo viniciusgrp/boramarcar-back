@@ -25,6 +25,7 @@ export interface Tenant {
   require_customer_email_confirmation: boolean;
   allow_customer_self_cancellation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
+  booking_slot_interval_minutes: number;
   owner_id: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
