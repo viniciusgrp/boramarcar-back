@@ -102,7 +102,17 @@ export class BusinessHoursService {
     }
 
     if (!data) {
-      return null;
+      const defaults = DEFAULT_WEEK_SCHEDULE[dayOfWeek];
+
+      if (defaults.isClosed) {
+        return { isClosed: true, openAt: dayBase, closeAt: dayBase };
+      }
+
+      return {
+        isClosed: false,
+        openAt: this.combineDateAndTime(dayBase, defaults.openTime),
+        closeAt: this.combineDateAndTime(dayBase, defaults.closeTime),
+      };
     }
 
     const row = data as Pick<

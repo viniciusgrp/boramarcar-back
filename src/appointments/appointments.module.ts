@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
+import { BusinessHoursModule } from '../business-hours/business-hours.module';
 import { CustomersModule } from '../customers/customers.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { FinanceModule } from '../finance/finance.module';
@@ -20,6 +21,7 @@ import { AppointmentsService } from './appointments.service';
     TenantsModule,
     ProfessionalsModule,
     ProfessionalHoursModule,
+    BusinessHoursModule,
     forwardRef(() => ProfessionalAbsencesModule),
     forwardRef(() => BillingModule),
     CustomersModule,

@@ -12,6 +12,7 @@ import { randomInt } from 'crypto';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
+  addDays,
   addHours,
   addMinutes,
   format,
@@ -30,6 +31,7 @@ import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
 import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/professional-absence-range.dto';
@@ -142,6 +144,7 @@ export class AppointmentsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly professionalHoursService: ProfessionalHoursService,
+    private readonly businessHoursService: BusinessHoursService,
     private readonly professionalAbsencesService: ProfessionalAbsencesService,
     private readonly professionalsService: ProfessionalsService,
     private readonly tenantsService: TenantsService,
@@ -212,6 +215,100 @@ export class AppointmentsService {
     }
 
     return [...slotSet].sort((left, right) => left.localeCompare(right));
+  }
+
+  async getAvailableDays(
+    tenantId: string,
+    serviceIds: string[],
+    options: { professionalId?: string; anyProfessional?: boolean },
+    daysToScan = 21,
+  ): Promise<string[]> {
+    const businessHours =
+      await this.businessHoursService.findAllByTenant(tenantId);
+    const businessOpenWeekdays = new Set(
+      businessHours.filter((hour) => !hour.isClosed).map((hour) => hour.dayOfWeek),
+    );
+
+    if (businessOpenWeekdays.size === 0) {
+      return [];
+    }
+
+    const openWeekdays = new Set<number>();
+
+    if (options.anyProfessional) {
+      const professionals =
+        await this.professionalsService.findActivePerformingAllServices(
+          tenantId,
+          serviceIds,
+        );
+
+      for (const professional of professionals) {
+        const weekdays = await this.resolveProfessionalOpenWeekdays(
+          tenantId,
+          professional.id,
+          businessOpenWeekdays,
+        );
+
+        for (const weekday of weekdays) {
+          openWeekdays.add(weekday);
+        }
+      }
+    } else if (options.professionalId) {
+      const weekdays = await this.resolveProfessionalOpenWeekdays(
+        tenantId,
+        options.professionalId,
+        businessOpenWeekdays,
+      );
+
+      for (const weekday of weekdays) {
+        openWeekdays.add(weekday);
+      }
+    }
+
+    if (openWeekdays.size === 0) {
+      return [];
+    }
+
+    const days: string[] = [];
+    let cursor = new Date();
+
+    for (let offset = 0; offset < daysToScan; offset += 1) {
+      if (openWeekdays.has(cursor.getDay())) {
+        days.push(format(cursor, 'yyyy-MM-dd'));
+      }
+
+      cursor = addDays(cursor, 1);
+    }
+
+    return days;
+  }
+
+  private async resolveProfessionalOpenWeekdays(
+    tenantId: string,
+    professionalId: string,
+    businessOpenWeekdays: Set<number>,
+  ): Promise<Set<number>> {
+    const professionalHours =
+      await this.professionalHoursService.findAllByProfessional(
+        tenantId,
+        professionalId,
+      );
+
+    const closedByProfessional = new Set(
+      professionalHours
+        .filter((hour) => hour.isClosed)
+        .map((hour) => hour.dayOfWeek),
+    );
+
+    const open = new Set<number>();
+
+    for (const weekday of businessOpenWeekdays) {
+      if (!closedByProfessional.has(weekday)) {
+        open.add(weekday);
+      }
+    }
+
+    return open;
   }
 
   private async computeAvailableSlotsForProfessional(

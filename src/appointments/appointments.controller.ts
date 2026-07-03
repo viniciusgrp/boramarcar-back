@@ -161,6 +161,38 @@ export class AppointmentsController {
       .then((slots) => ({ slots }));
   }
 
+  @Get('available-days')
+  getAvailableDays(
+    @Query('tenantId') tenantId?: string,
+    @Query('professionalId') professionalId?: string,
+    @Query('anyProfessional') anyProfessional?: string,
+    @Query('serviceId') serviceId?: string,
+    @Query('serviceIds') serviceIds?: string,
+  ): Promise<{ days: string[] }> {
+    const resolvedServiceIds = parseServiceIdsQuery(serviceId, serviceIds);
+    const useAnyProfessional =
+      anyProfessional === 'true' || professionalId?.trim() === 'any';
+
+    if (!tenantId || resolvedServiceIds.length === 0) {
+      throw new BadRequestException(
+        'Query parameters "tenantId" and at least one service id ("serviceIds" or "serviceId") are required',
+      );
+    }
+
+    if (!useAnyProfessional && !professionalId?.trim()) {
+      throw new BadRequestException(
+        'Query parameter "professionalId" is required unless "anyProfessional" is true',
+      );
+    }
+
+    return this.appointmentsService
+      .getAvailableDays(tenantId, resolvedServiceIds, {
+        anyProfessional: useAnyProfessional,
+        professionalId: useAnyProfessional ? undefined : professionalId?.trim(),
+      })
+      .then((days) => ({ days }));
+  }
+
   @Get('my/all')
   @UseGuards(AuthGuard)
   findMineAll(
