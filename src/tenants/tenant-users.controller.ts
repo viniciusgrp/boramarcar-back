@@ -60,6 +60,20 @@ export class TenantUsersController {
     );
   }
 
+  @Post('invites/:id/resend')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  resendInvite(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') inviteId: string,
+  ): Promise<{ email: string; expiresAt: string }> {
+    return this.tenantUsersService.resendInviteForTenant(
+      context.tenant.id,
+      context.tenant.name,
+      inviteId,
+    );
+  }
+
   @Get('invites/pending')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER')

@@ -235,6 +235,48 @@ export class TenantUsersService {
     return { email, expiresAt };
   }
 
+  async resendInviteForTenant(
+    tenantId: string,
+    tenantName: string,
+    inviteId: string,
+  ): Promise<{ email: string; expiresAt: string }> {
+    const invite = await this.findPendingInviteByIdForTenant(tenantId, inviteId);
+    const role = normalizeUserRole(invite.role);
+
+    await this.assertEmailCanReceiveInvite(tenantId, invite.email);
+
+    const token = randomBytes(24).toString('hex');
+    const expiresAt = addDays(new Date(), 7).toISOString();
+    const resentAt = new Date().toISOString();
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .update({
+        token,
+        expires_at: expiresAt,
+        created_at: resentAt,
+      })
+      .eq('id', invite.id)
+      .eq('tenant_id', tenantId)
+      .is('accepted_at', null);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const inviteUrl = `${this.resolveFrontendOrigin()}/admin/login?invite=${encodeURIComponent(token)}`;
+
+    await this.mailService.sendTeamInvite({
+      recipientEmail: invite.email,
+      tenantName,
+      inviteUrl,
+      roleLabel: USER_ROLE_LABELS[role],
+    });
+
+    return { email: invite.email, expiresAt };
+  }
+
   async previewInvite(token: string): Promise<TenantUserInvitePreview> {
     const invite = await this.findInviteByToken(token.trim());
 
@@ -604,6 +646,35 @@ export class TenantUsersService {
       .eq('id', invite.id);
 
     return mapTenantUserRow(data as TenantUserRow);
+  }
+
+  private async findPendingInviteByIdForTenant(
+    tenantId: string,
+    inviteId: string,
+  ): Promise<TenantUserInvite> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .select('*')
+      .eq('id', inviteId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Convite não encontrado.');
+    }
+
+    const invite = data as TenantUserInvite;
+
+    if (invite.accepted_at) {
+      throw new BadRequestException('Este convite já foi aceito.');
+    }
+
+    return invite;
   }
 
   private async findInviteByToken(token: string): Promise<TenantUserInvite> {
