@@ -813,13 +813,17 @@ export class BillingService {
     const accountId = tenant.stripe_connect_account_id?.trim() || null;
     const chargesEnabled = Boolean(tenant.stripe_connect_charges_enabled);
     const detailsSubmitted = Boolean(tenant.stripe_connect_details_submitted);
+    const isReady = Boolean(accountId && chargesEnabled);
+    const applicationFeePercent = this.getConnectApplicationFeePercent();
 
     return {
       accountId,
       chargesEnabled,
       detailsSubmitted,
-      isReady: Boolean(accountId && chargesEnabled),
+      isReady,
       onboardingRequired: !accountId || !chargesEnabled,
+      applicationFeePercent,
+      canOpenDashboard: isReady,
     };
   }
 
@@ -912,6 +916,50 @@ export class BillingService {
     return { url: accountLink.url };
   }
 
+  async createConnectDashboardLink(
+    tenantId: string,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    const connectAccountId = tenant.stripe_connect_account_id?.trim();
+
+    if (!connectAccountId || !tenant.stripe_connect_charges_enabled) {
+      throw new BadRequestException(
+        'Conecte e ative sua conta Stripe antes de abrir o painel de recebimentos.',
+      );
+    }
+
+    try {
+      const loginLink =
+        await this.stripe.accounts.createLoginLink(connectAccountId);
+
+      if (!loginLink.url) {
+        throw new InternalServerErrorException(
+          'Stripe did not return a dashboard login URL',
+        );
+      }
+
+      return { url: loginLink.url };
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof InternalServerErrorException
+      ) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Não foi possível abrir o painel Stripe do estabelecimento.',
+      );
+    }
+  }
+
   async syncConnectAccountFromStripe(tenantId: string): Promise<Tenant | null> {
     const tenant = await this.tenantsService.findById(tenantId);
 
@@ -964,7 +1012,7 @@ export class BillingService {
     );
   }
 
-  private resolveConnectApplicationFeeAmount(unitAmountCents: number): number {
+  private getConnectApplicationFeePercent(): number {
     const rawPercent = this.configService.get<string>(
       'STRIPE_CONNECT_APPLICATION_FEE_PERCENT',
     );
@@ -978,6 +1026,16 @@ export class BillingService {
       throw new InternalServerErrorException(
         'STRIPE_CONNECT_APPLICATION_FEE_PERCENT must be between 0 and 100',
       );
+    }
+
+    return percent;
+  }
+
+  private resolveConnectApplicationFeeAmount(unitAmountCents: number): number {
+    const percent = this.getConnectApplicationFeePercent();
+
+    if (percent <= 0) {
+      return 0;
     }
 
     return Math.round(unitAmountCents * (percent / 100));

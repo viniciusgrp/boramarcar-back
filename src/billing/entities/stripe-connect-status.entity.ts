@@ -4,6 +4,8 @@ export interface StripeConnectStatusResponse {
   detailsSubmitted: boolean;
   isReady: boolean;
   onboardingRequired: boolean;
+  applicationFeePercent: number;
+  canOpenDashboard: boolean;
 }
 
 export interface StripeConnectOnboardingResponse {

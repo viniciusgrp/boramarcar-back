@@ -116,6 +116,16 @@ export class BillingController {
     return this.billingService.getConnectStatus(tenant.id);
   }
 
+  @Post('connect/dashboard')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async createConnectDashboard(
+    @CurrentUser() user: User,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.createConnectDashboardLink(tenant.id);
+  }
+
   private async resolveOwnerTenant(userId: string) {
     const tenant = await this.tenantsService.findByOwnerId(userId);
 
