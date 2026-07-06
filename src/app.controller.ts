@@ -13,9 +13,15 @@ export class AppController {
 
   @SkipThrottle()
   @Get('health')
-  health(): { status: string; timestamp: string; uptime: number } {
+  health(): {
+    status: string;
+    environment: string;
+    timestamp: string;
+    uptime: number;
+  } {
     return {
       status: 'ok',
+      environment: process.env.APP_ENV?.trim() || 'development',
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
     };
