@@ -12,11 +12,12 @@ async function bootstrap() {
 
   app.use(helmet());
 
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-  const corsAllowAll = allowedOrigins.includes('*');
+  const rawOrigins = process.env.ALLOWED_ORIGINS?.trim();
+  const allowedOrigins = rawOrigins
+    ? rawOrigins.split(',').map((o) => o.trim()).filter(Boolean)
+    : [];
+  const corsAllowAll =
+    allowedOrigins.length === 0 || allowedOrigins.includes('*');
 
   app.enableCors({
     origin: (origin, callback) => {
