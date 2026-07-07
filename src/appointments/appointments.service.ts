@@ -604,6 +604,11 @@ export class AppointmentsService {
     if (!requiresDepositPayment) {
       return {
         appointment,
+        assignedProfessional: {
+          id: professionalId,
+          name: professionalBookingSettings.name,
+          contact_phone: professionalBookingSettings.contact_phone,
+        },
         loyaltyFeedback,
         customerReferralCode:
           await this.loyaltyService.resolveCustomerReferralCodeForAppointment(
@@ -623,6 +628,11 @@ export class AppointmentsService {
 
     return {
       appointment,
+      assignedProfessional: {
+        id: professionalId,
+        name: professionalBookingSettings.name,
+        contact_phone: professionalBookingSettings.contact_phone,
+      },
       checkoutUrl,
       loyaltyFeedback,
       customerReferralCode:
@@ -2272,12 +2282,13 @@ export class AppointmentsService {
     professionalId: string,
   ): Promise<{
     name: string;
+    contact_phone: string | null;
     bookingAcceptanceType: ProfessionalBookingAcceptanceType;
   }> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('professionals')
-      .select('name, booking_acceptance_type')
+      .select('name, contact_phone, booking_acceptance_type')
       .eq('id', professionalId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -2296,6 +2307,7 @@ export class AppointmentsService {
 
     return {
       name: data.name?.trim() || 'Profissional',
+      contact_phone: data.contact_phone?.trim() || null,
       bookingAcceptanceType:
         bookingAcceptanceType === 'AUTOMATIC' ||
         bookingAcceptanceType === 'MANUAL'
