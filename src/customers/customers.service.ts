@@ -347,6 +347,45 @@ export class CustomersService {
     );
   }
 
+  async searchForTenant(
+    tenantId: string,
+    query: string,
+    limit = 8,
+  ): Promise<CustomerListItem[]> {
+    const trimmed = query.trim();
+
+    if (trimmed.length < 3) {
+      throw new BadRequestException(
+        'Informe ao menos 3 caracteres para buscar clientes.',
+      );
+    }
+
+    const escaped = trimmed.replace(/[\\%_]/g, '\\$&');
+    const phoneDigits = trimmed.replace(/\D/g, '');
+    const filters = [`name.ilike.%${escaped}%`];
+
+    if (phoneDigits.length >= 3) {
+      filters.push(`phone.ilike.%${phoneDigits}%`);
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .or(filters.join(','))
+      .order('name', { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = (data ?? []) as Customer[];
+
+    return rows.map((row) => this.mapCustomerListItem(row, null));
+  }
+
   async listForTenant(tenantId: string): Promise<CustomerListItem[]> {
     const { data, error } = await this.supabaseService
       .getClient()

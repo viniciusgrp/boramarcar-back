@@ -4,6 +4,7 @@ export class CreateInternalAppointmentDto {
   serviceId?: string;
   serviceIds?: string[];
   startTime!: string;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   forceSchedule?: boolean;

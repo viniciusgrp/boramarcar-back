@@ -17,9 +17,7 @@ import {
   addMinutes,
   format,
   isAfter,
-  isToday,
   parse,
-  parseISO,
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
 import { CustomersService } from '../customers/customers.service';
@@ -37,6 +35,13 @@ import { ProfessionalAbsencesService } from '../professional-absences/profession
 import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/professional-absence-range.dto';
 import { ProfessionalsService } from '../professionals/professionals.service';
 import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
+import {
+  formatWallClockDate,
+  getWallClockNow,
+  isSameWallClockDay,
+  parseWallClockDateTime,
+  wallClockToStorageIso,
+} from '../schedule/utils/wall-clock-datetime.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import {
@@ -368,7 +373,7 @@ export class AppointmentsService {
       );
 
     const dayBase = parse(date, 'yyyy-MM-dd', new Date());
-    const now = new Date();
+    const now = getWallClockNow();
     const availableSlots: string[] = [];
     let slotStart = businessOpen;
 
@@ -376,18 +381,19 @@ export class AppointmentsService {
       const slotEnd = addMinutes(slotStart, durationMinutes);
 
       const hasConflict = bookedSlots.some((appointment) => {
-        const appointmentStart = new Date(appointment.start_time);
-        const appointmentEnd = new Date(appointment.end_time);
+        const appointmentStart = parseWallClockDateTime(appointment.start_time);
+        const appointmentEnd = parseWallClockDateTime(appointment.end_time);
         return slotStart < appointmentEnd && slotEnd > appointmentStart;
       });
 
       const hasAbsenceConflict = dayAbsences.some((absence) => {
-        const absenceStart = new Date(absence.startsAt);
-        const absenceEnd = new Date(absence.endsAt);
+        const absenceStart = parseWallClockDateTime(absence.startsAt);
+        const absenceEnd = parseWallClockDateTime(absence.endsAt);
         return slotStart < absenceEnd && slotEnd > absenceStart;
       });
 
-      const isFutureSlot = !isToday(dayBase) || isAfter(slotStart, now);
+      const isFutureSlot =
+        !isSameWallClockDay(dayBase, now) || isAfter(slotStart, now);
 
       if (!hasConflict && !hasAbsenceConflict && isFutureSlot) {
         availableSlots.push(format(slotStart, 'HH:mm'));
@@ -416,7 +422,7 @@ export class AppointmentsService {
     const serviceIds = normalizeServiceIds(dto);
     const booking = await this.resolveBookingServices(dto.tenantId, serviceIds);
 
-    const startTime = parseISO(dto.startTime);
+    const startTime = parseWallClockDateTime(dto.startTime);
     const endTime = addMinutes(startTime, booking.totalDurationMinutes);
 
     let professionalId = dto.professionalId?.trim() ?? '';
@@ -555,8 +561,8 @@ export class AppointmentsService {
         customer_id: customer.id,
         customer_name: customer.name.trim(),
         customer_phone: customer.phone.trim(),
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: wallClockToStorageIso(startTime),
+        end_time: wallClockToStorageIso(endTime),
         status: appointmentStatus,
         deposit_paid: isPaidWithPoints,
         payment_status: paymentStatus,
@@ -690,29 +696,20 @@ export class AppointmentsService {
 
     const customer = await this.resolveCustomerForInternal(
       tenantId,
+      dto.customerId,
       dto.customerName,
       dto.customerPhone,
     );
 
-    let customerId: string | null = null;
-
-    if (customer.phone.trim()) {
-      const resolvedCustomer =
-        await this.loyaltyService.findOrCreateCustomerForAppointment(
-          tenantId,
-          customer.name,
-          customer.phone,
-        );
-      customerId = resolvedCustomer.customer.id;
-    }
+    let customerId: string | null = customer.customerId;
 
     const booking = await this.resolveBookingServices(tenantId, serviceIds);
     const primaryServiceId = booking.items[0].id;
 
-    const startTime = parseISO(dto.startTime);
+    const startTime = parseWallClockDateTime(dto.startTime);
     const durationMinutes = booking.totalDurationMinutes;
     const endTime = addMinutes(startTime, durationMinutes);
-    const dateKey = format(startTime, 'yyyy-MM-dd');
+    const dateKey = formatWallClockDate(startTime);
 
     if (!dto.forceSchedule) {
       const schedule =
@@ -772,8 +769,8 @@ export class AppointmentsService {
         customer_id: customerId,
         customer_name: customer.name,
         customer_phone: customer.phone,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: wallClockToStorageIso(startTime),
+        end_time: wallClockToStorageIso(endTime),
         status: 'CONFIRMED',
         deposit_paid: false,
         payment_status: 'PAID',
@@ -1579,9 +1576,25 @@ export class AppointmentsService {
 
   private async resolveCustomerForInternal(
     tenantId: string,
+    customerId?: string,
     customerName?: string,
     customerPhone?: string,
-  ): Promise<{ name: string; phone: string }> {
+  ): Promise<{ customerId: string | null; name: string; phone: string }> {
+    const trimmedCustomerId = customerId?.trim();
+
+    if (trimmedCustomerId) {
+      const existingCustomer = await this.customersService.findByIdForTenant(
+        tenantId,
+        trimmedCustomerId,
+      );
+
+      return {
+        customerId: existingCustomer.id,
+        name: customerName?.trim() || existingCustomer.name,
+        phone: customerPhone?.trim() || existingCustomer.phone,
+      };
+    }
+
     const trimmedName = customerName?.trim() ?? '';
     const phoneDigits = this.normalizePhoneDigits(customerPhone);
 
@@ -1607,16 +1620,20 @@ export class AppointmentsService {
         (row) => this.normalizePhoneDigits(row.customer_phone) === phoneDigits,
       );
 
-      if (existing) {
-        return {
-          name: trimmedName || existing.customer_name,
-          phone: customerPhone?.trim() || existing.customer_phone,
-        };
-      }
+      const resolvedName = trimmedName || existing?.customer_name || 'Cliente balcão';
+      const resolvedPhone = customerPhone?.trim() || existing?.customer_phone || '';
+
+      const loyaltyCustomer =
+        await this.loyaltyService.findOrCreateCustomerForAppointment(
+          tenantId,
+          resolvedName,
+          resolvedPhone,
+        );
 
       return {
-        name: trimmedName || 'Cliente balcão',
-        phone: customerPhone?.trim() ?? '',
+        customerId: loyaltyCustomer.customer.id,
+        name: resolvedName,
+        phone: resolvedPhone,
       };
     }
 
@@ -1627,6 +1644,7 @@ export class AppointmentsService {
     }
 
     return {
+      customerId: null,
       name: trimmedName,
       phone: '',
     };
@@ -1642,8 +1660,8 @@ export class AppointmentsService {
     startTime: Date,
     endTime: Date,
   ): Promise<boolean> {
-    const dayStartIso = `${format(startTime, 'yyyy-MM-dd')}T00:00:00`;
-    const dayEndIso = `${format(startTime, 'yyyy-MM-dd')}T23:59:59`;
+    const dayStartIso = `${formatWallClockDate(startTime)}T00:00:00`;
+    const dayEndIso = `${formatWallClockDate(startTime)}T23:59:59`;
 
     const { data: appointments, error } = await this.supabaseService
       .getClient()
@@ -1670,8 +1688,8 @@ export class AppointmentsService {
     >[];
 
     return bookedSlots.some((appointment) => {
-      const appointmentStart = new Date(appointment.start_time);
-      const appointmentEnd = new Date(appointment.end_time);
+      const appointmentStart = parseWallClockDateTime(appointment.start_time);
+      const appointmentEnd = parseWallClockDateTime(appointment.end_time);
       return startTime < appointmentEnd && endTime > appointmentStart;
     });
   }
@@ -1724,7 +1742,7 @@ export class AppointmentsService {
       return false;
     }
 
-    return !isAfter(now, parseISO(row.start_time));
+    return !isAfter(now, parseWallClockDateTime(row.start_time));
   }
 
   private canCustomerRequestCancellation(
@@ -2488,7 +2506,7 @@ export class AppointmentsService {
       );
     }
 
-    const dateKey = format(startTime, 'yyyy-MM-dd');
+    const dateKey = formatWallClockDate(startTime);
     const availableProfessionalIds: string[] = [];
 
     for (const professional of professionals) {

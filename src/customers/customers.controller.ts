@@ -72,6 +72,23 @@ export class CustomersController {
     return this.customersService.updateProfile(resolveAuthUserId(user), dto);
   }
 
+  @Get('search')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  search(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Query('q') query?: string,
+  ): Promise<CustomerListItem[]> {
+    if (!query?.trim()) {
+      throw new BadRequestException('Query parameter "q" is required');
+    }
+
+    return this.customersService.searchForTenant(
+      context.tenant.id,
+      query.trim(),
+    );
+  }
+
   @Get()
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN')
