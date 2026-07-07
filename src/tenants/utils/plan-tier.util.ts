@@ -58,3 +58,7 @@ export function canAddActiveProfessional(
 
   return activeProfessionalCount < limit;
 }
+
+export function canCustomizeAdminThemeColors(planTier: PlanTier): boolean {
+  return planTier === 'PRO' || planTier === 'ELITE';
+}

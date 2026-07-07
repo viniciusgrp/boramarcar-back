@@ -2353,6 +2353,8 @@ export class AppointmentsService {
       address_city: row.address_city,
       address_state: row.address_state,
       primary_color: '#111827',
+      admin_secondary_color_light: '#b45309',
+      admin_secondary_color_dark: '#f59e0b',
       contact_phone: null,
       require_deposit: false,
       require_customer_email_confirmation: false,

@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Patch,
   UseGuards,
 } from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
@@ -19,6 +20,7 @@ import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { TenantMeResponse } from './entities/tenant-me-response.entity';
 import { Tenant } from './entities/tenant.entity';
 import type { InitialSetupStatus } from './entities/initial-setup-status.entity';
@@ -86,6 +88,16 @@ export class TenantsController {
     @Body() dto: UpdateTenantDto,
   ): Promise<Tenant> {
     return this.tenantsService.updateForOwner(user.id, dto);
+  }
+
+  @Patch('me/admin-theme')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  updateAdminTheme(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateTenantAdminThemeDto,
+  ): Promise<Tenant> {
+    return this.tenantsService.updateAdminThemeForOwner(user.id, dto);
   }
 
   @Get(':slug')

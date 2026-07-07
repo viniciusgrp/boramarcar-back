@@ -20,6 +20,8 @@ export interface Tenant {
   address_city: string | null;
   address_state: string | null;
   primary_color: string;
+  admin_secondary_color_light: string;
+  admin_secondary_color_dark: string;
   contact_phone: string | null;
   require_deposit: boolean;
   require_customer_email_confirmation: boolean;

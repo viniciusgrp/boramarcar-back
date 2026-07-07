@@ -22,7 +22,9 @@ import { AcceptTenantUserInviteDto } from './dto/accept-tenant-user-invite.dto';
 import { CreateTenantUserInviteDto } from './dto/create-tenant-user-invite.dto';
 import { SignupTenantUserInviteDto } from './dto/signup-tenant-user-invite.dto';
 import { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
+import type { TenantMembershipSummary } from './entities/tenant-user.entity';
 import type { TenantUser } from './entities/tenant-user.entity';
+import { UpdateTenantUserPreferencesDto } from './dto/update-tenant-user-preferences.dto';
 import type {
   TenantUserInviteListItem,
   TenantUserInvitePreview,
@@ -34,6 +36,15 @@ import { TenantUsersService } from './tenant-users.service';
 @Controller('tenant-users')
 export class TenantUsersController {
   constructor(private readonly tenantUsersService: TenantUsersService) {}
+
+  @Patch('me/preferences')
+  @UseGuards(AuthGuard)
+  updateMyPreferences(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateTenantUserPreferencesDto,
+  ): Promise<TenantMembershipSummary> {
+    return this.tenantUsersService.updatePreferencesForUser(user.id, dto);
+  }
 
   @Get()
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)

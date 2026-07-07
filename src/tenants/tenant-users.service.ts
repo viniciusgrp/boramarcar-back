@@ -23,12 +23,17 @@ import type {
 import type { UserRole } from './entities/user-role.type';
 import { normalizeUserRole } from './entities/user-role.type';
 import type { UpdateTenantUserRoleDto } from './dto/update-tenant-user-role.dto';
+import type { UpdateTenantUserPreferencesDto } from './dto/update-tenant-user-preferences.dto';
 import type {
   TenantUserInvite,
   TenantUserInviteListItem,
   TenantUserInvitePreview,
 } from './entities/tenant-user-invite.entity';
 import { USER_ROLE_LABELS } from './entities/user-role.type';
+import {
+  normalizeAdminThemeMode,
+  normalizeTenantUserPreferences,
+} from './utils/tenant-user-preferences.util';
 
 interface TenantUserRow extends TenantUser {}
 
@@ -57,6 +62,7 @@ function mapTenantUserRow(row: TenantUserRow): TenantUser {
     ...row,
     role: normalizeUserRole(row.role),
     professional_id: row.professional_id ?? null,
+    preferences: normalizeTenantUserPreferences(row.preferences),
   };
 }
 
@@ -65,6 +71,7 @@ function mapMembershipSummary(tenantUser: TenantUser): TenantMembershipSummary {
     id: tenantUser.id,
     role: tenantUser.role,
     professionalId: tenantUser.professional_id,
+    preferences: tenantUser.preferences,
   };
 }
 
@@ -93,6 +100,40 @@ export class TenantUsersService {
     }
 
     return data ? mapTenantUserRow(data as TenantUserRow) : null;
+  }
+
+  async updatePreferencesForUser(
+    userId: string,
+    dto: UpdateTenantUserPreferencesDto,
+  ): Promise<TenantMembershipSummary> {
+    const tenantUser = await this.findByUserId(userId);
+
+    if (!tenantUser) {
+      throw new NotFoundException(
+        'No establishment linked to the authenticated user',
+      );
+    }
+
+    const preferences = {
+      admin_theme_mode: normalizeAdminThemeMode(dto.adminThemeMode),
+    };
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .update({
+        preferences,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantUser.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return mapMembershipSummary(mapTenantUserRow(data as TenantUserRow));
   }
 
   async listForTenant(tenantId: string): Promise<TenantUserListItem[]> {
