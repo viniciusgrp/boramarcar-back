@@ -1,4 +1,5 @@
 import type { UserRole } from './user-role.type';
+import type { TenantUserPreferences } from './tenant-user-preferences.type';
 
 export interface TenantUser {
   id: string;
@@ -6,6 +7,7 @@ export interface TenantUser {
   user_id: string;
   role: UserRole;
   professional_id: string | null;
+  preferences: TenantUserPreferences;
   created_at: string;
   updated_at: string;
 }
@@ -23,4 +25,5 @@ export interface TenantMembershipSummary {
   id: string;
   role: UserRole;
   professionalId: string | null;
+  preferences: import('./tenant-user-preferences.type').TenantUserPreferences;
 }

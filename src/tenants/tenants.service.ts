@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -26,6 +27,13 @@ import {
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod, TRIAL_DEFAULT_PLAN_TIER } from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
+import {
+  canCustomizeAdminThemeColors,
+  DEFAULT_ADMIN_SECONDARY_COLOR_DARK,
+  DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT,
+  normalizeAdminThemeColor,
+} from './utils/admin-theme.util';
+import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { normalizePayoutFrequency } from './entities/payout-frequency.type';
 import { TenantUsersService } from './tenant-users.service';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -98,6 +106,14 @@ function mapTenantRow(row: Tenant): Tenant {
     stripe_connect_charges_enabled: Boolean(row.stripe_connect_charges_enabled),
     stripe_connect_details_submitted: Boolean(
       row.stripe_connect_details_submitted,
+    ),
+    admin_secondary_color_light: normalizeAdminThemeColor(
+      row.admin_secondary_color_light,
+      DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT,
+    ),
+    admin_secondary_color_dark: normalizeAdminThemeColor(
+      row.admin_secondary_color_dark,
+      DEFAULT_ADMIN_SECONDARY_COLOR_DARK,
     ),
   };
 }
@@ -208,6 +224,7 @@ export class TenantsService {
       user_id: userId,
       role: 'OWNER',
       professional_id: null,
+      preferences: { admin_theme_mode: 'light' },
       created_at: tenant.created_at,
       updated_at: tenant.updated_at,
     };
@@ -337,6 +354,51 @@ export class TenantsService {
         referee_points_bonus: this.resolveNonNegativeInteger(
           dto.refereePointsBonus,
           tenant.referee_points_bonus,
+        ),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenant.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return mapTenantRow(data as Tenant);
+  }
+
+  async updateAdminThemeForOwner(
+    ownerId: string,
+    dto: UpdateTenantAdminThemeDto,
+  ): Promise<Tenant> {
+    const accessContext = await this.findAccessContextByUserId(ownerId);
+
+    if (!accessContext) {
+      throw new NotFoundException(
+        'No establishment linked to the authenticated user',
+      );
+    }
+
+    const tenant = accessContext.tenant;
+
+    if (!canCustomizeAdminThemeColors(tenant.plan_tier)) {
+      throw new ForbiddenException(
+        'Personalização de cores do painel disponível nos planos Pro e Elite.',
+      );
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        admin_secondary_color_light: normalizeAdminThemeColor(
+          dto.secondaryColorLight,
+          DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT,
+        ),
+        admin_secondary_color_dark: normalizeAdminThemeColor(
+          dto.secondaryColorDark,
+          DEFAULT_ADMIN_SECONDARY_COLOR_DARK,
         ),
         updated_at: new Date().toISOString(),
       })
