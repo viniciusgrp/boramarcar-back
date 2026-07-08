@@ -3,7 +3,8 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { parse, setHours, setMinutes } from 'date-fns';
+import { parse } from 'date-fns';
+import { combineWallClockDayAndTime } from '../schedule/utils/wall-clock-datetime.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { BusinessHourItemDto } from './dto/update-business-hours.dto';
 import {
@@ -136,9 +137,7 @@ export class BusinessHoursService {
   }
 
   combineDateAndTime(dayBase: Date, timeValue: string): Date {
-    const normalized = this.normalizeTimeForStorage(timeValue);
-    const [hours, minutes] = normalized.split(':').map(Number);
-    return setMinutes(setHours(dayBase, hours), minutes);
+    return combineWallClockDayAndTime(dayBase, timeValue);
   }
 
   private mergeWithDefaults(
