@@ -37,6 +37,10 @@ import {
 import { extractStripeId } from './utils/stripe-id.util';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
 import { tenantHasManageableSubscription } from './utils/tenant-billing-access.util';
+import {
+  resolveConnectApplicationFeeAmount,
+  resolveTenantDepositApplicationFeePercent,
+} from './utils/deposit-application-fee.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -258,8 +262,12 @@ export class BillingService {
     const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}`;
 
     const unitAmountCents = Math.round(params.depositAmountBrl * 100);
-    const applicationFeeAmount =
-      this.resolveConnectApplicationFeeAmount(unitAmountCents);
+    const applicationFeePercent =
+      this.resolveConnectApplicationFeePercentForTenant(tenant);
+    const applicationFeeAmount = resolveConnectApplicationFeeAmount(
+      unitAmountCents,
+      applicationFeePercent,
+    );
 
     try {
       const session = await this.stripe.checkout.sessions.create({
@@ -814,7 +822,8 @@ export class BillingService {
     const chargesEnabled = Boolean(tenant.stripe_connect_charges_enabled);
     const detailsSubmitted = Boolean(tenant.stripe_connect_details_submitted);
     const isReady = Boolean(accountId && chargesEnabled);
-    const applicationFeePercent = this.getConnectApplicationFeePercent();
+    const applicationFeePercent =
+      this.resolveConnectApplicationFeePercentForTenant(tenant);
 
     return {
       accountId,
@@ -1012,7 +1021,7 @@ export class BillingService {
     );
   }
 
-  private getConnectApplicationFeePercent(): number {
+  private getDefaultConnectApplicationFeePercent(): number {
     const rawPercent = this.configService.get<string>(
       'STRIPE_CONNECT_APPLICATION_FEE_PERCENT',
     );
@@ -1031,13 +1040,10 @@ export class BillingService {
     return percent;
   }
 
-  private resolveConnectApplicationFeeAmount(unitAmountCents: number): number {
-    const percent = this.getConnectApplicationFeePercent();
-
-    if (percent <= 0) {
-      return 0;
-    }
-
-    return Math.round(unitAmountCents * (percent / 100));
+  private resolveConnectApplicationFeePercentForTenant(tenant: Tenant): number {
+    return resolveTenantDepositApplicationFeePercent(
+      tenant.deposit_application_fee_percent,
+      this.getDefaultConnectApplicationFeePercent(),
+    );
   }
 }
