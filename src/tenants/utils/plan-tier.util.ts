@@ -62,3 +62,10 @@ export function canAddActiveProfessional(
 export function canCustomizeAdminThemeColors(planTier: PlanTier): boolean {
   return planTier === 'PRO' || planTier === 'ELITE';
 }
+
+export function canAccessDepositFeatures(
+  planTier: PlanTier,
+  depositFeatureEnabled = false,
+): boolean {
+  return planTier === 'ELITE' || depositFeatureEnabled;
+}

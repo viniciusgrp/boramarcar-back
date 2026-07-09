@@ -1,5 +1,4 @@
 import { BadRequestException } from '@nestjs/common';
-import type { PlanTier } from '../../tenants/entities/plan-tier.type';
 
 export interface ResolvedServiceDepositFields {
   requires_deposit: boolean;
@@ -7,11 +6,11 @@ export interface ResolvedServiceDepositFields {
 }
 
 export function resolveServiceDepositFields(
-  planTier: PlanTier,
+  canUseDepositFeatures: boolean,
   requiresDeposit?: boolean,
   depositAmount?: number | null,
 ): ResolvedServiceDepositFields {
-  if (planTier !== 'ELITE') {
+  if (!canUseDepositFeatures) {
     if (requiresDeposit) {
       throw new BadRequestException(
         'Pagamento de sinal está disponível apenas no plano Elite.',

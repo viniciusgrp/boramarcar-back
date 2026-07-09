@@ -167,6 +167,68 @@ export class MailService {
     });
   }
 
+  isConfigured(): boolean {
+    return this.transporter !== null;
+  }
+
+  async sendSupportRequest(params: {
+    recipientEmail: string;
+    tenantName: string;
+    tenantId: string;
+    userRole: string;
+    senderName: string;
+    senderEmail: string;
+    subject: string;
+    message: string;
+  }): Promise<void> {
+    const escapedMessage = params.message
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br />');
+
+    await this.sendMail({
+      to: params.recipientEmail,
+      subject: `[Suporte BoraMarcar] ${params.subject}`,
+      replyTo: params.senderEmail,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">
+          <h1 style="font-size: 20px; margin: 0 0 12px;">Nova solicitação de suporte</h1>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; width: 140px;">Estabelecimento</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.tenantName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">ID do tenant</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.tenantId}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Função</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.userRole}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Nome</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.senderName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">E-mail</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.senderEmail}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Assunto</td>
+              <td style="padding: 8px 0; font-weight: 600;">${params.subject}</td>
+            </tr>
+          </table>
+          <p style="margin: 0 0 8px; color: #6b7280; font-size: 14px;">Mensagem</p>
+          <div style="padding: 16px; border-radius: 12px; background: #f9fafb; color: #111827;">
+            ${escapedMessage}
+          </div>
+        </div>
+      `,
+    });
+  }
+
   async sendReferralBonusEarned(params: {
     recipientEmail: string | null;
     recipientName: string;
@@ -227,6 +289,7 @@ export class MailService {
     to: string;
     subject: string;
     html: string;
+    replyTo?: string;
   }): Promise<void> {
     const recipient = params.to.trim().toLowerCase();
 
@@ -252,11 +315,14 @@ export class MailService {
       return;
     }
 
+    const replyTo = params.replyTo?.trim().toLowerCase();
+
     await this.transporter.sendMail({
       from,
       to: recipient,
       subject: params.subject,
       html: params.html,
+      ...(replyTo ? { replyTo } : {}),
     });
   }
 

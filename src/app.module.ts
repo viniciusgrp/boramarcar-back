@@ -21,6 +21,7 @@ import { ServicesModule } from './services/services.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UploadModule } from './upload/upload.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { UploadModule } from './upload/upload.module';
     LoyaltyModule,
     NotificationsModule,
     UploadModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [
