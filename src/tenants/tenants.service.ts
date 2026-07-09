@@ -329,7 +329,6 @@ export class TenantsService {
         address_neighborhood: this.normalizeOptionalText(dto.addressNeighborhood),
         address_city: this.normalizeOptionalText(dto.addressCity),
         address_state: this.normalizeState(dto.addressState),
-        require_deposit: dto.requireDeposit,
         require_customer_email_confirmation:
           dto.requireCustomerEmailConfirmation ??
           tenant.require_customer_email_confirmation,
@@ -659,7 +658,6 @@ export class TenantsService {
         name: tenantName,
         slug: normalizedSlug,
         primary_color: '#111827',
-        require_deposit: false,
         owner_id: ownerId,
         subscription_status: 'INACTIVE',
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,

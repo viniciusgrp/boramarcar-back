@@ -23,7 +23,6 @@ export interface Tenant {
   admin_secondary_color_light: string;
   admin_secondary_color_dark: string;
   contact_phone: string | null;
-  require_deposit: boolean;
   deposit_feature_enabled: boolean;
   deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;

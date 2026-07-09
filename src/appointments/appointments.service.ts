@@ -2390,7 +2390,6 @@ export class AppointmentsService {
       admin_secondary_color_light: '#b45309',
       admin_secondary_color_dark: '#f59e0b',
       contact_phone: null,
-      require_deposit: false,
       deposit_feature_enabled: false,
       deposit_application_fee_percent: null,
       require_customer_email_confirmation: false,
