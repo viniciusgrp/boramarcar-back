@@ -24,6 +24,7 @@ export interface Tenant {
   admin_secondary_color_dark: string;
   contact_phone: string | null;
   require_deposit: boolean;
+  deposit_feature_enabled: boolean;
   require_customer_email_confirmation: boolean;
   allow_customer_self_cancellation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;

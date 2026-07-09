@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
+import { canAccessDepositFeatures } from '../tenants/utils/plan-tier.util';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
@@ -51,12 +52,13 @@ export class ServicesService {
   async createForTenant(
     tenantId: string,
     planTier: PlanTier,
+    depositFeatureEnabled: boolean,
     dto: CreateServiceDto,
   ): Promise<Service> {
     this.validateServicePayload(dto.durationMinutes, dto.price);
 
     const depositFields = resolveServiceDepositFields(
-      planTier,
+      canAccessDepositFeatures(planTier, depositFeatureEnabled),
       dto.requiresDeposit,
       dto.depositAmount,
     );
@@ -95,6 +97,7 @@ export class ServicesService {
   async updateForTenant(
     tenantId: string,
     planTier: PlanTier,
+    depositFeatureEnabled: boolean,
     serviceId: string,
     dto: UpdateServiceDto,
   ): Promise<Service> {
@@ -132,7 +135,7 @@ export class ServicesService {
 
     if (dto.requiresDeposit !== undefined || dto.depositAmount !== undefined) {
       const depositFields = resolveServiceDepositFields(
-        planTier,
+        canAccessDepositFeatures(planTier, depositFeatureEnabled),
         dto.requiresDeposit,
         dto.depositAmount,
       );
@@ -172,9 +175,10 @@ export class ServicesService {
   async softDeleteForTenant(
     tenantId: string,
     planTier: PlanTier,
+    depositFeatureEnabled: boolean,
     serviceId: string,
   ): Promise<Service> {
-    return this.updateForTenant(tenantId, planTier, serviceId, {
+    return this.updateForTenant(tenantId, planTier, depositFeatureEnabled, serviceId, {
       isActive: false,
     });
   }

@@ -48,6 +48,7 @@ import {
   assertProfessionalScope,
   assertProfessionalScopeForMutation,
 } from '../tenants/utils/tenant-user-scope.util';
+import { canAccessDepositFeatures } from '../tenants/utils/plan-tier.util';
 import { FinanceService } from '../finance/finance.service';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -506,7 +507,10 @@ export class AppointmentsService {
 
     const requiresDepositPayment =
       !isPaidWithPoints &&
-      tenant.plan_tier === 'ELITE' &&
+      canAccessDepositFeatures(
+        tenant.plan_tier,
+        tenant.deposit_feature_enabled,
+      ) &&
       booking.requiresDeposit &&
       booking.totalDepositAmount > 0;
 
@@ -2387,6 +2391,7 @@ export class AppointmentsService {
       admin_secondary_color_dark: '#f59e0b',
       contact_phone: null,
       require_deposit: false,
+      deposit_feature_enabled: false,
       require_customer_email_confirmation: false,
       allow_customer_self_cancellation: false,
       booking_acceptance_type: 'AUTOMATIC',

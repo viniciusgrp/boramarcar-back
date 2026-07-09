@@ -8,7 +8,7 @@ import type { InitialSetupStatus } from './entities/initial-setup-status.entity'
 import type { Tenant } from './entities/tenant.entity';
 import { INITIAL_SETUP_CHECKLIST_VERSION } from './initial-setup.constants';
 import { TenantsService } from './tenants.service';
-import { normalizePlanTier } from './utils/plan-tier.util';
+import { normalizePlanTier, canAccessDepositFeatures } from './utils/plan-tier.util';
 
 @Injectable()
 export class InitialSetupService {
@@ -68,7 +68,10 @@ export class InitialSetupService {
   }
 
   private async getStatusForTenant(tenant: Tenant): Promise<InitialSetupStatus> {
-    const requiresStripeConnect = normalizePlanTier(tenant.plan_tier) === 'ELITE';
+    const requiresStripeConnect = canAccessDepositFeatures(
+      normalizePlanTier(tenant.plan_tier),
+      tenant.deposit_feature_enabled,
+    );
 
     if (this.isPersistedCompleteForCurrentVersion(tenant)) {
       return {

@@ -76,7 +76,12 @@ export class ServicesController {
     }
 
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.servicesService.createForTenant(tenant.id, tenant.plan_tier, dto);
+    return this.servicesService.createForTenant(
+      tenant.id,
+      tenant.plan_tier,
+      tenant.deposit_feature_enabled,
+      dto,
+    );
   }
 
   @Put(':id')
@@ -90,6 +95,7 @@ export class ServicesController {
     return this.servicesService.updateForTenant(
       tenant.id,
       tenant.plan_tier,
+      tenant.deposit_feature_enabled,
       id,
       dto,
     );
@@ -105,6 +111,7 @@ export class ServicesController {
     return this.servicesService.softDeleteForTenant(
       tenant.id,
       tenant.plan_tier,
+      tenant.deposit_feature_enabled,
       id,
     );
   }

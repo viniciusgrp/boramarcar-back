@@ -100,6 +100,7 @@ function mapTenantRow(row: Tenant): Tenant {
     allow_customer_self_cancellation: Boolean(
       row.allow_customer_self_cancellation,
     ),
+    deposit_feature_enabled: Boolean(row.deposit_feature_enabled),
     booking_slot_interval_minutes: normalizeBookingSlotIntervalMinutes(
       row.booking_slot_interval_minutes,
     ),
