@@ -31,7 +31,15 @@ export function resolveTenantDepositApplicationFeePercent(
   defaultPercent: number,
 ): number {
   if (tenantOverride !== null && tenantOverride !== undefined) {
-    return normalizeApplicationFeePercent(tenantOverride) ?? 0;
+    const normalized = normalizeApplicationFeePercent(tenantOverride);
+
+    if (normalized === null) {
+      throw new InternalServerErrorException(
+        'Invalid deposit_application_fee_percent configured for tenant',
+      );
+    }
+
+    return normalized;
   }
 
   return normalizeApplicationFeePercent(defaultPercent) ?? 0;
