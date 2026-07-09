@@ -101,6 +101,11 @@ function mapTenantRow(row: Tenant): Tenant {
       row.allow_customer_self_cancellation,
     ),
     deposit_feature_enabled: Boolean(row.deposit_feature_enabled),
+    deposit_application_fee_percent:
+      row.deposit_application_fee_percent === null ||
+      row.deposit_application_fee_percent === undefined
+        ? null
+        : Number(row.deposit_application_fee_percent),
     booking_slot_interval_minutes: normalizeBookingSlotIntervalMinutes(
       row.booking_slot_interval_minutes,
     ),

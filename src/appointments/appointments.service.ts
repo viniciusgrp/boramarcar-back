@@ -2392,6 +2392,7 @@ export class AppointmentsService {
       contact_phone: null,
       require_deposit: false,
       deposit_feature_enabled: false,
+      deposit_application_fee_percent: null,
       require_customer_email_confirmation: false,
       allow_customer_self_cancellation: false,
       booking_acceptance_type: 'AUTOMATIC',

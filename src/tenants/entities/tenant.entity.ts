@@ -25,6 +25,7 @@ export interface Tenant {
   contact_phone: string | null;
   require_deposit: boolean;
   deposit_feature_enabled: boolean;
+  deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;
   allow_customer_self_cancellation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
