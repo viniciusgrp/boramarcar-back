@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  ForbiddenException,
   Headers,
   NotFoundException,
   Body,
@@ -15,7 +16,11 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { SkipTenantAccessCheck } from '../tenants/decorators/skip-tenant-access-check.decorator';
 import { TenantsService } from '../tenants/tenants.service';
-import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
+import { DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE } from '../tenants/constants/deposit-feature.constants';
+import {
+  canAccessDepositFeatures,
+  normalizePlanTier,
+} from '../tenants/utils/plan-tier.util';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { BillingService } from './billing.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -84,6 +89,7 @@ export class BillingController {
   @UseGuards(AuthGuard)
   async getConnectStatus(@CurrentUser() user: User) {
     const tenant = await this.resolveOwnerTenant(user.id);
+    this.assertCanAccessDepositFeatures(tenant);
     return this.billingService.getConnectStatus(tenant.id);
   }
 
@@ -94,6 +100,7 @@ export class BillingController {
     @CurrentUser() user: User,
   ): Promise<CheckoutSessionResponse> {
     const tenant = await this.resolveOwnerTenant(user.id);
+    this.assertCanAccessDepositFeatures(tenant);
 
     if (!user.email?.trim()) {
       throw new BadRequestException(
@@ -112,6 +119,7 @@ export class BillingController {
   @UseGuards(AuthGuard)
   async syncConnectStatus(@CurrentUser() user: User) {
     const tenant = await this.resolveOwnerTenant(user.id);
+    this.assertCanAccessDepositFeatures(tenant);
     await this.billingService.syncConnectAccountFromStripe(tenant.id);
     return this.billingService.getConnectStatus(tenant.id);
   }
@@ -123,7 +131,19 @@ export class BillingController {
     @CurrentUser() user: User,
   ): Promise<CheckoutSessionResponse> {
     const tenant = await this.resolveOwnerTenant(user.id);
+    this.assertCanAccessDepositFeatures(tenant);
     return this.billingService.createConnectDashboardLink(tenant.id);
+  }
+
+  private assertCanAccessDepositFeatures(tenant: Tenant): void {
+    if (
+      !canAccessDepositFeatures(
+        normalizePlanTier(tenant.plan_tier),
+        tenant.deposit_feature_enabled,
+      )
+    ) {
+      throw new ForbiddenException(DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE);
+    }
   }
 
   private async resolveOwnerTenant(userId: string) {

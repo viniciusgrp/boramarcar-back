@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE } from '../../tenants/constants/deposit-feature.constants';
 
 export interface ResolvedServiceDepositFields {
   requires_deposit: boolean;
@@ -12,9 +13,7 @@ export function resolveServiceDepositFields(
 ): ResolvedServiceDepositFields {
   if (!canUseDepositFeatures) {
     if (requiresDeposit) {
-      throw new BadRequestException(
-        'Pagamento de sinal está disponível apenas no plano Elite.',
-      );
+      throw new BadRequestException(DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE);
     }
 
     return { requires_deposit: false, deposit_amount: null };
