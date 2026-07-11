@@ -19,6 +19,7 @@ export class UpdateTenantDto {
   addressCity?: string | null;
   addressState?: string | null;
   requireCustomerEmailConfirmation?: boolean;
+  requireCustomerAccount?: boolean;
   allowCustomerSelfCancellation?: boolean;
   bookingAcceptanceType!: TenantBookingAcceptanceType;
   bookingSlotIntervalMinutes?: number;

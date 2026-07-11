@@ -26,6 +26,7 @@ export interface Tenant {
   deposit_feature_enabled: boolean;
   deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;
+  require_customer_account: boolean;
   allow_customer_self_cancellation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
@@ -50,6 +51,7 @@ export interface Tenant {
   initial_setup_completed_at: string | null;
   initial_setup_version: number | null;
   initial_setup_settings_visited_at: string | null;
+  initial_setup_customer_account_decided_at: string | null;
   created_at: string;
   updated_at: string;
 }

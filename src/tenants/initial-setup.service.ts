@@ -82,6 +82,7 @@ export class InitialSetupService {
         hasService: true,
         hasBranding: true,
         hasVisitedSettings: true,
+        hasCustomerAccountPolicy: true,
         hasStripeConnect: true,
         requiresStripeConnect,
       };
@@ -93,12 +94,16 @@ export class InitialSetupService {
     ]);
     const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
     const hasVisitedSettings = Boolean(tenant.initial_setup_settings_visited_at);
+    const hasCustomerAccountPolicy = Boolean(
+      tenant.initial_setup_customer_account_decided_at,
+    );
     const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
     const isComplete =
       hasProfessional &&
       hasService &&
       hasBranding &&
       hasVisitedSettings &&
+      hasCustomerAccountPolicy &&
       (!requiresStripeConnect || hasStripeConnect);
 
     if (isComplete) {
@@ -113,6 +118,7 @@ export class InitialSetupService {
       hasService,
       hasBranding,
       hasVisitedSettings,
+      hasCustomerAccountPolicy,
       hasStripeConnect,
       requiresStripeConnect,
     };

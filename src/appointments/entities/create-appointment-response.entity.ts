@@ -8,4 +8,6 @@ export interface CreateAppointmentResponse {
   checkoutUrl?: string;
   loyaltyFeedback?: BookingLoyaltyFeedback;
   customerReferralCode?: string | null;
+  /** Present for guest bookings (no auth). Store with appointment id in localStorage. */
+  guestAccessToken?: string;
 }

@@ -97,6 +97,11 @@ function mapTenantRow(row: Tenant): Tenant {
     require_customer_email_confirmation: Boolean(
       row.require_customer_email_confirmation,
     ),
+    require_customer_account:
+      row.require_customer_account === undefined ||
+      row.require_customer_account === null
+        ? true
+        : Boolean(row.require_customer_account),
     allow_customer_self_cancellation: Boolean(
       row.allow_customer_self_cancellation,
     ),
@@ -332,9 +337,18 @@ export class TenantsService {
         require_customer_email_confirmation:
           dto.requireCustomerEmailConfirmation ??
           tenant.require_customer_email_confirmation,
+        require_customer_account:
+          dto.requireCustomerAccount ?? tenant.require_customer_account,
         allow_customer_self_cancellation:
           dto.allowCustomerSelfCancellation ??
           tenant.allow_customer_self_cancellation,
+        ...(dto.requireCustomerAccount !== undefined &&
+        !tenant.initial_setup_customer_account_decided_at
+          ? {
+              initial_setup_customer_account_decided_at:
+                new Date().toISOString(),
+            }
+          : {}),
         booking_acceptance_type: normalizeTenantBookingAcceptanceType(
           dto.bookingAcceptanceType,
         ),

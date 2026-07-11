@@ -147,12 +147,25 @@ export class LoyaltyController {
   }
 
   @Post('redeem')
+  @UseGuards(AuthGuard)
   async redeemReward(
+    @CurrentUser() user: User,
     @Body() dto: RedeemLoyaltyRewardDto,
   ): Promise<{ customer: Customer; transaction: LoyaltyTransaction }> {
     if (!dto.tenantId?.trim() || !dto.customerId?.trim() || !dto.rewardId?.trim()) {
       throw new BadRequestException(
         'Fields "tenantId", "customerId" and "rewardId" are required',
+      );
+    }
+
+    const profile = await this.loyaltyService.getProfileForAuthCustomer(
+      dto.tenantId.trim(),
+      resolveAuthUserId(user),
+    );
+
+    if (!profile.customer || profile.customer.id !== dto.customerId.trim()) {
+      throw new BadRequestException(
+        'Você só pode resgatar pontos da sua própria conta.',
       );
     }
 
