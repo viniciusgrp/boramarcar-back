@@ -3,6 +3,7 @@ import type { BookingSource } from './booking-source.type';
 
 export interface AdminAppointment {
   id: string;
+  customerId: string | null;
   customerName: string;
   customerPhone: string;
   startTime: string;

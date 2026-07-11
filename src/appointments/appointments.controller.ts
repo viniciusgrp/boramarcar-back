@@ -23,8 +23,13 @@ import { RolesGuard } from '../tenants/guards/roles.guard';
 import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import {
+  GuestAppointmentCancelDto,
+  GuestAppointmentLookupDto,
+} from './dto/guest-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
+import type { AppointmentLoyaltyRedeemOptions } from './entities/appointment-loyalty-redeem-options.entity';
 import {
   CustomerAppointment,
 } from './entities/customer-appointment.entity';
@@ -307,6 +312,63 @@ export class AppointmentsController {
     );
   }
 
+  @Post('guest/lookup')
+  lookupGuestAppointments(
+    @Body() dto: GuestAppointmentLookupDto,
+  ): Promise<CustomerAppointment[]> {
+    if (!dto.tenantId?.trim()) {
+      throw new BadRequestException('Field "tenantId" is required');
+    }
+
+    if (dto.scope !== 'upcoming' && dto.scope !== 'past') {
+      throw new BadRequestException(
+        'Field "scope" must be "upcoming" or "past"',
+      );
+    }
+
+    return this.appointmentsService.findGuestAppointments({
+      tenantId: dto.tenantId,
+      entries: Array.isArray(dto.entries) ? dto.entries : [],
+      scope: dto.scope,
+    });
+  }
+
+  @Patch('guest/:id/request-cancellation')
+  requestGuestCancellation(
+    @Param('id') id: string,
+    @Body() dto: GuestAppointmentCancelDto,
+  ): Promise<CustomerAppointment> {
+    if (!dto.tenantId?.trim() || !dto.accessToken?.trim()) {
+      throw new BadRequestException(
+        'Fields "tenantId" and "accessToken" are required',
+      );
+    }
+
+    return this.appointmentsService.requestCancellationForGuest({
+      tenantId: dto.tenantId,
+      appointmentId: id,
+      accessToken: dto.accessToken,
+    });
+  }
+
+  @Get(':id/loyalty-redeem-options')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  getLoyaltyRedeemOptions(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') id: string,
+  ): Promise<AppointmentLoyaltyRedeemOptions> {
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.getLoyaltyRedeemOptionsForAppointment(
+      context.tenant.id,
+      id,
+      scopedProfessionalId,
+    );
+  }
+
   @Patch(':id/status')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
@@ -328,6 +390,7 @@ export class AppointmentsController {
       id,
       dto.status,
       scopedProfessionalId,
+      dto.loyaltyRewardId,
     );
   }
 

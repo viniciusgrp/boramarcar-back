@@ -8,7 +8,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import { randomInt } from 'crypto';
+import { randomInt, randomBytes } from 'crypto';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
@@ -55,6 +55,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
+import type { AppointmentLoyaltyRedeemOptions } from './entities/appointment-loyalty-redeem-options.entity';
 import {
   CustomerAppointment,
   CustomerAppointmentScope,
@@ -420,6 +421,18 @@ export class AppointmentsService {
       );
     }
 
+    if (tenant.require_customer_account && !authUserId) {
+      throw new BadRequestException(
+        'É necessário entrar ou criar uma conta para agendar neste estabelecimento.',
+      );
+    }
+
+    if (!authUserId && dto.loyaltyRewardId?.trim()) {
+      throw new BadRequestException(
+        'Resgate de fidelidade pelo cliente exige conta. O estabelecimento pode aplicar os pontos no atendimento.',
+      );
+    }
+
     const serviceIds = normalizeServiceIds(dto);
     const booking = await this.resolveBookingServices(dto.tenantId, serviceIds);
 
@@ -555,6 +568,10 @@ export class AppointmentsService {
       ? addMinutes(new Date(), 30).toISOString()
       : null;
 
+    const guestAccessToken = authUserId
+      ? null
+      : randomBytes(32).toString('hex');
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -575,6 +592,7 @@ export class AppointmentsService {
         total_price: appointmentTotalPrice,
         loyalty_reward_id: loyaltyRewardId,
         hold_expires_at: holdExpiresAt,
+        guest_access_token: guestAccessToken,
       })
       .select('*')
       .single();
@@ -625,6 +643,7 @@ export class AppointmentsService {
             dto.tenantId,
             customer.id,
           ),
+        ...(guestAccessToken ? { guestAccessToken } : {}),
       };
     }
 
@@ -650,6 +669,7 @@ export class AppointmentsService {
           dto.tenantId,
           customer.id,
         ),
+      ...(guestAccessToken ? { guestAccessToken } : {}),
     };
   }
 
@@ -1331,9 +1351,18 @@ export class AppointmentsService {
     appointmentId: string,
     status: UpdateAppointmentStatusDto['status'],
     scopedProfessionalId?: string,
+    loyaltyRewardId?: string | null,
   ): Promise<AdminAppointment> {
     if (!APPOINTMENT_STATUSES.includes(status)) {
       throw new BadRequestException('Invalid appointment status');
+    }
+
+    const trimmedLoyaltyRewardId = loyaltyRewardId?.trim() || null;
+
+    if (trimmedLoyaltyRewardId && status !== 'COMPLETED') {
+      throw new BadRequestException(
+        'Resgate de fidelidade só pode ser aplicado ao concluir o atendimento.',
+      );
     }
 
     const { data: existing, error: fetchError } = await this.supabaseService
@@ -1381,6 +1410,10 @@ export class AppointmentsService {
       status: UpdateAppointmentStatusDto['status'];
       commission_amount?: number;
       cancellation_requested_at?: null;
+      loyalty_reward_id?: string;
+      total_price?: number;
+      deposit_paid?: boolean;
+      payment_status?: PaymentStatus;
     } = { status };
 
     const isCompletingAppointment =
@@ -1398,6 +1431,51 @@ export class AppointmentsService {
 
     if (isReactivatingCancelled) {
       updatePayload.cancellation_requested_at = null;
+    }
+
+    let appliedLoyaltyRewardId: string | null =
+      existing.loyalty_reward_id?.trim() || null;
+
+    if (isCompletingAppointment && trimmedLoyaltyRewardId) {
+      if (appliedLoyaltyRewardId) {
+        throw new BadRequestException(
+          'Este agendamento já foi pago com pontos de fidelidade.',
+        );
+      }
+
+      if (!existing.customer_id) {
+        throw new BadRequestException(
+          'Não há cliente vinculado para resgatar fidelidade.',
+        );
+      }
+
+      const serviceIds = (
+        Array.isArray(existing.appointment_services)
+          ? existing.appointment_services
+          : []
+      )
+        .map(
+          (item: { service_id?: string }) =>
+            item.service_id?.trim() || '',
+        )
+        .filter(Boolean);
+
+      if (serviceIds.length === 0 && existing.service_id) {
+        serviceIds.push(existing.service_id as string);
+      }
+
+      await this.loyaltyService.validateRewardForAppointmentBooking({
+        tenantId,
+        customerId: existing.customer_id as string,
+        rewardId: trimmedLoyaltyRewardId,
+        serviceIds,
+      });
+
+      updatePayload.loyalty_reward_id = trimmedLoyaltyRewardId;
+      updatePayload.total_price = 0;
+      updatePayload.deposit_paid = true;
+      updatePayload.payment_status = 'PAID';
+      appliedLoyaltyRewardId = trimmedLoyaltyRewardId;
     }
 
     if (isCompletingAppointment) {
@@ -1419,10 +1497,12 @@ export class AppointmentsService {
         existing as Parameters<typeof buildAppointmentCommissionServiceLines>[0],
       );
 
-      updatePayload.commission_amount = calculateAppointmentCommissionAmount(
-        serviceLines,
-        commissionPercent,
-      );
+      updatePayload.commission_amount = appliedLoyaltyRewardId
+        ? 0
+        : calculateAppointmentCommissionAmount(
+            serviceLines,
+            commissionPercent,
+          );
     }
 
     if (isRevertingCompletion) {
@@ -1440,6 +1520,19 @@ export class AppointmentsService {
       throw new InternalServerErrorException(updateError.message);
     }
 
+    if (
+      isCompletingAppointment &&
+      trimmedLoyaltyRewardId &&
+      existing.customer_id
+    ) {
+      await this.loyaltyService.redeemRewardForAppointment({
+        tenantId,
+        customerId: existing.customer_id as string,
+        rewardId: trimmedLoyaltyRewardId,
+        appointmentId,
+      });
+    }
+
     if (isCompletingAppointment) {
       const tenant = await this.tenantsService.findById(tenantId);
 
@@ -1451,13 +1544,17 @@ export class AppointmentsService {
         tenantId,
         appointmentId,
         professionalId: existing.professional_id,
-        totalPrice: Number(existing.total_price ?? 0),
+        totalPrice: Number(
+          appliedLoyaltyRewardId
+            ? 0
+            : (updatePayload.total_price ?? existing.total_price ?? 0),
+        ),
         commissionAmount: Number(updatePayload.commission_amount ?? 0),
         enablePayoutControl: tenant.enable_payout_control,
       });
     }
 
-    if (isCompletingAppointment && !existing.loyalty_reward_id) {
+    if (isCompletingAppointment && !appliedLoyaltyRewardId) {
       const loyaltyServiceLines = buildAppointmentLoyaltyServiceLines(
         existing as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
       );
@@ -1490,7 +1587,7 @@ export class AppointmentsService {
       });
     }
 
-    if (existing.loyalty_reward_id) {
+    if (appliedLoyaltyRewardId || existing.loyalty_reward_id) {
       if (isCancelling) {
         await this.loyaltyService.refundRedeemedPointsForAppointment({
           tenantId,
@@ -1523,6 +1620,305 @@ export class AppointmentsService {
     }
 
     return appointment;
+  }
+
+  async getLoyaltyRedeemOptionsForAppointment(
+    tenantId: string,
+    appointmentId: string,
+    scopedProfessionalId?: string,
+  ): Promise<AppointmentLoyaltyRedeemOptions> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const row = data as SupabaseAppointmentWithRelations;
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      row.professional_id,
+    );
+
+    const settings = await this.loyaltyService.getSettingsForTenant(tenantId);
+    const alreadyPaidWithPoints = Boolean(row.loyalty_reward_id);
+    const customerId = row.customer_id?.trim() || null;
+
+    if (!settings.is_active || !customerId || alreadyPaidWithPoints) {
+      return {
+        customerId,
+        customerName: row.customer_name,
+        pointsBalance: 0,
+        isLoyaltyActive: settings.is_active,
+        alreadyPaidWithPoints,
+        rewards: [],
+        suggestedRewardId: null,
+      };
+    }
+
+    const profile = await this.loyaltyService.getPublicProfileByCustomerId(
+      tenantId,
+      customerId,
+    );
+
+    const { data: serviceRows } = await this.supabaseService
+      .getClient()
+      .from('appointment_services')
+      .select('service_id')
+      .eq('appointment_id', appointmentId)
+      .eq('tenant_id', tenantId);
+
+    const resolvedServiceIds = (
+      (serviceRows as Array<{ service_id: string }> | null) ?? []
+    )
+      .map((item) => item.service_id)
+      .filter(Boolean);
+
+    if (resolvedServiceIds.length === 0) {
+      const { data: appt } = await this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select('service_id')
+        .eq('id', appointmentId)
+        .maybeSingle();
+
+      if (appt?.service_id) {
+        resolvedServiceIds.push(appt.service_id as string);
+      }
+    }
+
+    const balance = profile.customer?.points_balance ?? 0;
+    const rewards = (profile.rewards ?? [])
+      .filter((reward) => reward.is_active)
+      .filter(
+        (reward) =>
+          reward.service_id !== null &&
+          resolvedServiceIds.includes(reward.service_id) &&
+          balance >= reward.points_cost,
+      )
+      .map((reward) => ({
+        id: reward.id,
+        title: reward.title,
+        pointsCost: reward.points_cost,
+        serviceId: reward.service_id,
+      }));
+
+    return {
+      customerId,
+      customerName: row.customer_name,
+      pointsBalance: balance,
+      isLoyaltyActive: true,
+      alreadyPaidWithPoints,
+      rewards,
+      suggestedRewardId: rewards[0]?.id ?? null,
+    };
+  }
+
+  async findGuestAppointments(params: {
+    tenantId: string;
+    entries: Array<{ appointmentId: string; accessToken: string }>;
+    scope: CustomerAppointmentScope;
+  }): Promise<CustomerAppointment[]> {
+    const tenantId = params.tenantId.trim();
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    const entries = params.entries
+      .map((entry) => ({
+        appointmentId: entry.appointmentId?.trim() || '',
+        accessToken: entry.accessToken?.trim() || '',
+      }))
+      .filter((entry) => entry.appointmentId && entry.accessToken)
+      .slice(0, 50);
+
+    if (entries.length === 0) {
+      return [];
+    }
+
+    const ids = entries.map((entry) => entry.appointmentId);
+    const tokenById = new Map(
+      entries.map((entry) => [entry.appointmentId, entry.accessToken]),
+    );
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(`${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`)
+      .eq('tenant_id', tenantId)
+      .in('id', ids);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const now = new Date();
+    const rows = (data ?? []) as Array<
+      SupabaseAppointmentWithRelations & {
+        guest_access_token?: string | null;
+        cancellation_requested_at?: string | null;
+      }
+    >;
+
+    return rows
+      .filter((row) => {
+        const expected = tokenById.get(row.id);
+        return Boolean(
+          expected &&
+            row.guest_access_token &&
+            row.guest_access_token === expected,
+        );
+      })
+      .filter((row) => this.matchesCustomerAppointmentScope(row, params.scope, now))
+      .map((row) =>
+        this.mapCustomerAppointmentRow(row, now, {
+          id: tenant.id,
+          slug: tenant.slug,
+          allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+        }),
+      )
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.startTime);
+        const rightTime = Date.parse(right.startTime);
+        return params.scope === 'upcoming'
+          ? leftTime - rightTime
+          : rightTime - leftTime;
+      });
+  }
+
+  async requestCancellationForGuest(params: {
+    tenantId: string;
+    appointmentId: string;
+    accessToken: string;
+  }): Promise<CustomerAppointment> {
+    const tenantId = params.tenantId.trim();
+    const appointmentId = params.appointmentId.trim();
+    const accessToken = params.accessToken.trim();
+
+    if (!tenantId || !appointmentId || !accessToken) {
+      throw new BadRequestException(
+        'Tenant, agendamento e token de acesso são obrigatórios.',
+      );
+    }
+
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(`${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`)
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (
+      !existing ||
+      !(existing as { guest_access_token?: string }).guest_access_token ||
+      (existing as { guest_access_token?: string }).guest_access_token !==
+        accessToken
+    ) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const row = existing as SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+      guest_access_token?: string | null;
+    };
+    const now = new Date();
+
+    if (!this.canCustomerRequestCancellation(row, now)) {
+      if (row.cancellation_requested_at) {
+        throw new BadRequestException(
+          'O cancelamento deste agendamento já foi solicitado.',
+        );
+      }
+
+      throw new BadRequestException(
+        'Este agendamento não pode mais ser cancelado por aqui.',
+      );
+    }
+
+    if (tenant.allow_customer_self_cancellation) {
+      await this.updateStatusForTenant(tenantId, appointmentId, 'CANCELLED');
+
+      const { data: updated, error: reloadError } = await this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select(`${ADMIN_APPOINTMENT_SELECT}, cancellation_requested_at`)
+        .eq('id', appointmentId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      if (reloadError) {
+        throw new InternalServerErrorException(reloadError.message);
+      }
+
+      if (!updated) {
+        throw new NotFoundException('Agendamento não encontrado.');
+      }
+
+      const context = await this.loadAppointmentEmailContext(
+        tenantId,
+        appointmentId,
+      );
+      this.dispatchCustomerCancelledEmail(context);
+
+      return this.mapCustomerAppointmentRow(
+        updated as SupabaseAppointmentWithRelations & {
+          cancellation_requested_at?: string | null;
+        },
+        now,
+        {
+          id: tenant.id,
+          slug: tenant.slug,
+          allowCustomerSelfCancellation: true,
+        },
+      );
+    }
+
+    const requestedAt = now.toISOString();
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({ cancellation_requested_at: requestedAt })
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    return this.mapCustomerAppointmentRow(
+      {
+        ...row,
+        cancellation_requested_at: requestedAt,
+      },
+      now,
+      {
+        id: tenant.id,
+        slug: tenant.slug,
+        allowCustomerSelfCancellation: false,
+      },
+    );
   }
 
   private async findAdminById(
@@ -1841,6 +2237,7 @@ export class AppointmentsService {
 
     return {
       id: row.id,
+      customerId: row.customer_id?.trim() ? row.customer_id : null,
       customerName: row.customer_name,
       customerPhone: row.customer_phone,
       startTime: row.start_time,
@@ -2390,10 +2787,10 @@ export class AppointmentsService {
       admin_secondary_color_light: '#b45309',
       admin_secondary_color_dark: '#f59e0b',
       contact_phone: null,
-      require_deposit: false,
       deposit_feature_enabled: false,
       deposit_application_fee_percent: null,
       require_customer_email_confirmation: false,
+      require_customer_account: true,
       allow_customer_self_cancellation: false,
       booking_acceptance_type: 'AUTOMATIC',
       booking_slot_interval_minutes: 15,
@@ -2418,6 +2815,7 @@ export class AppointmentsService {
       initial_setup_completed_at: null,
       initial_setup_version: null,
       initial_setup_settings_visited_at: null,
+      initial_setup_customer_account_decided_at: null,
       created_at: '',
       updated_at: '',
     };

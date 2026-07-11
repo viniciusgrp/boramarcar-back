@@ -22,6 +22,7 @@ export type AppointmentServiceRelation =
 export interface SupabaseAppointmentWithRelations {
   id: string;
   professional_id: string;
+  customer_id?: string | null;
   customer_name: string;
   customer_phone: string;
   start_time: string;
@@ -31,6 +32,7 @@ export interface SupabaseAppointmentWithRelations {
   total_duration_minutes?: number | null;
   total_price?: number | null;
   loyalty_reward_id?: string | null;
+  guest_access_token?: string | null;
   professionals: RelationName;
   services: ServiceRelation;
   appointment_services?: AppointmentServiceRelation | null;

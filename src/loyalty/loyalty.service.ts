@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -361,7 +362,21 @@ export class LoyaltyService {
     tenantId: string,
     phone: string,
   ): Promise<LoyaltyPublicProfile> {
-    const customer = await this.findCustomerByPhone(tenantId, phone);
+    void phone;
+    void tenantId;
+    throw new ForbiddenException(
+      'Consulta de fidelidade por telefone não está disponível. Entre com sua conta ou peça ao estabelecimento.',
+    );
+  }
+
+  async getPublicProfileByCustomerId(
+    tenantId: string,
+    customerId: string,
+  ): Promise<LoyaltyPublicProfile> {
+    const customer = await this.assertCustomerBelongsToTenant(
+      customerId,
+      tenantId,
+    );
     return this.buildPublicProfile(tenantId, customer);
   }
 
