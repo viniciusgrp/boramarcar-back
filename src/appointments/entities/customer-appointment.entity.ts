@@ -15,4 +15,6 @@ export interface CustomerAppointment {
   allowsAutomaticCancellation: boolean;
   tenantId: string;
   tenantSlug: string;
+  customerName?: string;
+  customerPhone?: string;
 }
