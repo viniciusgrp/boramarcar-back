@@ -2120,6 +2120,8 @@ export class AppointmentsService {
       allowsAutomaticCancellation: Boolean(tenant?.allowCustomerSelfCancellation),
       tenantId: tenant?.id ?? '',
       tenantSlug: tenant?.slug ?? '',
+      customerName: adminAppointment.customerName,
+      customerPhone: adminAppointment.customerPhone,
     };
   }
 
