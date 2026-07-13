@@ -16,6 +16,7 @@ import { SkipTenantAccessCheck } from './decorators/skip-tenant-access-check.dec
 import { Roles } from './decorators/roles.decorator';
 import { TenantAccessGuard } from './guards/tenant-access.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { OnboardTenantDto } from './dto/onboard-tenant.dto';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
@@ -62,6 +63,20 @@ export class TenantsController {
     }
 
     return response;
+  }
+
+  @Post('me/onboard')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async onboard(
+    @CurrentUser() user: User,
+    @Body() dto: OnboardTenantDto,
+  ): Promise<RegisterTenantResponseDto> {
+    const tenant = await this.tenantsService.onboardForAuthenticatedUser(
+      user.id,
+      dto,
+    );
+    return { tenant };
   }
 
   @Get('me/initial-setup')

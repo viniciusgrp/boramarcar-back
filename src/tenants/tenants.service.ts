@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { OnboardTenantDto } from './dto/onboard-tenant.dto';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
@@ -696,6 +697,81 @@ export class TenantsService {
     }
 
     await this.tenantUsersService.createOwnerMembership(tenantData.id, ownerId);
+
+    return mapTenantRow(tenantData as Tenant);
+  }
+
+  async onboardForAuthenticatedUser(
+    userId: string,
+    dto: OnboardTenantDto,
+  ): Promise<Tenant> {
+    const existing = await this.findMeResponse(userId);
+
+    if (existing) {
+      throw new ConflictException(
+        'Esta conta já está vinculada a um estabelecimento.',
+      );
+    }
+
+    const ownerName = dto.owner_name?.trim() ?? '';
+    const tenantName = dto.tenant_name?.trim() ?? '';
+    const normalizedSlug = normalizeSlug(dto.slug ?? '');
+
+    if (!ownerName || !tenantName) {
+      throw new BadRequestException('Preencha todos os campos obrigatórios.');
+    }
+
+    if (!isValidSlug(normalizedSlug)) {
+      throw new BadRequestException(
+        'A URL personalizada deve conter apenas letras minúsculas, números e traços.',
+      );
+    }
+
+    const existingSlug = await this.findBySlug(normalizedSlug);
+
+    if (existingSlug) {
+      throw new ConflictException(
+        'Esta URL já está em uso. Escolha outro endereço para sua empresa.',
+      );
+    }
+
+    const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
+
+    const { data: tenantData, error: tenantError } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .insert({
+        name: tenantName,
+        slug: normalizedSlug,
+        primary_color: '#111827',
+        owner_id: userId,
+        subscription_status: 'INACTIVE',
+        plan_tier: TRIAL_DEFAULT_PLAN_TIER,
+        trial_starts_at: trialStartsAt,
+        trial_ends_at: trialEndsAt,
+      })
+      .select('*')
+      .single();
+
+    if (tenantError || !tenantData) {
+      if (tenantError?.code === '23505') {
+        throw new ConflictException(
+          'Esta URL já está em uso. Escolha outro endereço para sua empresa.',
+        );
+      }
+
+      throw new InternalServerErrorException(
+        tenantError?.message ?? 'Não foi possível criar o estabelecimento.',
+      );
+    }
+
+    await this.tenantUsersService.createOwnerMembership(tenantData.id, userId);
+
+    await this.supabaseService
+      .getClient()
+      .auth.admin.updateUserById(userId, {
+        user_metadata: { full_name: ownerName },
+      });
 
     return mapTenantRow(tenantData as Tenant);
   }
