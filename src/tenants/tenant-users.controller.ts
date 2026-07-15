@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -81,6 +82,19 @@ export class TenantUsersController {
     return this.tenantUsersService.resendInviteForTenant(
       context.tenant.id,
       context.tenant.name,
+      inviteId,
+    );
+  }
+
+  @Delete('invites/:id')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  cancelInvite(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') inviteId: string,
+  ): Promise<{ email: string }> {
+    return this.tenantUsersService.cancelInviteForTenant(
+      context.tenant.id,
       inviteId,
     );
   }

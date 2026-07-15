@@ -318,6 +318,27 @@ export class TenantUsersService {
     return { email: invite.email, expiresAt };
   }
 
+  async cancelInviteForTenant(
+    tenantId: string,
+    inviteId: string,
+  ): Promise<{ email: string }> {
+    const invite = await this.findPendingInviteByIdForTenant(tenantId, inviteId);
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .delete()
+      .eq('id', invite.id)
+      .eq('tenant_id', tenantId)
+      .is('accepted_at', null);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return { email: invite.email };
+  }
+
   async previewInvite(token: string): Promise<TenantUserInvitePreview> {
     const invite = await this.findInviteByToken(token.trim());
 

@@ -12,6 +12,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AllowInactiveTenantAccess } from './decorators/allow-inactive-tenant-access.decorator';
 import { SkipTenantAccessCheck } from './decorators/skip-tenant-access-check.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { TenantAccessGuard } from './guards/tenant-access.guard';
@@ -91,6 +92,7 @@ export class TenantsController {
   @Post('me/initial-setup/settings-visited')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN')
+  @AllowInactiveTenantAccess()
   markInitialSetupSettingsVisited(
     @CurrentUser() user: User,
   ): Promise<InitialSetupStatus> {
@@ -100,6 +102,7 @@ export class TenantsController {
   @Post('me/initial-setup/booking-link-shared')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN')
+  @AllowInactiveTenantAccess()
   markInitialSetupBookingLinkShared(
     @CurrentUser() user: User,
   ): Promise<InitialSetupStatus> {
