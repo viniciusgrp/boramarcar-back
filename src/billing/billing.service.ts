@@ -14,6 +14,7 @@ import type { SubscriptionStatus } from '../tenants/entities/subscription-status
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import type { StripeConnectStatusResponse } from './entities/stripe-connect-status.entity';
@@ -66,6 +67,7 @@ export class BillingService {
   constructor(
     private readonly configService: ConfigService,
     private readonly tenantsService: TenantsService,
+    private readonly supabaseService: SupabaseService,
     @Inject(forwardRef(() => AppointmentsService))
     private readonly appointmentsService: AppointmentsService,
   ) {
@@ -126,13 +128,73 @@ export class BillingService {
         }`,
         error instanceof Error ? error.stack : undefined,
       );
+      throw error instanceof Error
+        ? error
+        : new InternalServerErrorException('Stripe webhook processing failed');
     }
 
     return { received: true };
   }
 
   async handleStripeWebhook(event: StripeEvent): Promise<void> {
-    await this.processWebhookEvent(event);
+    const claimed = await this.claimWebhookEvent(event.id, event.type);
+
+    if (!claimed) {
+      this.logger.debug(
+        `Skipping already processed Stripe event ${event.id} (${event.type})`,
+      );
+      return;
+    }
+
+    try {
+      await this.processWebhookEvent(event);
+    } catch (error) {
+      await this.releaseWebhookEventClaim(event.id);
+      throw error;
+    }
+  }
+
+  /**
+   * Inserts the event id. Returns false when the event was already processed
+   * (unique constraint), true when this worker claimed it.
+   */
+  private async claimWebhookEvent(
+    eventId: string,
+    eventType: string,
+  ): Promise<boolean> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('stripe_webhook_events')
+      .insert({
+        event_id: eventId,
+        event_type: eventType,
+      });
+
+    if (!error) {
+      return true;
+    }
+
+    if (error.code === '23505') {
+      return false;
+    }
+
+    throw new InternalServerErrorException(
+      `Failed to claim Stripe webhook event: ${error.message}`,
+    );
+  }
+
+  private async releaseWebhookEventClaim(eventId: string): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('stripe_webhook_events')
+      .delete()
+      .eq('event_id', eventId);
+
+    if (error) {
+      this.logger.error(
+        `Failed to release Stripe webhook claim for ${eventId}: ${error.message}`,
+      );
+    }
   }
 
   private async processWebhookEvent(event: StripeEvent): Promise<void> {

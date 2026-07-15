@@ -1,10 +1,12 @@
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from './plan-tier.type';
 import type { SubscriptionStatus } from './subscription-status.type';
-import type { CalendarCardPreferences } from './calendar-card-preferences.type';
-import type { PayoutFrequency } from './payout-frequency.type';
 
-export interface Tenant {
+/**
+ * Safe subset of Tenant exposed on public booking routes (GET /tenants/:slug).
+ * Omits Stripe IDs, owner, payout prefs, and internal onboarding fields.
+ */
+export interface PublicTenant {
   id: string;
   name: string;
   slug: string;
@@ -20,39 +22,17 @@ export interface Tenant {
   address_city: string | null;
   address_state: string | null;
   primary_color: string;
-  admin_secondary_color_light: string;
-  admin_secondary_color_dark: string;
   contact_phone: string | null;
   deposit_feature_enabled: boolean;
-  deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;
   require_customer_account: boolean;
   allow_customer_self_cancellation: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
-  owner_id: string | null;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  stripe_connect_account_id: string | null;
-  stripe_connect_charges_enabled: boolean;
-  stripe_connect_details_submitted: boolean;
   subscription_status: SubscriptionStatus;
-  subscription_expires_at: string | null;
-  trial_starts_at: string | null;
   trial_ends_at: string | null;
-  pre_subscription_trial_ends_at: string | null;
   plan_tier: PlanTier;
-  calendar_card_preferences: CalendarCardPreferences;
-  enable_payout_control: boolean;
-  payout_frequency: PayoutFrequency;
   enable_referral_program: boolean;
   referrer_points_bonus: number;
   referee_points_bonus: number;
-  initial_setup_completed_at: string | null;
-  initial_setup_version: number | null;
-  initial_setup_settings_visited_at: string | null;
-  initial_setup_customer_account_decided_at: string | null;
-  initial_setup_booking_link_shared_at: string | null;
-  created_at: string;
-  updated_at: string;
 }

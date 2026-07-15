@@ -24,9 +24,11 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { TenantMeResponse } from './entities/tenant-me-response.entity';
 import { Tenant } from './entities/tenant.entity';
+import type { PublicTenant } from './entities/public-tenant.entity';
 import type { InitialSetupStatus } from './entities/initial-setup-status.entity';
 import { InitialSetupService } from './initial-setup.service';
 import { TenantsService } from './tenants.service';
+import { toPublicTenant } from './utils/to-public-tenant.util';
 
 @Controller('tenants')
 export class TenantsController {
@@ -95,6 +97,15 @@ export class TenantsController {
     return this.initialSetupService.markSettingsVisitedForUser(user.id);
   }
 
+  @Post('me/initial-setup/booking-link-shared')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  markInitialSetupBookingLinkShared(
+    @CurrentUser() user: User,
+  ): Promise<InitialSetupStatus> {
+    return this.initialSetupService.markBookingLinkSharedForUser(user.id);
+  }
+
   @Put('me')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN')
@@ -116,7 +127,7 @@ export class TenantsController {
   }
 
   @Get(':slug')
-  async findBySlug(@Param('slug') slug: string): Promise<Tenant> {
+  async findBySlug(@Param('slug') slug: string): Promise<PublicTenant> {
     const tenant = await this.tenantsService.findBySlug(slug);
 
     if (!tenant) {
@@ -125,6 +136,6 @@ export class TenantsController {
       );
     }
 
-    return tenant;
+    return toPublicTenant(tenant);
   }
 }

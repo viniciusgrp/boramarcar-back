@@ -9,6 +9,7 @@ import type { Tenant } from './entities/tenant.entity';
 import { INITIAL_SETUP_CHECKLIST_VERSION } from './initial-setup.constants';
 import { TenantsService } from './tenants.service';
 import { normalizePlanTier, canAccessDepositFeatures } from './utils/plan-tier.util';
+import { isSubscriptionActive } from './utils/tenant-access.util';
 
 @Injectable()
 export class InitialSetupService {
@@ -67,6 +68,44 @@ export class InitialSetupService {
     return this.getStatusForTenant(refreshedTenant);
   }
 
+  async markBookingLinkSharedForUser(
+    userId: string,
+  ): Promise<InitialSetupStatus> {
+    const accessContext = await this.tenantsService.findAccessContextByUserId(
+      userId,
+    );
+
+    if (!accessContext) {
+      throw new NotFoundException(
+        'No establishment linked to the authenticated user',
+      );
+    }
+
+    const tenant = accessContext.tenant;
+
+    if (!tenant.initial_setup_booking_link_shared_at) {
+      const { error } = await this.supabaseService
+        .getClient()
+        .from('tenants')
+        .update({
+          initial_setup_booking_link_shared_at: new Date().toISOString(),
+        })
+        .eq('id', tenant.id);
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+    }
+
+    const refreshedTenant = await this.tenantsService.findById(tenant.id);
+
+    if (!refreshedTenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    return this.getStatusForTenant(refreshedTenant);
+  }
+
   private async getStatusForTenant(tenant: Tenant): Promise<InitialSetupStatus> {
     const requiresStripeConnect = canAccessDepositFeatures(
       normalizePlanTier(tenant.plan_tier),
@@ -81,30 +120,51 @@ export class InitialSetupService {
         hasProfessional: true,
         hasService: true,
         hasBranding: true,
+        hasBusinessHours: true,
+        hasContactPhone: true,
         hasVisitedSettings: true,
+        hasSharedBookingLink: true,
         hasCustomerAccountPolicy: true,
         hasStripeConnect: true,
         requiresStripeConnect,
+        hasActiveSubscription: true,
       };
     }
 
-    const [hasProfessional, hasService] = await Promise.all([
+    const [hasProfessional, hasService, hasBusinessHours] = await Promise.all([
       this.tenantHasProfessionals(tenant.id),
       this.tenantHasServices(tenant.id),
+      this.tenantHasOpenBusinessHours(tenant.id),
     ]);
     const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
-    const hasVisitedSettings = Boolean(tenant.initial_setup_settings_visited_at);
+    const hasContactPhone = Boolean(tenant.contact_phone?.trim());
+    const hasAddress = Boolean(
+      tenant.address_street?.trim() && tenant.address_city?.trim(),
+    );
+    const hasVisitedSettings =
+      Boolean(tenant.initial_setup_settings_visited_at) &&
+      (hasContactPhone || hasAddress);
+    const hasSharedBookingLink = Boolean(
+      tenant.initial_setup_booking_link_shared_at,
+    );
     const hasCustomerAccountPolicy = Boolean(
       tenant.initial_setup_customer_account_decided_at,
     );
     const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
+    const hasActiveSubscription = isSubscriptionActive(
+      tenant.subscription_status,
+    );
     const isComplete =
       hasProfessional &&
       hasService &&
       hasBranding &&
+      hasBusinessHours &&
+      hasContactPhone &&
       hasVisitedSettings &&
+      hasSharedBookingLink &&
       hasCustomerAccountPolicy &&
-      (!requiresStripeConnect || hasStripeConnect);
+      (!requiresStripeConnect || hasStripeConnect) &&
+      hasActiveSubscription;
 
     if (isComplete) {
       await this.persistCompletion(tenant.id);
@@ -117,10 +177,14 @@ export class InitialSetupService {
       hasProfessional,
       hasService,
       hasBranding,
+      hasBusinessHours,
+      hasContactPhone,
       hasVisitedSettings,
+      hasSharedBookingLink,
       hasCustomerAccountPolicy,
       hasStripeConnect,
       requiresStripeConnect,
+      hasActiveSubscription,
     };
   }
 
@@ -166,6 +230,21 @@ export class InitialSetupService {
       .from('services')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (count ?? 0) > 0;
+  }
+
+  private async tenantHasOpenBusinessHours(tenantId: string): Promise<boolean> {
+    const { count, error } = await this.supabaseService
+      .getClient()
+      .from('business_hours')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_closed', false);
 
     if (error) {
       throw new InternalServerErrorException(error.message);

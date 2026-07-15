@@ -2818,6 +2818,7 @@ export class AppointmentsService {
       initial_setup_version: null,
       initial_setup_settings_visited_at: null,
       initial_setup_customer_account_decided_at: null,
+      initial_setup_booking_link_shared_at: null,
       created_at: '',
       updated_at: '',
     };

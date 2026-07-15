@@ -18,7 +18,6 @@ import { ProfessionalHoursModule } from './professional-hours/professional-hours
 import { ProfessionalAbsencesModule } from './professional-absences/professional-absences.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
 import { ServicesModule } from './services/services.module';
-import { NotificationsModule } from './notifications/notifications.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UploadModule } from './upload/upload.module';
 import { SupportModule } from './support/support.module';
@@ -59,7 +58,6 @@ import { SupportModule } from './support/support.module';
     CustomersModule,
     UsersModule,
     LoyaltyModule,
-    NotificationsModule,
     UploadModule,
     SupportModule,
   ],
