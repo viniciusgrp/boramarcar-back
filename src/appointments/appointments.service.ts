@@ -690,7 +690,29 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data ? this.mapAppointmentRow(data as Appointment) : null;
+    if (!data) {
+      return null;
+    }
+
+    const appointment = this.mapAppointmentRow(data as Appointment);
+
+    try {
+      const context = await this.loadAppointmentEmailContext(
+        appointment.tenant_id,
+        appointment.id,
+      );
+      this.dispatchAppointmentConfirmationEmail(context);
+    } catch (emailError: unknown) {
+      const message =
+        emailError instanceof Error
+          ? emailError.message
+          : 'Unknown deposit confirmation email error';
+      this.logger.error(
+        `Failed to dispatch confirmation emails after deposit for appointment ${appointment.id}: ${message}`,
+      );
+    }
+
+    return appointment;
   }
 
   async createInternal(
@@ -2519,28 +2541,52 @@ export class AppointmentsService {
     serviceName: string;
     professionalName: string;
   }): void {
-    const customerEmail = params.customer.email?.trim();
+    const mailAppointment = {
+      customerName: params.appointment.customer_name,
+      customerEmail: params.customer.email?.trim() ?? '',
+      customerPhone: params.appointment.customer_phone,
+      serviceName: params.serviceName,
+      professionalName: params.professionalName,
+      startTime: params.appointment.start_time,
+    };
 
-    if (!customerEmail) {
-      return;
+    if (mailAppointment.customerEmail) {
+      void this.mailService
+        .sendAppointmentConfirmation(mailAppointment, params.tenant)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Unknown confirmation email error';
+          this.logger.error(
+            `Failed to send confirmation for appointment ${params.appointment.id}: ${message}`,
+          );
+        });
     }
 
-    void this.mailService
-      .sendAppointmentConfirmation(
-        {
-          customerName: params.appointment.customer_name,
-          customerEmail,
-          serviceName: params.serviceName,
-          professionalName: params.professionalName,
-          startTime: params.appointment.start_time,
-        },
-        params.tenant,
-      )
+    void this.resolveAppointmentResponsibleEmail(
+      params.tenant.id,
+      params.appointment.professional_id,
+      params.tenant.owner_id,
+    )
+      .then((responsibleEmail) => {
+        if (!responsibleEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentConfirmedResponsible(
+          responsibleEmail,
+          mailAppointment,
+          params.tenant,
+        );
+      })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : 'Unknown confirmation email error';
+          error instanceof Error
+            ? error.message
+            : 'Unknown responsible confirmation email error';
         this.logger.error(
-          `Failed to send confirmation for appointment ${params.appointment.id}: ${message}`,
+          `Failed to notify responsible for appointment ${params.appointment.id}: ${message}`,
         );
       });
   }
@@ -2737,16 +2783,56 @@ export class AppointmentsService {
     };
   }
 
+  private async resolveAppointmentResponsibleEmail(
+    tenantId: string,
+    professionalId: string,
+    ownerId: string | null,
+  ): Promise<string | null> {
+    const trimmedProfessionalId = professionalId?.trim();
+
+    if (trimmedProfessionalId) {
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('tenant_users')
+        .select('user_id')
+        .eq('tenant_id', tenantId)
+        .eq('professional_id', trimmedProfessionalId)
+        .limit(1);
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      const linkedUserId = data?.[0]?.user_id?.trim();
+
+      if (linkedUserId) {
+        const professionalEmail = await this.resolveAuthUserEmail(linkedUserId);
+
+        if (professionalEmail) {
+          return professionalEmail;
+        }
+      }
+    }
+
+    return this.resolveTenantOwnerEmail(ownerId);
+  }
+
   private async resolveTenantOwnerEmail(
     ownerId: string | null,
   ): Promise<string | null> {
-    if (!ownerId?.trim()) {
+    return this.resolveAuthUserEmail(ownerId);
+  }
+
+  private async resolveAuthUserEmail(
+    userId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!userId?.trim()) {
       return null;
     }
 
     const { data, error } = await this.supabaseService
       .getClient()
-      .auth.admin.getUserById(ownerId);
+      .auth.admin.getUserById(userId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);

@@ -84,6 +84,25 @@ export class MailService {
     });
   }
 
+  async sendAppointmentConfirmedResponsible(
+    responsibleEmail: string,
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: responsibleEmail,
+      subject: `Novo agendamento confirmado - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Novo agendamento confirmado',
+        intro:
+          'Um horário foi confirmado na sua agenda. Confira os detalhes abaixo:',
+        appointment,
+        tenant,
+        showCustomerContact: true,
+      }),
+    });
+  }
+
   async sendAppointmentRejection(
     appointment: MailAppointment,
     tenant: Tenant,
@@ -331,6 +350,7 @@ export class MailService {
     intro: string;
     appointment: MailAppointment;
     tenant: Tenant;
+    showCustomerContact?: boolean;
   }): string {
     const startTime = parseISO(params.appointment.startTime);
     const formattedDate = format(startTime, "EEEE, dd 'de' MMMM 'de' yyyy", {
@@ -338,6 +358,22 @@ export class MailService {
     });
     const formattedTime = format(startTime, 'HH:mm');
     const formattedAddress = formatTenantAddress(params.tenant);
+    const customerPhone = params.appointment.customerPhone?.trim();
+    const customerContactRows = params.showCustomerContact
+      ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Cliente</td>
+            <td style="padding: 8px 0; font-weight: 600;">${params.appointment.customerName}</td>
+          </tr>
+          ${
+            customerPhone
+              ? `<tr>
+            <td style="padding: 8px 0; color: #6b7280;">Telefone</td>
+            <td style="padding: 8px 0; font-weight: 600;">${customerPhone}</td>
+          </tr>`
+              : ''
+          }`
+      : '';
 
     return `
       <div style="font-family: Inter, Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 560px;">
@@ -364,14 +400,19 @@ export class MailService {
             <td style="padding: 8px 0; color: #6b7280;">Profissional</td>
             <td style="padding: 8px 0; font-weight: 600;">${params.appointment.professionalName}</td>
           </tr>
+          ${customerContactRows}
           <tr>
             <td style="padding: 8px 0; color: #6b7280; vertical-align: top;">Endereço</td>
             <td style="padding: 8px 0; font-weight: 600;">${formattedAddress}</td>
           </tr>
         </table>
-        <p style="margin: 0; color: #6b7280; font-size: 14px;">
+        ${
+          params.showCustomerContact
+            ? ''
+            : `<p style="margin: 0; color: #6b7280; font-size: 14px;">
           Cliente: ${params.appointment.customerName}
-        </p>
+        </p>`
+        }
       </div>
     `;
   }
