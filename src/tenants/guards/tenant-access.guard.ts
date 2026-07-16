@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthenticatedRequest } from '../../auth/types/authenticated-request';
+import { ALLOW_INACTIVE_TENANT_ACCESS_KEY } from '../decorators/allow-inactive-tenant-access.decorator';
 import { SKIP_TENANT_ACCESS_CHECK_KEY } from '../decorators/skip-tenant-access-check.decorator';
 import { TenantsService } from '../tenants.service';
 import {
@@ -31,6 +32,11 @@ export class TenantAccessGuard implements CanActivate {
       return true;
     }
 
+    const allowInactive = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_INACTIVE_TENANT_ACCESS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     if (!request.user?.id) {
@@ -45,7 +51,7 @@ export class TenantAccessGuard implements CanActivate {
       throw new ForbiddenException(TRIAL_EXPIRED_MESSAGE);
     }
 
-    if (!hasTenantAdminAccess(tenantAccess.tenant)) {
+    if (!allowInactive && !hasTenantAdminAccess(tenantAccess.tenant)) {
       throw new ForbiddenException(TRIAL_EXPIRED_MESSAGE);
     }
 

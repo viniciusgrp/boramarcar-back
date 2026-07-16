@@ -8,6 +8,10 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { ReferralService } from '../loyalty/referral.service';
 import { normalizePhoneKey } from '../loyalty/utils/loyalty-points.util';
+import {
+  getWallClockNow,
+  wallClockToStorageIso,
+} from '../schedule/utils/wall-clock-datetime.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import type { CompleteCustomerProfileDto } from './dto/complete-customer-profile.dto';
@@ -400,9 +404,9 @@ export class CustomersService {
 
     const rows = (data ?? []) as Customer[];
     const lastAppointmentByCustomer =
-      await this.fetchLastAppointmentAtByCustomerIds(
+      await this.fetchLastAppointmentAtByCustomers(
         tenantId,
-        rows.map((row) => row.id),
+        rows.map((row) => ({ id: row.id, phone: row.phone })),
       );
 
     return rows.map((row) =>
@@ -435,7 +439,9 @@ export class CustomersService {
 
     const customer = this.mapCustomerRow(data as Customer);
     const lastAppointmentByCustomer =
-      await this.fetchLastAppointmentAtByCustomerIds(tenantId, [customerId]);
+      await this.fetchLastAppointmentAtByCustomers(tenantId, [
+        { id: customerId, phone: customer.phone },
+      ]);
 
     return {
       ...customer,
@@ -564,47 +570,171 @@ export class CustomersService {
     };
   }
 
-  private async fetchLastAppointmentAtByCustomerIds(
+  private async fetchLastAppointmentAtByCustomers(
     tenantId: string,
-    customerIds: string[],
+    customers: Array<{ id: string; phone: string }>,
   ): Promise<Map<string, string>> {
-    if (customerIds.length === 0) {
+    if (customers.length === 0) {
       return new Map();
     }
 
-    const nowIso = new Date().toISOString();
+    const customerIds = customers.map((customer) => customer.id);
+    const customerIdSet = new Set(customerIds);
+    const phoneKeyToCustomerId = new Map<string, string>();
 
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('appointments')
-      .select('customer_id, start_time')
-      .eq('tenant_id', tenantId)
-      .in('customer_id', customerIds)
-      .lt('start_time', nowIso)
-      .not('status', 'eq', 'CANCELLED');
+    for (const customer of customers) {
+      const phoneKey = normalizePhoneKey(customer.phone);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+      if (phoneKey.length >= 12 && !phoneKeyToCustomerId.has(phoneKey)) {
+        phoneKeyToCustomerId.set(phoneKey, customer.id);
+      }
+    }
+
+    const nowStorageIso = wallClockToStorageIso(getWallClockNow());
+
+    const [linkedResult, orphanResult] = await Promise.all([
+      this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select('customer_id, customer_phone, start_time')
+        .eq('tenant_id', tenantId)
+        .in('customer_id', customerIds)
+        .not('status', 'eq', 'CANCELLED')
+        .order('start_time', { ascending: false }),
+      this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select('customer_id, customer_phone, start_time')
+        .eq('tenant_id', tenantId)
+        .is('customer_id', null)
+        .not('status', 'eq', 'CANCELLED')
+        .order('start_time', { ascending: false }),
+    ]);
+
+    if (linkedResult.error) {
+      throw new InternalServerErrorException(linkedResult.error.message);
+    }
+
+    if (orphanResult.error) {
+      throw new InternalServerErrorException(orphanResult.error.message);
+    }
+
+    const lastPastByCustomer = new Map<string, string>();
+    const nextUpcomingByCustomer = new Map<string, string>();
+
+    const ingestRows = (
+      rows: Array<{
+        customer_id?: string | null;
+        customer_phone?: string | null;
+        start_time?: string | null;
+      }>,
+      allowPhoneFallback: boolean,
+    ) => {
+      for (const row of rows) {
+        const startTime = row.start_time ?? undefined;
+
+        if (!startTime) {
+          continue;
+        }
+
+        const resolvedCustomerId = this.resolveCustomerIdForAppointmentRow(
+          {
+            customerId: row.customer_id,
+            customerPhone: row.customer_phone,
+          },
+          customerIdSet,
+          phoneKeyToCustomerId,
+          allowPhoneFallback,
+        );
+
+        if (!resolvedCustomerId) {
+          continue;
+        }
+
+        if (startTime < nowStorageIso) {
+          if (!lastPastByCustomer.has(resolvedCustomerId)) {
+            lastPastByCustomer.set(resolvedCustomerId, startTime);
+          }
+          continue;
+        }
+
+        const existingUpcoming = nextUpcomingByCustomer.get(resolvedCustomerId);
+
+        if (!existingUpcoming || startTime < existingUpcoming) {
+          nextUpcomingByCustomer.set(resolvedCustomerId, startTime);
+        }
+      }
+    };
+
+    ingestRows(linkedResult.data ?? [], true);
+    ingestRows(orphanResult.data ?? [], true);
+
+    const missingCustomers = customers.filter(
+      (customer) =>
+        !lastPastByCustomer.has(customer.id) &&
+        !nextUpcomingByCustomer.has(customer.id),
+    );
+
+    if (missingCustomers.length > 0 && phoneKeyToCustomerId.size > 0) {
+      const phoneFallbackResult = await this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select('customer_id, customer_phone, start_time')
+        .eq('tenant_id', tenantId)
+        .not('status', 'eq', 'CANCELLED')
+        .order('start_time', { ascending: false })
+        .limit(2000);
+
+      if (phoneFallbackResult.error) {
+        throw new InternalServerErrorException(phoneFallbackResult.error.message);
+      }
+
+      ingestRows(phoneFallbackResult.data ?? [], true);
     }
 
     const lastAppointmentByCustomer = new Map<string, string>();
 
-    for (const row of data ?? []) {
-      const customerId = row.customer_id as string | undefined;
-      const startTime = row.start_time as string | undefined;
+    for (const customer of customers) {
+      const resolved =
+        lastPastByCustomer.get(customer.id) ??
+        nextUpcomingByCustomer.get(customer.id);
 
-      if (!customerId || !startTime) {
-        continue;
-      }
-
-      const existing = lastAppointmentByCustomer.get(customerId);
-
-      if (!existing || startTime > existing) {
-        lastAppointmentByCustomer.set(customerId, startTime);
+      if (resolved) {
+        lastAppointmentByCustomer.set(customer.id, resolved);
       }
     }
 
     return lastAppointmentByCustomer;
+  }
+
+  private resolveCustomerIdForAppointmentRow(
+    row: {
+      customerId: string | null | undefined;
+      customerPhone: string | null | undefined;
+    },
+    customerIdSet: Set<string>,
+    phoneKeyToCustomerId: Map<string, string>,
+    allowPhoneFallback: boolean,
+  ): string | null {
+    const linkedCustomerId = row.customerId?.trim();
+
+    if (linkedCustomerId && customerIdSet.has(linkedCustomerId)) {
+      return linkedCustomerId;
+    }
+
+    if (!allowPhoneFallback) {
+      return null;
+    }
+
+    const phoneKey = row.customerPhone
+      ? normalizePhoneKey(row.customerPhone)
+      : '';
+
+    if (phoneKey.length >= 12) {
+      return phoneKeyToCustomerId.get(phoneKey) ?? null;
+    }
+
+    return null;
   }
 
   private mapCustomerListItem(

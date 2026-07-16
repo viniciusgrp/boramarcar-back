@@ -74,6 +74,12 @@ import {
   SupabaseAppointmentWithRelations,
 } from './types/supabase-appointment-row.type';
 import type { ReminderAppointmentRow } from './types/reminder-appointment-row.type';
+import { DepositPaymentService } from './deposit-payment.service';
+import {
+  doTimeRangesOverlap,
+  isBookingOverlapConstraintError,
+} from './utils/booking-slot-overlap.util';
+import { DEPOSIT_HOLD_MINUTES } from './utils/deposit-payment-policy';
 import { normalizeServiceIds } from './utils/normalize-service-ids.util';
 import { resolveInitialAppointmentStatus } from './utils/resolve-initial-appointment-status.util';
 
@@ -161,6 +167,7 @@ export class AppointmentsService {
     private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
     private readonly mailService: MailService,
+    private readonly depositPaymentService: DepositPaymentService,
   ) {}
 
   async getAvailability(
@@ -565,7 +572,7 @@ export class AppointmentsService {
 
     // Checkout do Stripe expira em 30 min; após isso o slot é liberado pelo cron.
     const holdExpiresAt = requiresDepositPayment
-      ? addMinutes(new Date(), 30).toISOString()
+      ? addMinutes(new Date(), DEPOSIT_HOLD_MINUTES).toISOString()
       : null;
 
     const guestAccessToken = authUserId
@@ -598,6 +605,12 @@ export class AppointmentsService {
       .single();
 
     if (error) {
+      if (isBookingOverlapConstraintError(error)) {
+        throw new ConflictException(
+          'Este horário não está mais disponível. Escolha outro horário.',
+        );
+      }
+
       throw new InternalServerErrorException(error.message);
     }
 
@@ -647,13 +660,23 @@ export class AppointmentsService {
       };
     }
 
-    const checkoutUrl =
-      await this.billingService.createDepositCheckoutSession({
+    let checkoutUrl: string;
+
+    try {
+      checkoutUrl = await this.billingService.createDepositCheckoutSession({
         appointmentId: appointment.id,
         tenantId: tenant.id,
         tenantName: tenant.name,
+        tenantSlug: tenant.slug,
         depositAmountBrl: booking.totalDepositAmount,
       });
+    } catch (checkoutError: unknown) {
+      await this.depositPaymentService.releasePendingDepositHold(appointment.id);
+      this.logger.error(
+        `Deposit checkout failed for appointment ${appointment.id}; hold released`,
+      );
+      throw checkoutError;
+    }
 
     return {
       appointment,
@@ -674,23 +697,71 @@ export class AppointmentsService {
   }
 
   async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('appointments')
-      .update({
-        status: 'CONFIRMED',
-        payment_status: 'PAID',
-        deposit_paid: true,
-      })
-      .eq('id', appointmentId)
-      .select('*')
-      .maybeSingle();
+    const result =
+      await this.depositPaymentService.confirmDepositPayment(appointmentId);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (result.outcome !== 'confirmed' || !result.appointment) {
+      return result.appointment;
     }
 
-    return data ? this.mapAppointmentRow(data as Appointment) : null;
+    const appointment = this.mapAppointmentRow(result.appointment);
+
+    try {
+      const context = await this.loadAppointmentEmailContext(
+        appointment.tenant_id,
+        appointment.id,
+      );
+      this.dispatchAppointmentConfirmationEmail(context);
+    } catch (emailError: unknown) {
+      const message =
+        emailError instanceof Error
+          ? emailError.message
+          : 'Unknown deposit confirmation email error';
+      this.logger.error(
+        `Failed to dispatch confirmation emails after deposit for appointment ${appointment.id}: ${message}`,
+      );
+    }
+
+    return appointment;
+  }
+
+  async confirmDepositPaymentDetailed(appointmentId: string) {
+    const result =
+      await this.depositPaymentService.confirmDepositPayment(appointmentId);
+
+    if (result.outcome === 'confirmed' && result.appointment) {
+      const appointment = this.mapAppointmentRow(result.appointment);
+
+      try {
+        const context = await this.loadAppointmentEmailContext(
+          appointment.tenant_id,
+          appointment.id,
+        );
+        this.dispatchAppointmentConfirmationEmail(context);
+      } catch (emailError: unknown) {
+        const message =
+          emailError instanceof Error
+            ? emailError.message
+            : 'Unknown deposit confirmation email error';
+        this.logger.error(
+          `Failed to dispatch confirmation emails after deposit for appointment ${appointment.id}: ${message}`,
+        );
+      }
+
+      return { ...result, appointment };
+    }
+
+    return result;
+  }
+
+  async releasePendingDepositHold(appointmentId: string): Promise<boolean> {
+    return this.depositPaymentService.releasePendingDepositHold(appointmentId);
+  }
+
+  async markDepositRefunded(appointmentId: string): Promise<Appointment | null> {
+    const row =
+      await this.depositPaymentService.markDepositRefunded(appointmentId);
+    return row ? this.mapAppointmentRow(row) : null;
   }
 
   async createInternal(
@@ -806,6 +877,12 @@ export class AppointmentsService {
       .single();
 
     if (error) {
+      if (isBookingOverlapConstraintError(error)) {
+        throw new ConflictException(
+          'Este horário não está mais disponível. Escolha outro horário.',
+        );
+      }
+
       throw new InternalServerErrorException(error.message);
     }
 
@@ -2090,7 +2167,12 @@ export class AppointmentsService {
     return bookedSlots.some((appointment) => {
       const appointmentStart = parseWallClockDateTime(appointment.start_time);
       const appointmentEnd = parseWallClockDateTime(appointment.end_time);
-      return startTime < appointmentEnd && endTime > appointmentStart;
+      return doTimeRangesOverlap(
+        startTime,
+        endTime,
+        appointmentStart,
+        appointmentEnd,
+      );
     });
   }
 
@@ -2474,24 +2556,7 @@ export class AppointmentsService {
   }
 
   async expireAbandonedDepositHolds(): Promise<number> {
-    const now = new Date().toISOString();
-
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('appointments')
-      .update({ status: 'CANCELLED' })
-      .eq('status', 'PENDING_PAYMENT')
-      .not('hold_expires_at', 'is', null)
-      .lt('hold_expires_at', now)
-      .select('id');
-
-    if (error) {
-      throw new InternalServerErrorException(
-        `Deposit hold expiration failed: ${error.message}`,
-      );
-    }
-
-    return (data ?? []).length;
+    return this.depositPaymentService.expireAbandonedDepositHolds();
   }
 
   private dispatchAppointmentEmails(params: {
@@ -2519,28 +2584,52 @@ export class AppointmentsService {
     serviceName: string;
     professionalName: string;
   }): void {
-    const customerEmail = params.customer.email?.trim();
+    const mailAppointment = {
+      customerName: params.appointment.customer_name,
+      customerEmail: params.customer.email?.trim() ?? '',
+      customerPhone: params.appointment.customer_phone,
+      serviceName: params.serviceName,
+      professionalName: params.professionalName,
+      startTime: params.appointment.start_time,
+    };
 
-    if (!customerEmail) {
-      return;
+    if (mailAppointment.customerEmail) {
+      void this.mailService
+        .sendAppointmentConfirmation(mailAppointment, params.tenant)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Unknown confirmation email error';
+          this.logger.error(
+            `Failed to send confirmation for appointment ${params.appointment.id}: ${message}`,
+          );
+        });
     }
 
-    void this.mailService
-      .sendAppointmentConfirmation(
-        {
-          customerName: params.appointment.customer_name,
-          customerEmail,
-          serviceName: params.serviceName,
-          professionalName: params.professionalName,
-          startTime: params.appointment.start_time,
-        },
-        params.tenant,
-      )
+    void this.resolveAppointmentResponsibleEmail(
+      params.tenant.id,
+      params.appointment.professional_id,
+      params.tenant.owner_id,
+    )
+      .then((responsibleEmail) => {
+        if (!responsibleEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentConfirmedResponsible(
+          responsibleEmail,
+          mailAppointment,
+          params.tenant,
+        );
+      })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : 'Unknown confirmation email error';
+          error instanceof Error
+            ? error.message
+            : 'Unknown responsible confirmation email error';
         this.logger.error(
-          `Failed to send confirmation for appointment ${params.appointment.id}: ${message}`,
+          `Failed to notify responsible for appointment ${params.appointment.id}: ${message}`,
         );
       });
   }
@@ -2737,16 +2826,56 @@ export class AppointmentsService {
     };
   }
 
+  private async resolveAppointmentResponsibleEmail(
+    tenantId: string,
+    professionalId: string,
+    ownerId: string | null,
+  ): Promise<string | null> {
+    const trimmedProfessionalId = professionalId?.trim();
+
+    if (trimmedProfessionalId) {
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('tenant_users')
+        .select('user_id')
+        .eq('tenant_id', tenantId)
+        .eq('professional_id', trimmedProfessionalId)
+        .limit(1);
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      const linkedUserId = data?.[0]?.user_id?.trim();
+
+      if (linkedUserId) {
+        const professionalEmail = await this.resolveAuthUserEmail(linkedUserId);
+
+        if (professionalEmail) {
+          return professionalEmail;
+        }
+      }
+    }
+
+    return this.resolveTenantOwnerEmail(ownerId);
+  }
+
   private async resolveTenantOwnerEmail(
     ownerId: string | null,
   ): Promise<string | null> {
-    if (!ownerId?.trim()) {
+    return this.resolveAuthUserEmail(ownerId);
+  }
+
+  private async resolveAuthUserEmail(
+    userId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!userId?.trim()) {
       return null;
     }
 
     const { data, error } = await this.supabaseService
       .getClient()
-      .auth.admin.getUserById(ownerId);
+      .auth.admin.getUserById(userId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -2818,6 +2947,7 @@ export class AppointmentsService {
       initial_setup_version: null,
       initial_setup_settings_visited_at: null,
       initial_setup_customer_account_decided_at: null,
+      initial_setup_booking_link_shared_at: null,
       created_at: '',
       updated_at: '',
     };

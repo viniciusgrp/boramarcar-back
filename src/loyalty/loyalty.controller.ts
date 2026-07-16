@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  NotFoundException,
   Param,
   Post,
   Put,
@@ -15,8 +14,11 @@ import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { resolveAuthUserId } from '../auth/utils/resolve-auth-user-id.util';
+import { CurrentTenantContext } from '../tenants/decorators/current-tenant-context.decorator';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import type { TenantAccessContext } from '../tenants/entities/tenant-access-context.entity';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
-import { TenantsService } from '../tenants/tenants.service';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { CreateLoyaltyRewardDto } from './dto/create-loyalty-reward.dto';
 import { RedeemLoyaltyRewardDto } from './dto/redeem-loyalty-reward.dto';
 import { UpdateLoyaltyRewardDto } from './dto/update-loyalty-reward.dto';
@@ -32,73 +34,81 @@ import { LoyaltyService } from './loyalty.service';
 
 @Controller('loyalty')
 export class LoyaltyController {
-  constructor(
-    private readonly loyaltyService: LoyaltyService,
-    private readonly tenantsService: TenantsService,
-  ) {}
+  constructor(private readonly loyaltyService: LoyaltyService) {}
 
   @Get('settings')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async getSettings(@CurrentUser() user: User): Promise<LoyaltySettings> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.getSettingsForTenant(tenant.id);
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  async getSettings(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<LoyaltySettings> {
+    return this.loyaltyService.getSettingsForTenant(context.tenant.id);
   }
 
   @Put('settings')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async updateSettings(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: UpdateLoyaltySettingsDto,
   ): Promise<LoyaltySettings> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.updateSettingsForTenant(tenant.id, dto);
+    return this.loyaltyService.updateSettingsForTenant(context.tenant.id, dto);
   }
 
   @Get('rewards/managed')
-  @UseGuards(AuthGuard, TenantAccessGuard)
-  async findManagedRewards(@CurrentUser() user: User): Promise<LoyaltyReward[]> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.findRewardsManagedByTenant(tenant.id);
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  async findManagedRewards(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<LoyaltyReward[]> {
+    return this.loyaltyService.findRewardsManagedByTenant(context.tenant.id);
   }
 
   @Get('redemptions/managed')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async findManagedRedemptions(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
   ): Promise<LoyaltyRedemptionHistoryItem[]> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.findRedemptionHistoryForTenant(tenant.id);
+    return this.loyaltyService.findRedemptionHistoryForTenant(context.tenant.id);
   }
 
   @Post('rewards')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async createReward(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: CreateLoyaltyRewardDto,
   ): Promise<LoyaltyReward> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.createRewardForTenant(tenant.id, dto);
+    return this.loyaltyService.createRewardForTenant(context.tenant.id, dto);
   }
 
   @Put('rewards/:id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async updateReward(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
     @Body() dto: UpdateLoyaltyRewardDto,
   ): Promise<LoyaltyReward> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.updateRewardForTenant(tenant.id, id, dto);
+    return this.loyaltyService.updateRewardForTenant(
+      context.tenant.id,
+      id,
+      dto,
+    );
   }
 
   @Delete('rewards/:id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
   async deleteReward(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
   ): Promise<LoyaltyReward> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.loyaltyService.softDeleteRewardForTenant(tenant.id, id);
+    return this.loyaltyService.softDeleteRewardForTenant(
+      context.tenant.id,
+      id,
+    );
   }
 
   @Get('public/booking-feedback')
@@ -152,12 +162,6 @@ export class LoyaltyController {
     @CurrentUser() user: User,
     @Body() dto: RedeemLoyaltyRewardDto,
   ): Promise<{ customer: Customer; transaction: LoyaltyTransaction }> {
-    if (!dto.tenantId?.trim() || !dto.customerId?.trim() || !dto.rewardId?.trim()) {
-      throw new BadRequestException(
-        'Fields "tenantId", "customerId" and "rewardId" are required',
-      );
-    }
-
     const profile = await this.loyaltyService.getProfileForAuthCustomer(
       dto.tenantId.trim(),
       resolveAuthUserId(user),
@@ -174,17 +178,5 @@ export class LoyaltyController {
       dto.customerId.trim(),
       dto.rewardId.trim(),
     );
-  }
-
-  private async resolveOwnerTenant(userId: string) {
-    const tenant = await this.tenantsService.findByOwnerId(userId);
-
-    if (!tenant) {
-      throw new NotFoundException(
-        'No establishment linked to the authenticated user',
-      );
-    }
-
-    return tenant;
   }
 }

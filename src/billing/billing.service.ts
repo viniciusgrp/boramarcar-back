@@ -14,6 +14,7 @@ import type { SubscriptionStatus } from '../tenants/entities/subscription-status
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
 import type { StripeConnectStatusResponse } from './entities/stripe-connect-status.entity';
@@ -53,6 +54,7 @@ export interface CreateDepositCheckoutSessionParams {
   appointmentId: string;
   tenantId: string;
   tenantName: string;
+  tenantSlug: string;
   depositAmountBrl: number;
 }
 
@@ -66,6 +68,7 @@ export class BillingService {
   constructor(
     private readonly configService: ConfigService,
     private readonly tenantsService: TenantsService,
+    private readonly supabaseService: SupabaseService,
     @Inject(forwardRef(() => AppointmentsService))
     private readonly appointmentsService: AppointmentsService,
   ) {
@@ -126,19 +129,82 @@ export class BillingService {
         }`,
         error instanceof Error ? error.stack : undefined,
       );
+      throw error instanceof Error
+        ? error
+        : new InternalServerErrorException('Stripe webhook processing failed');
     }
 
     return { received: true };
   }
 
   async handleStripeWebhook(event: StripeEvent): Promise<void> {
-    await this.processWebhookEvent(event);
+    const claimed = await this.claimWebhookEvent(event.id, event.type);
+
+    if (!claimed) {
+      this.logger.debug(
+        `Skipping already processed Stripe event ${event.id} (${event.type})`,
+      );
+      return;
+    }
+
+    try {
+      await this.processWebhookEvent(event);
+    } catch (error) {
+      await this.releaseWebhookEventClaim(event.id);
+      throw error;
+    }
+  }
+
+  /**
+   * Inserts the event id. Returns false when the event was already processed
+   * (unique constraint), true when this worker claimed it.
+   */
+  private async claimWebhookEvent(
+    eventId: string,
+    eventType: string,
+  ): Promise<boolean> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('stripe_webhook_events')
+      .insert({
+        event_id: eventId,
+        event_type: eventType,
+      });
+
+    if (!error) {
+      return true;
+    }
+
+    if (error.code === '23505') {
+      return false;
+    }
+
+    throw new InternalServerErrorException(
+      `Failed to claim Stripe webhook event: ${error.message}`,
+    );
+  }
+
+  private async releaseWebhookEventClaim(eventId: string): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('stripe_webhook_events')
+      .delete()
+      .eq('event_id', eventId);
+
+    if (error) {
+      this.logger.error(
+        `Failed to release Stripe webhook claim for ${eventId}: ${error.message}`,
+      );
+    }
   }
 
   private async processWebhookEvent(event: StripeEvent): Promise<void> {
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutSessionCompleted(event.data.object);
+        break;
+      case 'checkout.session.expired':
+        await this.handleDepositCheckoutExpired(event.data.object);
         break;
       case 'customer.subscription.updated':
         await this.handleSubscriptionUpdated(event.data.object);
@@ -205,19 +271,98 @@ export class BillingService {
       return;
     }
 
-    const appointment =
-      await this.appointmentsService.confirmDepositPayment(appointmentId);
+    const result =
+      await this.appointmentsService.confirmDepositPaymentDetailed(
+        appointmentId,
+      );
 
-    if (!appointment) {
-      this.logger.warn(
-        `Deposit payment received but appointment ${appointmentId} was not found`,
+    if (result.outcome === 'confirmed') {
+      this.logger.log(
+        `Deposit confirmed: appointment=${appointmentId} status=CONFIRMED payment_status=PAID`,
       );
       return;
     }
 
-    this.logger.log(
-      `Deposit confirmed: appointment=${appointmentId} status=CONFIRMED payment_status=PAID`,
+    if (result.outcome === 'already_confirmed') {
+      this.logger.debug(
+        `Deposit already confirmed for appointment ${appointmentId}`,
+      );
+      return;
+    }
+
+    if (result.outcome === 'late_payment_needs_refund') {
+      await this.refundLateDepositPayment(session, appointmentId);
+      return;
+    }
+
+    this.logger.warn(
+      `Deposit payment received but appointment ${appointmentId} was not confirmable (outcome=${result.outcome})`,
     );
+  }
+
+  private async handleDepositCheckoutExpired(
+    session: StripeCheckoutSession,
+  ): Promise<void> {
+    if (session.mode !== 'payment') {
+      return;
+    }
+
+    const checkoutType = session.metadata?.checkout_type;
+
+    if (checkoutType !== 'appointment_deposit') {
+      return;
+    }
+
+    const appointmentId = session.metadata?.appointment_id?.trim();
+
+    if (!appointmentId) {
+      this.logger.warn(
+        'Deposit checkout.session.expired missing appointment_id metadata',
+      );
+      return;
+    }
+
+    const released =
+      await this.appointmentsService.releasePendingDepositHold(appointmentId);
+
+    if (released) {
+      this.logger.log(
+        `Released pending deposit hold after checkout expiry: appointment=${appointmentId}`,
+      );
+    }
+  }
+
+  private async refundLateDepositPayment(
+    session: StripeCheckoutSession,
+    appointmentId: string,
+  ): Promise<void> {
+    const paymentIntentId = extractStripeId(session.payment_intent);
+
+    if (!paymentIntentId) {
+      this.logger.error(
+        `Late deposit payment for ${appointmentId} has no payment_intent; cannot auto-refund`,
+      );
+      return;
+    }
+
+    try {
+      await this.stripe.refunds.create({
+        payment_intent: paymentIntentId,
+      });
+      await this.appointmentsService.markDepositRefunded(appointmentId);
+      this.logger.log(
+        `Auto-refunded late deposit payment for cancelled appointment ${appointmentId}`,
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown refund error';
+      this.logger.error(
+        `Failed to auto-refund late deposit for appointment ${appointmentId}: ${message}`,
+      );
+      throw error instanceof Error
+        ? error
+        : new InternalServerErrorException(message);
+    }
   }
 
   private resolveTenantIdFromCheckoutSession(
@@ -258,8 +403,9 @@ export class BillingService {
     }
 
     const successBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_SUCCESS_URL');
-    const cancelUrl = this.getRequiredUrl('STRIPE_DEPOSIT_CANCEL_URL');
+    const cancelBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_CANCEL_URL');
     const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}`;
+    const cancelUrl = `${cancelBaseUrl}${cancelBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}&tenant_slug=${encodeURIComponent(params.tenantSlug)}`;
 
     const unitAmountCents = Math.round(params.depositAmountBrl * 100);
     const applicationFeePercent =
@@ -711,6 +857,7 @@ export class BillingService {
             quantity: 1,
           },
         ],
+        allow_promotion_codes: true,
         success_url: successUrl,
         cancel_url: cancelUrl,
         metadata: {

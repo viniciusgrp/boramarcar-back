@@ -1,2 +1,2 @@
-/** Bump when new essential onboarding steps are added to the admin checklist. */
-export const INITIAL_SETUP_CHECKLIST_VERSION = 4;
+/** Bump when essential onboarding steps are added or removed from the admin checklist. */
+export const INITIAL_SETUP_CHECKLIST_VERSION = 8;

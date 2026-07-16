@@ -14,6 +14,7 @@ import { AppointmentReminderCron } from './appointment-reminder.cron';
 import { DepositHoldExpirationCron } from './deposit-hold-expiration.cron';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
+import { DepositPaymentService } from './deposit-payment.service';
 
 @Module({
   imports: [
@@ -30,7 +31,12 @@ import { AppointmentsService } from './appointments.service';
     MailModule,
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsService, AppointmentReminderCron, DepositHoldExpirationCron],
-  exports: [AppointmentsService],
+  providers: [
+    AppointmentsService,
+    DepositPaymentService,
+    AppointmentReminderCron,
+    DepositHoldExpirationCron,
+  ],
+  exports: [AppointmentsService, DepositPaymentService],
 })
 export class AppointmentsModule {}
