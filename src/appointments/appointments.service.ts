@@ -79,6 +79,11 @@ import {
   doTimeRangesOverlap,
   isBookingOverlapConstraintError,
 } from './utils/booking-slot-overlap.util';
+import {
+  CUSTOMER_CANCELLABLE_STATUSES,
+  isUpcomingCustomerAppointment,
+  matchesCustomerAppointmentScope,
+} from './utils/customer-appointment-scope.util';
 import { DEPOSIT_HOLD_MINUTES } from './utils/deposit-payment-policy';
 import { normalizeServiceIds } from './utils/normalize-service-ids.util';
 import { resolveInitialAppointmentStatus } from './utils/resolve-initial-appointment-status.util';
@@ -142,13 +147,6 @@ const ADMIN_APPOINTMENT_SELECT = `
     services!service_id ( name )
   )
 `;
-
-const CUSTOMER_CANCELLABLE_STATUSES: AppointmentStatus[] = [
-  'PENDING',
-  'PENDING_PAYMENT',
-  'PENDING_APPROVAL',
-  'CONFIRMED',
-];
 
 @Injectable()
 export class AppointmentsService {
@@ -1109,9 +1107,9 @@ export class AppointmentsService {
     }
 
     const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
-    const now = new Date();
+    const now = getWallClockNow();
     const filtered = rows.filter((row) =>
-      this.matchesCustomerAppointmentScope(row, scope, now),
+      matchesCustomerAppointmentScope(row, scope, now),
     );
 
     filtered.sort((left, right) => {
@@ -1148,12 +1146,19 @@ export class AppointmentsService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
+    const customerIds = await this.customersService.findEquivalentCustomerIdsForTenant(
+      trimmedTenantId,
+      customer.customer.phone,
+    );
+    const scopedCustomerIds =
+      customerIds.length > 0 ? customerIds : [customer.customer.id];
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
       .select(ADMIN_APPOINTMENT_SELECT)
       .eq('tenant_id', trimmedTenantId)
-      .eq('customer_id', customer.customer.id);
+      .in('customer_id', scopedCustomerIds);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -1163,9 +1168,9 @@ export class AppointmentsService {
       cancellation_requested_at?: string | null;
     })[];
 
-    const now = new Date();
+    const now = getWallClockNow();
     const filtered = rows.filter((row) =>
-      this.matchesCustomerAppointmentScope(row, scope, now),
+      matchesCustomerAppointmentScope(row, scope, now),
     );
 
     filtered.sort((left, right) => {
@@ -1198,8 +1203,7 @@ export class AppointmentsService {
       return [];
     }
 
-    const customerIds = eligibleCustomers.map((context) => context.customer.id);
-    const tenantByCustomerId = new Map(
+    const tenantInfoByPrimaryCustomerId = new Map(
       eligibleCustomers.map((context) => [
         context.customer.id,
         {
@@ -1211,11 +1215,37 @@ export class AppointmentsService {
       ]),
     );
 
+    const expanded = await this.customersService.expandCustomerIdsByPhone(
+      eligibleCustomers.map((context) => ({
+        id: context.customer.id,
+        tenantId: context.tenantId,
+        phone: context.customer.phone,
+      })),
+    );
+
+    const tenantByCustomerId = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        slug: string;
+        allowCustomerSelfCancellation: boolean;
+      }
+    >();
+
+    for (const [customerId, mapping] of expanded.tenantByCustomerId) {
+      const tenant = tenantInfoByPrimaryCustomerId.get(mapping.primaryCustomerId);
+
+      if (tenant) {
+        tenantByCustomerId.set(customerId, tenant);
+      }
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
       .select(ADMIN_APPOINTMENT_SELECT)
-      .in('customer_id', customerIds);
+      .in('customer_id', expanded.customerIds);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -1226,11 +1256,11 @@ export class AppointmentsService {
       customer_id?: string;
     })[];
 
-    const now = new Date();
+    const now = getWallClockNow();
     const grouped = new Map<string, CustomerAppointmentGroup>();
 
     for (const row of rows) {
-      if (!this.matchesCustomerAppointmentScope(row, scope, now)) {
+      if (!matchesCustomerAppointmentScope(row, scope, now)) {
         continue;
       }
 
@@ -1310,13 +1340,20 @@ export class AppointmentsService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
+    const customerIds = await this.customersService.findEquivalentCustomerIdsForTenant(
+      trimmedTenantId,
+      customer.customer.phone,
+    );
+    const scopedCustomerIds =
+      customerIds.length > 0 ? customerIds : [customer.customer.id];
+
     const { data: existing, error: fetchError } = await this.supabaseService
       .getClient()
       .from('appointments')
       .select(ADMIN_APPOINTMENT_SELECT)
       .eq('id', trimmedAppointmentId)
       .eq('tenant_id', trimmedTenantId)
-      .eq('customer_id', customer.customer.id)
+      .in('customer_id', scopedCustomerIds)
       .maybeSingle();
 
     if (fetchError) {
@@ -1330,7 +1367,7 @@ export class AppointmentsService {
     const row = existing as SupabaseAppointmentWithRelations & {
       cancellation_requested_at?: string | null;
     };
-    const now = new Date();
+    const now = getWallClockNow();
 
     if (!this.canCustomerRequestCancellation(row, now)) {
       if (row.cancellation_requested_at) {
@@ -1357,7 +1394,7 @@ export class AppointmentsService {
         .select(ADMIN_APPOINTMENT_SELECT)
         .eq('id', trimmedAppointmentId)
         .eq('tenant_id', trimmedTenantId)
-        .eq('customer_id', customer.customer.id)
+        .in('customer_id', scopedCustomerIds)
         .maybeSingle();
 
       if (reloadError) {
@@ -1388,7 +1425,7 @@ export class AppointmentsService {
       );
     }
 
-    const requestedAt = now.toISOString();
+    const requestedAt = new Date().toISOString();
 
     const { error: updateError } = await this.supabaseService
       .getClient()
@@ -1396,7 +1433,7 @@ export class AppointmentsService {
       .update({ cancellation_requested_at: requestedAt })
       .eq('id', trimmedAppointmentId)
       .eq('tenant_id', trimmedTenantId)
-      .eq('customer_id', customer.customer.id);
+      .in('customer_id', scopedCustomerIds);
 
     if (updateError) {
       throw new InternalServerErrorException(updateError.message);
@@ -1840,7 +1877,7 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const now = new Date();
+    const now = getWallClockNow();
     const rows = (data ?? []) as Array<
       SupabaseAppointmentWithRelations & {
         guest_access_token?: string | null;
@@ -1857,7 +1894,7 @@ export class AppointmentsService {
             row.guest_access_token === expected,
         );
       })
-      .filter((row) => this.matchesCustomerAppointmentScope(row, params.scope, now))
+      .filter((row) => matchesCustomerAppointmentScope(row, params.scope, now))
       .map((row) =>
         this.mapCustomerAppointmentRow(row, now, {
           id: tenant.id,
@@ -1920,7 +1957,7 @@ export class AppointmentsService {
       cancellation_requested_at?: string | null;
       guest_access_token?: string | null;
     };
-    const now = new Date();
+    const now = getWallClockNow();
 
     if (!this.canCustomerRequestCancellation(row, now)) {
       if (row.cancellation_requested_at) {
@@ -1972,7 +2009,7 @@ export class AppointmentsService {
       );
     }
 
-    const requestedAt = now.toISOString();
+    const requestedAt = new Date().toISOString();
     const { error: updateError } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -2207,28 +2244,6 @@ export class AppointmentsService {
     };
   }
 
-  private matchesCustomerAppointmentScope(
-    row: SupabaseAppointmentWithRelations & {
-      cancellation_requested_at?: string | null;
-    },
-    scope: CustomerAppointmentScope,
-    now: Date,
-  ): boolean {
-    const isUpcoming = this.isUpcomingCustomerAppointment(row, now);
-    return scope === 'upcoming' ? isUpcoming : !isUpcoming;
-  }
-
-  private isUpcomingCustomerAppointment(
-    row: Pick<SupabaseAppointmentWithRelations, 'start_time' | 'status'>,
-    now: Date,
-  ): boolean {
-    if (!CUSTOMER_CANCELLABLE_STATUSES.includes(row.status as AppointmentStatus)) {
-      return false;
-    }
-
-    return !isAfter(now, parseWallClockDateTime(row.start_time));
-  }
-
   private canCustomerRequestCancellation(
     row: SupabaseAppointmentWithRelations & {
       cancellation_requested_at?: string | null;
@@ -2239,7 +2254,7 @@ export class AppointmentsService {
       return false;
     }
 
-    return this.isUpcomingCustomerAppointment(row, now);
+    return isUpcomingCustomerAppointment(row, now);
   }
 
   private dispatchCancellationRequestEmail(context: {
