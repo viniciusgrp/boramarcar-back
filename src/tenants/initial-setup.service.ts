@@ -161,7 +161,6 @@ export class InitialSetupService {
       hasBusinessHours &&
       hasContactPhone &&
       hasVisitedSettings &&
-      hasSharedBookingLink &&
       hasCustomerAccountPolicy &&
       (!requiresStripeConnect || hasStripeConnect) &&
       hasActiveSubscription;
