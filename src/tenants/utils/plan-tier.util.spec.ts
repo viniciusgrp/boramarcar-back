@@ -1,4 +1,7 @@
-import { canAccessDepositFeatures } from './plan-tier.util';
+import {
+  canAccessDepositFeatures,
+  canAccessLoyaltyFeatures,
+} from './plan-tier.util';
 
 describe('plan-tier.util', () => {
   describe('canAccessDepositFeatures', () => {
@@ -15,6 +18,14 @@ describe('plan-tier.util', () => {
     it('allows non-Elite plans when deposit feature is enabled', () => {
       expect(canAccessDepositFeatures('SOLO', true)).toBe(true);
       expect(canAccessDepositFeatures('PRO', true)).toBe(true);
+    });
+  });
+
+  describe('canAccessLoyaltyFeatures', () => {
+    it('is available on all plan tiers', () => {
+      expect(canAccessLoyaltyFeatures('SOLO')).toBe(true);
+      expect(canAccessLoyaltyFeatures('PRO')).toBe(true);
+      expect(canAccessLoyaltyFeatures('ELITE')).toBe(true);
     });
   });
 });

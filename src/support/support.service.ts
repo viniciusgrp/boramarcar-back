@@ -49,7 +49,7 @@ export class SupportService {
 
     const recipientEmail =
       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ||
-      'viniciusgrp@gmail.com';
+      'support@example.com';
 
     await this.mailService.sendSupportRequest({
       recipientEmail,

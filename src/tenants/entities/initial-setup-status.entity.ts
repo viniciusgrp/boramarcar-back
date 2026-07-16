@@ -13,4 +13,5 @@ export interface InitialSetupStatus {
   hasStripeConnect: boolean;
   requiresStripeConnect: boolean;
   hasActiveSubscription: boolean;
+  hasTestBooking: boolean;
 }

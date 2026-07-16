@@ -23,6 +23,7 @@ import { RolesGuard } from '../tenants/guards/roles.guard';
 import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { ReleaseDepositHoldDto } from './dto/release-deposit-hold.dto';
 import {
   GuestAppointmentCancelDto,
   GuestAppointmentLookupDto,
@@ -310,6 +311,17 @@ export class AppointmentsController {
       id,
       scopedProfessionalId,
     );
+  }
+
+  @Post('public/release-deposit-hold')
+  async releaseDepositHold(
+    @Body() dto: ReleaseDepositHoldDto,
+  ): Promise<{ released: boolean }> {
+    const released = await this.appointmentsService.releasePendingDepositHold(
+      dto.appointmentId,
+    );
+
+    return { released };
   }
 
   @Post('guest/lookup')

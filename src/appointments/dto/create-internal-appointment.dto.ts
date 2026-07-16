@@ -7,6 +7,7 @@ import {
   IsUUID,
   MinLength,
 } from 'class-validator';
+import { IsBrazilianPhone } from '../../common/validators/is-brazilian-phone.validator';
 
 export class CreateInternalAppointmentDto {
   @IsUUID()
@@ -36,7 +37,7 @@ export class CreateInternalAppointmentDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(1)
+  @IsBrazilianPhone()
   customerPhone?: string;
 
   @IsOptional()

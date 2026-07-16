@@ -12,6 +12,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { IsBrazilianPhone } from '../../common/validators/is-brazilian-phone.validator';
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { CalendarCardPreferences } from '../entities/calendar-card-preferences.type';
 import type { PayoutFrequency } from '../entities/payout-frequency.type';
@@ -33,6 +34,7 @@ export class UpdateTenantDto {
 
   @IsOptional()
   @IsString()
+  @IsBrazilianPhone()
   contactPhone?: string | null;
 
   @IsOptional()

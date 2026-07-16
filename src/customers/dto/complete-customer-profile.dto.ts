@@ -1,11 +1,12 @@
 import { IsISO8601, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBrazilianPhone } from '../../common/validators/is-brazilian-phone.validator';
 
 export class CompleteCustomerProfileDto {
   @IsUUID()
   tenantId!: string;
 
   @IsString()
-  @MinLength(1)
+  @IsBrazilianPhone({ required: true })
   phone!: string;
 
   @IsOptional()

@@ -69,3 +69,8 @@ export function canAccessDepositFeatures(
 ): boolean {
   return planTier === 'ELITE' || depositFeatureEnabled;
 }
+
+/** Loyalty is available on every plan with product access (trial/subscription). */
+export function canAccessLoyaltyFeatures(_planTier: PlanTier): boolean {
+  return true;
+}
