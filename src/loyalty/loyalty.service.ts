@@ -568,12 +568,16 @@ export class LoyaltyService {
     const existing = await this.findCustomerByPhone(tenantId, trimmedPhone);
 
     if (existing) {
-      if (existing.name !== trimmedName) {
+      const shouldNormalizePhone = existing.phone !== phoneKey;
+      const shouldRename = existing.name !== trimmedName;
+
+      if (shouldRename || shouldNormalizePhone) {
         const { data, error } = await this.supabaseService
           .getClient()
           .from('customers')
           .update({
             name: trimmedName,
+            phone: phoneKey,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
@@ -614,7 +618,7 @@ export class LoyaltyService {
       .insert({
         tenant_id: tenantId,
         name: trimmedName,
-        phone: trimmedPhone,
+        phone: phoneKey,
         points_balance: 0,
         referral_code: newReferralCode,
       })

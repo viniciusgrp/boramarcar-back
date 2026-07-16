@@ -520,23 +520,159 @@ export class CustomersService {
     return data ? this.mapCustomerRow(data as Customer) : null;
   }
 
-  private async findByPhoneForTenant(
-    tenantId: string,
-    phone: string,
-  ): Promise<Customer | null> {
+  /**
+   * Returns every customer id in the same tenants that shares a normalized
+   * phone with the given auth-linked customers. Used so "Meus Agendamentos"
+   * still finds rows created as guest/balcão before the account claimed the phone.
+   */
+  async expandCustomerIdsByPhone(
+    customers: Array<{ id: string; tenantId: string; phone: string }>,
+  ): Promise<{
+    customerIds: string[];
+    tenantByCustomerId: Map<
+      string,
+      { primaryCustomerId: string; tenantId: string }
+    >;
+  }> {
+    if (customers.length === 0) {
+      return { customerIds: [], tenantByCustomerId: new Map() };
+    }
+
+    const tenantIds = [...new Set(customers.map((customer) => customer.tenantId))];
+    const phoneKeyByTenantAndPrimary = new Map<string, string>();
+
+    for (const customer of customers) {
+      const phoneKey = normalizePhoneKey(customer.phone);
+
+      if (phoneKey.length < 12) {
+        continue;
+      }
+
+      phoneKeyByTenantAndPrimary.set(
+        `${customer.tenantId}:${phoneKey}`,
+        customer.id,
+      );
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('customers')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('phone', phone)
-      .maybeSingle();
+      .select('id, tenant_id, phone')
+      .in('tenant_id', tenantIds);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data ? this.mapCustomerRow(data as Customer) : null;
+    const customerIds = new Set<string>();
+    const tenantByCustomerId = new Map<
+      string,
+      { primaryCustomerId: string; tenantId: string }
+    >();
+
+    for (const customer of customers) {
+      customerIds.add(customer.id);
+      tenantByCustomerId.set(customer.id, {
+        primaryCustomerId: customer.id,
+        tenantId: customer.tenantId,
+      });
+    }
+
+    for (const row of (data ?? []) as Array<{
+      id: string;
+      tenant_id: string;
+      phone: string;
+    }>) {
+      const phoneKey = normalizePhoneKey(row.phone ?? '');
+      const primaryCustomerId = phoneKeyByTenantAndPrimary.get(
+        `${row.tenant_id}:${phoneKey}`,
+      );
+
+      if (!primaryCustomerId) {
+        continue;
+      }
+
+      customerIds.add(row.id);
+      tenantByCustomerId.set(row.id, {
+        primaryCustomerId,
+        tenantId: row.tenant_id,
+      });
+    }
+
+    return {
+      customerIds: [...customerIds],
+      tenantByCustomerId,
+    };
+  }
+
+  async findEquivalentCustomerIdsForTenant(
+    tenantId: string,
+    phone: string,
+  ): Promise<string[]> {
+    const phoneKey = normalizePhoneKey(phone);
+
+    if (phoneKey.length < 12) {
+      return [];
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('id, phone')
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return ((data ?? []) as Array<{ id: string; phone: string }>)
+      .filter((row) => normalizePhoneKey(row.phone ?? '') === phoneKey)
+      .map((row) => row.id);
+  }
+
+  private async findByPhoneForTenant(
+    tenantId: string,
+    phone: string,
+  ): Promise<Customer | null> {
+    const phoneKey = normalizePhoneKey(phone);
+    const localDigits = phoneKey.startsWith('55')
+      ? phoneKey.slice(2)
+      : phoneKey;
+
+    const { data: exactMatches, error: exactError } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .or(`phone.eq.${phoneKey},phone.eq.${localDigits}`);
+
+    if (exactError) {
+      throw new InternalServerErrorException(exactError.message);
+    }
+
+    const exactMatch = ((exactMatches ?? []) as Customer[]).find(
+      (row) => normalizePhoneKey(row.phone ?? '') === phoneKey,
+    );
+
+    if (exactMatch) {
+      return this.mapCustomerRow(exactMatch);
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('*')
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const match = ((data ?? []) as Customer[]).find(
+      (row) => normalizePhoneKey(row.phone ?? '') === phoneKey,
+    );
+
+    return match ? this.mapCustomerRow(match) : null;
   }
 
   private normalizeBirthDate(value?: string): string | null {
