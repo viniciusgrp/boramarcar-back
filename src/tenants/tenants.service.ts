@@ -36,6 +36,7 @@ import {
 } from './utils/admin-theme.util';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { normalizePayoutFrequency } from './entities/payout-frequency.type';
+import { NtfyService } from '../notifications/ntfy.service';
 import { TenantUsersService } from './tenant-users.service';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
@@ -164,6 +165,7 @@ export class TenantsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly tenantUsersService: TenantUsersService,
+    private readonly ntfyService: NtfyService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -698,6 +700,12 @@ export class TenantsService {
 
     await this.tenantUsersService.createOwnerMembership(tenantData.id, ownerId);
 
+    void this.notifyNewTenantSignup({
+      name: tenantData.name as string,
+      slug: tenantData.slug as string,
+      ownerEmail: email,
+    }).catch(() => undefined);
+
     return mapTenantRow(tenantData as Tenant);
   }
 
@@ -773,7 +781,39 @@ export class TenantsService {
         user_metadata: { full_name: ownerName },
       });
 
+    void this.notifyNewTenantSignup({
+      name: tenantData.name as string,
+      slug: tenantData.slug as string,
+      ownerUserId: userId,
+    }).catch(() => undefined);
+
     return mapTenantRow(tenantData as Tenant);
+  }
+
+  private async notifyNewTenantSignup(params: {
+    name: string;
+    slug: string;
+    ownerEmail?: string;
+    ownerUserId?: string;
+  }): Promise<void> {
+    let ownerEmail = params.ownerEmail;
+
+    if (!ownerEmail && params.ownerUserId) {
+      try {
+        const { data: authUser } = await this.supabaseService
+          .getClient()
+          .auth.admin.getUserById(params.ownerUserId);
+        ownerEmail = authUser?.user?.email;
+      } catch {
+        ownerEmail = undefined;
+      }
+    }
+
+    await this.ntfyService.notifyNewTenant({
+      name: params.name,
+      slug: params.slug,
+      ownerEmail,
+    });
   }
 
   async updateStripeCustomerId(
