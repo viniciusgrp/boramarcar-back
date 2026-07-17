@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,6 +17,10 @@ import {
 } from '../../../tenants/utils/tenant-user-scope.util';
 import { SupportAssistantRepository } from '../support-assistant.repository';
 import {
+  parseWallClockDateTime,
+  wallClockToStorageIso,
+} from '../../../schedule/utils/wall-clock-datetime.util';
+import {
   buildAbsenceRangeIso,
   extractSupportActionPropose,
 } from './support-action-sanitize.util';
@@ -25,9 +30,11 @@ import type {
   SupportActionPayload,
   SupportCancelAppointmentPayload,
   SupportCreateAbsencePayload,
+  SupportDeleteAbsencePayload,
   SupportParsedActionPropose,
   SupportProposedActionCard,
 } from './support-action.types';
+import type { ProfessionalAbsence } from '../../../professional-absences/entities/professional-absence.entity';
 
 const CANCELLABLE_STATUSES = [
   'PENDING',
@@ -81,11 +88,11 @@ export class SupportAssistantActionsService {
         proposedAction: card,
       };
     } catch (error) {
-      const message =
-        error instanceof BadRequestException || error instanceof NotFoundException
-          ? error.message
-          : 'Não foi possível preparar a ação. Peça mais detalhes ou use o painel.';
-      this.logger.warn(`Action preview failed: ${message}`);
+      const message = this.resolvePreviewErrorMessage(error);
+      this.logger.warn(
+        `Action preview failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       return {
         displayContent: `${extracted.displayContent}\n\n${message}`.trim(),
         proposedAction: null,
@@ -112,27 +119,26 @@ export class SupportAssistantActionsService {
     }
 
     try {
+      let result: SupportActionExecuteResult;
+
       if (proposal.type === 'create_absence') {
-        const result = await this.executeCreateAbsence({
+        result = await this.executeCreateAbsence({
           context: params.context,
           proposal,
           confirmCancelConflicting: params.confirmCancelConflicting === true,
         });
-        this.proposalStore.delete(proposal.id);
-        await this.repository.insertAuditEvent({
-          tenantId: params.context.tenant.id,
-          userId: params.userId,
-          conversationId: proposal.conversationId,
-          eventType: 'action_executed',
-          metadata: { type: proposal.type },
+      } else if (proposal.type === 'delete_absence') {
+        result = await this.executeDeleteAbsence({
+          context: params.context,
+          proposal,
         });
-        return result;
+      } else {
+        result = await this.executeCancelAppointment({
+          context: params.context,
+          proposal,
+        });
       }
 
-      const result = await this.executeCancelAppointment({
-        context: params.context,
-        proposal,
-      });
       this.proposalStore.delete(proposal.id);
       await this.repository.insertAuditEvent({
         tenantId: params.context.tenant.id,
@@ -190,6 +196,9 @@ export class SupportAssistantActionsService {
   }): Promise<SupportProposedActionCard> {
     if (params.action.type === 'create_absence') {
       return this.previewCreateAbsence(params);
+    }
+    if (params.action.type === 'delete_absence') {
+      return this.previewDeleteAbsence(params);
     }
     return this.previewCancelAppointment(params);
   }
@@ -270,6 +279,64 @@ export class SupportAssistantActionsService {
       warnings,
       requiresCancelConflicting: conflicts.length > 0,
       conflictCount: conflicts.length,
+    };
+  }
+
+  private async previewDeleteAbsence(params: {
+    context: TenantAccessContext;
+    userId: string;
+    conversationId: string;
+    action: SupportParsedActionPropose;
+  }): Promise<SupportProposedActionCard> {
+    const payload = params.action.payload as SupportDeleteAbsencePayload;
+    const professionalId = await this.resolveProfessionalIdForAbsence(
+      params.context,
+      payload.professionalId,
+    );
+    const absence = await this.resolveAbsenceToDelete(
+      params.context.tenant.id,
+      professionalId,
+      payload,
+    );
+
+    const professional =
+      await this.professionalsService.assertProfessionalBelongsToTenant(
+        professionalId,
+        params.context.tenant.id,
+      );
+
+    const proposal = this.proposalStore.create({
+      tenantId: params.context.tenant.id,
+      userId: params.userId,
+      conversationId: params.conversationId,
+      action: params.action,
+      resolvedProfessionalId: professionalId,
+      resolvedAbsenceId: absence.id,
+    });
+
+    await this.repository.insertAuditEvent({
+      tenantId: params.context.tenant.id,
+      userId: params.userId,
+      conversationId: params.conversationId,
+      eventType: 'action_previewed',
+      metadata: { type: 'delete_absence' },
+    });
+
+    const isAllDay =
+      payload.allDay !== false && (!payload.startTime || !payload.endTime);
+    const periodLabel = isAllDay
+      ? `Dia inteiro em ${payload.date}`
+      : `${payload.date} das ${payload.startTime} às ${payload.endTime}`;
+
+    return {
+      id: proposal.id,
+      type: 'delete_absence',
+      summary: `Remover ausência${professional?.name ? ` de ${professional.name}` : ''}`,
+      details: {
+        period: periodLabel,
+        professional: professional?.name ?? professionalId,
+        reason: absence.reason ?? '—',
+      },
     };
   }
 
@@ -393,6 +460,43 @@ export class SupportAssistantActionsService {
     };
   }
 
+  private async executeDeleteAbsence(params: {
+    context: TenantAccessContext;
+    proposal: {
+      resolvedProfessionalId?: string;
+      resolvedAbsenceId?: string;
+    };
+  }): Promise<SupportActionExecuteResult> {
+    const professionalId = params.proposal.resolvedProfessionalId;
+    const absenceId = params.proposal.resolvedAbsenceId;
+    if (!professionalId || !absenceId) {
+      throw new BadRequestException('Ausência não resolvida na proposta.');
+    }
+
+    await this.assertProfessionalAccess(params.context, professionalId);
+
+    const existing = await this.professionalAbsencesService.findAbsenceById(
+      params.context.tenant.id,
+      absenceId,
+    );
+    if (!existing || existing.professionalId !== professionalId) {
+      throw new NotFoundException(
+        'Essa ausência não existe mais. Atualize a tela ou tente novamente.',
+      );
+    }
+
+    await this.professionalAbsencesService.deleteForTenant(
+      params.context.tenant.id,
+      absenceId,
+    );
+
+    return {
+      success: true,
+      message: 'Ausência removida com sucesso.',
+      gotoPath: '/admin/meu-perfil',
+    };
+  }
+
   private async executeCancelAppointment(params: {
     context: TenantAccessContext;
     proposal: {
@@ -453,6 +557,60 @@ export class SupportAssistantActionsService {
     throw new BadRequestException(
       'Informe qual profissional ficará ausente, ou vincule seu perfil em Equipe / Meu perfil.',
     );
+  }
+
+  private async resolveAbsenceToDelete(
+    tenantId: string,
+    professionalId: string,
+    payload: SupportDeleteAbsencePayload,
+  ): Promise<ProfessionalAbsence> {
+    const range = buildAbsenceRangeIso(payload);
+    const rangeStartKey = this.toAbsenceStorageKey(range.startsAt);
+    const rangeEndKey = this.toAbsenceStorageKey(range.endsAt);
+    const candidates =
+      await this.professionalAbsencesService.findOverlappingForProfessionalOnDate(
+        tenantId,
+        professionalId,
+        payload.date,
+      );
+
+    if (candidates.length === 0) {
+      throw new BadRequestException(
+        'Não encontrei ausência nesse dia para remover. Informe a data (e o horário, se for parcial).',
+      );
+    }
+
+    const exact = candidates.filter((absence) => {
+      return (
+        this.toAbsenceStorageKey(absence.startsAt) === rangeStartKey &&
+        this.toAbsenceStorageKey(absence.endsAt) === rangeEndKey
+      );
+    });
+    if (exact.length === 1) {
+      return exact[0];
+    }
+
+    const overlapping = candidates.filter((absence) => {
+      const startKey = this.toAbsenceStorageKey(absence.startsAt);
+      const endKey = this.toAbsenceStorageKey(absence.endsAt);
+      return startKey < rangeEndKey && endKey > rangeStartKey;
+    });
+
+    if (overlapping.length === 1) {
+      return overlapping[0];
+    }
+
+    if (overlapping.length === 0 && candidates.length === 1) {
+      return candidates[0];
+    }
+
+    throw new BadRequestException(
+      `Encontrei ${Math.max(overlapping.length, candidates.length)} ausências nesse dia. Informe o horário exato (ex.: das 8 às 12) ou remova em Meu perfil / Equipe.`,
+    );
+  }
+
+  private toAbsenceStorageKey(iso: string): string {
+    return wallClockToStorageIso(parseWallClockDateTime(iso));
   }
 
   private async assertProfessionalAccess(
@@ -633,5 +791,38 @@ export class SupportAssistantActionsService {
       professionalName: professionalName ?? 'Profissional',
       status: row.status,
     };
+  }
+
+  private resolvePreviewErrorMessage(error: unknown): string {
+    if (error instanceof BadRequestException || error instanceof NotFoundException) {
+      const response = error.getResponse();
+      if (typeof response === 'string' && response.trim()) {
+        return response;
+      }
+      if (
+        response &&
+        typeof response === 'object' &&
+        'message' in response
+      ) {
+        const nested = (response as { message?: unknown }).message;
+        if (typeof nested === 'string' && nested.trim()) {
+          return nested;
+        }
+        if (Array.isArray(nested) && typeof nested[0] === 'string') {
+          return nested[0];
+        }
+      }
+      if (typeof error.message === 'string' && error.message.trim()) {
+        return error.message;
+      }
+    }
+
+    if (error instanceof HttpException) {
+      this.logger.warn(
+        `Action preview hit unexpected HTTP ${error.getStatus()}: ${error.message}`,
+      );
+    }
+
+    return 'Não foi possível preparar a ação. Peça mais detalhes ou use o painel.';
   }
 }

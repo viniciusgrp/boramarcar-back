@@ -158,4 +158,17 @@ export class TenantUsersController {
       dto,
     );
   }
+
+  @Delete(':id')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
+  removeMember(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') tenantUserId: string,
+  ): Promise<{ id: string }> {
+    return this.tenantUsersService.removeMemberForTenant(
+      context.tenant.id,
+      tenantUserId,
+    );
+  }
 }

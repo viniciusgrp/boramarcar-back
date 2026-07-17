@@ -14,8 +14,11 @@ Existem 3 planos: **Solo**, **Pro** e **Elite**. A gestão da assinatura (escolh
 | Customizar cores do painel admin | Não | Sim | Sim |
 | Sinal (cobrança de depósito no agendamento) | Não* | Não* | Sim |
 | Fidelidade (pontos, recompensas, indicação) | Sim | Sim | Sim |
+| Assistente IA (chat de suporte no painel) | Complemento* | Complemento* | Complemento* |
 
 \* Sinal também pode ser liberado independentemente do plano se o estabelecimento tiver a flag especial `deposit_feature_enabled` habilitada manualmente (caso avaliado individualmente pela equipe BoraMarcar).
+
+\* Assistente IA é um **complemento pago** (R$ 29,90/mês), não incluso nos planos. Contrata em **Faturamento → Assistente IA**, só com plano **ativo** (não no trial). A cota diária de mensagens acompanha o plano base: Solo 40/dia (20 por usuário), Pro 100/dia (40 por usuário), Elite 200/dia (50 por usuário).
 
 Se o dono perguntar por que não vê "Financeiro", "Fluxo de caixa" ou "Comissões" no menu, a causa mais comum é estar no plano **Solo**. Para liberar, é preciso fazer upgrade para Pro ou Elite.
 
@@ -35,6 +38,7 @@ Se o dono perguntar por que não pode adicionar mais profissionais, o limite do 
 - Assinar/mudar de plano é feito via Checkout do Stripe (Solo, Pro ou Elite).
 - Há um Portal do Cliente Stripe para gerenciar forma de pagamento, cancelar ou trocar plano.
 - Em caso de pagamento não reconhecido pelo sistema depois de pago no Stripe, existe uma opção de "sincronizar assinatura" na tela de Faturamento.
+- O **Assistente IA** é contratado na mesma assinatura (item extra). Remoção e ajustes de pagamento do complemento também passam pelo portal.
 
 ## Recebimento de sinal (Stripe Connect)
 

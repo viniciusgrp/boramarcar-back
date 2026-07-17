@@ -15,16 +15,22 @@ Existem 3 papéis (roles) no painel admin:
 ## Gestão de equipe (tela "Equipe")
 
 - Aba **"Quem atende"**: cadastro dos profissionais que realizam atendimentos (nome, foto, comissão, horários, ausências). Ao criar um profissional, é possível convidar por e-mail para que ele tenha acesso ao painel como Colaborador.
-- Aba **"Acesso ao painel"** (só visível para o Dono): convidar novos usuários com papel Gerente ou Colaborador, reenviar ou cancelar convites pendentes, alterar o papel de um usuário já convidado (exceto o próprio Dono), e vincular um usuário Gerente ou Colaborador a um perfil de profissional existente. Para Gerente o vínculo é opcional; para Colaborador é obrigatório.
+  - **Desativar**: pausa temporária. O profissional continua na lista (Inativo), some da agenda, mas **mantém o acesso ao painel**. Volta à agenda com um clique em **Ativar**.
+  - **Excluir**: arquiva o cadastro (some da lista principal; histórico/agendamentos preservados) e **revoga o acesso ao painel** de Gerente/Colaborador vinculado (o Dono mantém o painel). Pode reativar em **Ver excluídos** ou ao cadastrar de novo com o mesmo celular/e-mail de convite (o sistema oferece reativar o cadastro antigo em vez de duplicar). Após reativar, envie um novo convite se a pessoa precisar entrar no painel de novo.
+- Aba **"Acesso ao painel"** (só visível para o Dono): convidar novos usuários com papel Gerente ou Colaborador, reenviar ou cancelar convites pendentes, alterar o papel de um usuário já convidado (exceto o próprio Dono), remover o acesso de um membro (exceto o Dono), e vincular um usuário Gerente ou Colaborador a um perfil de profissional **ativo**. Para Gerente o vínculo é opcional; para Colaborador é obrigatório.
 
 ## Acesso ao produto
 
 - O acesso ao painel admin depende de o estabelecimento ter assinatura ativa **ou** estar dentro do período de trial (14 dias). Se o trial expirar e não houver assinatura ativa, o painel fica bloqueado até o Dono assinar um plano em Faturamento.
 - Esse bloqueio vale para todos os papéis (Dono, Gerente, Colaborador), pois é um bloqueio do estabelecimento como um todo, não do usuário individual.
+- Além disso, se o perfil profissional vinculado for **excluído**, Gerente/Colaborador perdem o acesso ao painel desse estabelecimento. Pausar (desativar) não corta o login. O Dono continua entrando normalmente.
 
 ## Boas práticas para responder
 
 - Se um Gerente perguntar por que não acessa Faturamento ou Recebimentos, isso é esperado: esses itens são exclusivos do Dono.
 - Se um Gerente perguntar se pode atender clientes: sim, desde que o Dono vincule um profissional a ele em Equipe → Acesso ao painel. Ele continua com os acessos de gerente.
 - Se um Colaborador perguntar por que não vê Clientes ou Financeiro, isso também é esperado: o papel de Colaborador é limitado à própria agenda, perfil e comissões.
-- Para convites, alteração de papel, ou vínculo de Gerente/Colaborador a um profissional, direcione para a tela Equipe → "Acesso ao painel", que só o Dono pode acessar.
+- Se alguém perguntar se desativar corta o login: não. Só some da agenda; o painel continua.
+- Se alguém perguntar se excluir corta o login: sim, para Gerente/Colaborador vinculados; o Dono não perde o painel. Para voltar, reative (Ver excluídos ou cadastro com o mesmo contato) e convide de novo.
+- Se perguntarem a diferença: Desativar = pausa na agenda, mantém painel; Excluir = some da lista e corta o painel, mas dá para reativar depois.
+- Para convites, alteração de papel, remoção de acesso ou vínculo de Gerente/Colaborador a um profissional, direcione para a tela Equipe → "Acesso ao painel", que só o Dono pode acessar.

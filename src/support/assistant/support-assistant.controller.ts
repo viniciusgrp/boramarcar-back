@@ -43,10 +43,7 @@ export class SupportAssistantController {
     @CurrentTenantContext() context: TenantAccessContext,
     @CurrentUser() user: User,
   ): Promise<SupportAssistantStatus> {
-    return this.supportAssistantService.getStatus({
-      tenantId: context.tenant.id,
-      userId: user.id,
-    });
+    return this.supportAssistantService.getStatus(context, user);
   }
 
   @Post('conversations')

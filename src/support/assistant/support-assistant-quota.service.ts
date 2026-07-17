@@ -1,10 +1,14 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import type { PlanTier } from '../../tenants/entities/plan-tier.type';
+import { getSupportAiDailyQuota } from '../../tenants/utils/support-ai-quota.util';
 import { SupportAssistantConfigService } from './support-assistant-config.service';
 import { SupportAssistantRepository } from './support-assistant.repository';
 
 export interface SupportQuotaStatus {
   remainingTenant: number;
   remainingUser: number;
+  dailyLimitTenant: number;
+  dailyLimitUser: number;
 }
 
 @Injectable()
@@ -17,8 +21,10 @@ export class SupportAssistantQuotaService {
   async getRemainingQuota(params: {
     tenantId: string;
     userId: string;
+    planTier: PlanTier;
   }): Promise<SupportQuotaStatus> {
     const sinceIso = this.getRollingDayStartIso();
+    const limits = getSupportAiDailyQuota(params.planTier);
     const [tenantCount, userCount] = await Promise.all([
       this.repository.countAuditEventsSince({
         tenantId: params.tenantId,
@@ -34,14 +40,10 @@ export class SupportAssistantQuotaService {
     ]);
 
     return {
-      remainingTenant: Math.max(
-        0,
-        this.config.getDailyLimitPerTenant() - tenantCount,
-      ),
-      remainingUser: Math.max(
-        0,
-        this.config.getDailyLimitPerUser() - userCount,
-      ),
+      dailyLimitTenant: limits.tenant,
+      dailyLimitUser: limits.user,
+      remainingTenant: Math.max(0, limits.tenant - tenantCount),
+      remainingUser: Math.max(0, limits.user - userCount),
     };
   }
 
@@ -49,6 +51,7 @@ export class SupportAssistantQuotaService {
     tenantId: string;
     userId: string;
     conversationId: string;
+    planTier: PlanTier;
   }): Promise<SupportQuotaStatus> {
     const remaining = await this.getRemainingQuota(params);
 

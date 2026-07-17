@@ -1,5 +1,6 @@
 export const SUPPORT_ACTION_TYPES = [
   'create_absence',
+  'delete_absence',
   'cancel_appointment',
 ] as const;
 
@@ -14,6 +15,9 @@ export interface SupportCreateAbsencePayload {
   professionalId?: string;
 }
 
+/** Mesmo formato de create_absence: identifica a ausência a remover. */
+export type SupportDeleteAbsencePayload = SupportCreateAbsencePayload;
+
 export interface SupportCancelAppointmentPayload {
   appointmentId?: string;
   date?: string;
@@ -23,6 +27,7 @@ export interface SupportCancelAppointmentPayload {
 
 export type SupportActionPayload =
   | SupportCreateAbsencePayload
+  | SupportDeleteAbsencePayload
   | SupportCancelAppointmentPayload;
 
 export interface SupportParsedActionPropose {

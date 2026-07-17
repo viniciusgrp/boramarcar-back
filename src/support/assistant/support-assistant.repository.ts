@@ -1,6 +1,7 @@
 import {
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../../supabase/supabase.service';
@@ -13,6 +14,8 @@ import type {
 
 @Injectable()
 export class SupportAssistantRepository {
+  private readonly logger = new Logger(SupportAssistantRepository.name);
+
   constructor(private readonly supabaseService: SupabaseService) {}
 
   async createConversation(params: {
@@ -212,7 +215,10 @@ export class SupportAssistantRepository {
       });
 
     if (error) {
-      throw new InternalServerErrorException(error.message);
+      // Never block chat/actions on audit (ex.: CHECK antigo sem action_*).
+      this.logger.warn(
+        `Audit event "${params.eventType}" skipped: ${error.message}`,
+      );
     }
   }
 }

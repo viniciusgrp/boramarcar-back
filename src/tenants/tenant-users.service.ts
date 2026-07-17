@@ -35,6 +35,7 @@ import {
   normalizeAdminThemeMode,
   normalizeTenantUserPreferences,
 } from './utils/tenant-user-preferences.util';
+import { shouldRevokePanelMembershipOnProfessionalArchive } from './utils/inactive-professional-access.util';
 
 interface TenantUserRow extends TenantUser {}
 
@@ -232,6 +233,7 @@ export class TenantUsersService {
     const professionalId = resolveProfessionalIdForRole(role, dto.professionalId);
 
     if (professionalId) {
+      await this.assertProfessionalIsActive(tenantId, professionalId);
       await this.assertProfessionalNotLinkedToMember(tenantId, professionalId);
     }
 
@@ -595,6 +597,7 @@ export class TenantUsersService {
     const professionalId = resolveProfessionalIdForRole(role, dto.professionalId);
 
     if (professionalId && professionalId !== existing.professional_id) {
+      await this.assertProfessionalIsActive(tenantId, professionalId);
       await this.assertProfessionalNotLinkedToMember(
         tenantId,
         professionalId,
@@ -629,6 +632,139 @@ export class TenantUsersService {
       professionalId: row.professional_id,
       professionalName: this.resolveProfessionalName(row.professionals),
     };
+  }
+
+  async removeMemberForTenant(
+    tenantId: string,
+    tenantUserId: string,
+  ): Promise<{ id: string }> {
+    const existing = await this.findByIdForTenant(tenantId, tenantUserId);
+
+    if (existing.role === 'OWNER') {
+      throw new ForbiddenException(
+        'O dono do estabelecimento não pode ser removido da equipe.',
+      );
+    }
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .delete()
+      .eq('id', tenantUserId)
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return { id: tenantUserId };
+  }
+
+  /**
+   * Removes panel access for non-owner members linked to an archived
+   * professional and cancels their pending invites.
+   */
+  async revokeAccessForArchivedProfessional(
+    tenantId: string,
+    professionalId: string,
+  ): Promise<void> {
+    const { data: members, error: membersError } = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .select('id, role')
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId);
+
+    if (membersError) {
+      throw new InternalServerErrorException(membersError.message);
+    }
+
+    const memberIdsToRevoke = (members ?? [])
+      .filter((row) =>
+        shouldRevokePanelMembershipOnProfessionalArchive(
+          normalizeUserRole(row.role),
+        ),
+      )
+      .map((row) => row.id as string);
+
+    if (memberIdsToRevoke.length > 0) {
+      const { error: deleteMembersError } = await this.supabaseService
+        .getClient()
+        .from('tenant_users')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .in('id', memberIdsToRevoke);
+
+      if (deleteMembersError) {
+        throw new InternalServerErrorException(deleteMembersError.message);
+      }
+    }
+
+    const { error: deleteInvitesError } = await this.supabaseService
+      .getClient()
+      .from('tenant_user_invites')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('professional_id', professionalId)
+      .is('accepted_at', null);
+
+    if (deleteInvitesError) {
+      throw new InternalServerErrorException(deleteInvitesError.message);
+    }
+  }
+
+  /**
+   * @returns null when there is no linked professional; true when archived;
+   * false when the profile exists and is not archived (active or paused).
+   */
+  async findLinkedProfessionalArchivedStatus(
+    tenantId: string,
+    professionalId: string | null,
+  ): Promise<boolean | null> {
+    if (!professionalId) {
+      return null;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('professionals')
+      .select('deleted_at')
+      .eq('id', professionalId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      return true;
+    }
+
+    return Boolean(data.deleted_at);
+  }
+
+  private async assertProfessionalIsActive(
+    tenantId: string,
+    professionalId: string,
+  ): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('professionals')
+      .select('is_active, deleted_at')
+      .eq('id', professionalId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data || !data.is_active || data.deleted_at) {
+      throw new BadRequestException(
+        'Só é possível vincular acesso a um profissional ativo.',
+      );
+    }
   }
 
   private async findByIdForTenant(

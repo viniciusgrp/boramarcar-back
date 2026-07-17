@@ -1,8 +1,20 @@
-import { Inject, Injectable, Logger, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
 import { InitialSetupService } from '../../tenants/initial-setup.service';
 import type { TenantAccessContext } from '../../tenants/entities/tenant-access-context.entity';
 import { USER_ROLE_LABELS } from '../../tenants/entities/user-role.type';
+import {
+  getSupportAiDenialMessage,
+  resolveSupportAiAccess,
+} from '../../tenants/utils/support-ai-access.util';
+import { getSupportAiDailyQuota } from '../../tenants/utils/support-ai-quota.util';
 import { NtfyService } from '../../notifications/ntfy.service';
 import { SupportService } from '../support.service';
 import type { CreateSupportAssistantMessageDto } from './dto/create-support-assistant-message.dto';
@@ -19,12 +31,12 @@ import {
 } from './context/support-analytics-snapshot.builder';
 import { SupportAnalyticsSnapshotService } from './context/support-analytics-snapshot.service';
 import { SupportAssistantActionsService } from './actions/support-assistant-actions.service';
-import { SupportActionProposalStore } from './actions/support-action-proposal.store';
-import type {
-  SupportAssistantMessageResponse,
-  SupportAssistantStatus,
-  SupportConversation,
-  SupportConversationWithMessages,
+import {
+  toSupportChatMessage,
+  type SupportAssistantMessageResponse,
+  type SupportAssistantStatus,
+  type SupportConversation,
+  type SupportConversationWithMessages,
 } from './entities/support-assistant.types';
 import type { SupportProposedActionCard } from './actions/support-action.types';
 import type { LlmProvider } from './llm/llm-provider.interface';
@@ -59,24 +71,48 @@ export class SupportAssistantService {
     private readonly ntfyService: NtfyService,
   ) {}
 
-  async getStatus(params: {
-    tenantId: string;
-    userId: string;
-  }): Promise<SupportAssistantStatus> {
+  async getStatus(
+    context: TenantAccessContext,
+    user: User,
+  ): Promise<SupportAssistantStatus> {
     if (!this.config.isEnabled()) {
       return {
         enabled: false,
+        reason: 'disabled',
         remainingQuotaTenant: null,
         remainingQuotaUser: null,
+        dailyLimitTenant: null,
+        dailyLimitUser: null,
       };
     }
 
-    const remaining = await this.quotaService.getRemainingQuota(params);
+    const access = resolveSupportAiAccess(context.tenant);
+    const quotaDefaults = getSupportAiDailyQuota(context.tenant.plan_tier);
+
+    if (!access.allowed) {
+      return {
+        enabled: false,
+        reason: access.reason,
+        remainingQuotaTenant: null,
+        remainingQuotaUser: null,
+        dailyLimitTenant: quotaDefaults.tenant,
+        dailyLimitUser: quotaDefaults.user,
+      };
+    }
+
+    const remaining = await this.quotaService.getRemainingQuota({
+      tenantId: context.tenant.id,
+      userId: user.id,
+      planTier: context.tenant.plan_tier,
+    });
 
     return {
       enabled: true,
+      reason: null,
       remainingQuotaTenant: remaining.remainingTenant,
       remainingQuotaUser: remaining.remainingUser,
+      dailyLimitTenant: remaining.dailyLimitTenant,
+      dailyLimitUser: remaining.dailyLimitUser,
     };
   }
 
@@ -85,7 +121,7 @@ export class SupportAssistantService {
     user: User,
     dto: CreateSupportConversationDto,
   ): Promise<SupportConversation> {
-    this.config.assertReady();
+    this.assertSupportAiReady(context);
 
     return this.repository.createConversation({
       tenantId: context.tenant.id,
@@ -99,7 +135,7 @@ export class SupportAssistantService {
     user: User,
     conversationId: string,
   ): Promise<SupportConversationWithMessages> {
-    this.config.assertReady();
+    this.assertSupportAiReady(context);
 
     return this.repository.getConversationWithMessages({
       conversationId,
@@ -114,7 +150,7 @@ export class SupportAssistantService {
     conversationId: string,
     dto: CreateSupportAssistantMessageDto,
   ): Promise<SupportAssistantMessageResponse> {
-    this.config.assertReady();
+    this.assertSupportAiReady(context);
 
     const conversation = await this.repository.findConversationForUser({
       conversationId,
@@ -148,6 +184,7 @@ export class SupportAssistantService {
       tenantId: context.tenant.id,
       userId: user.id,
       conversationId,
+      planTier: context.tenant.plan_tier,
     });
 
     const existing = await this.repository.getConversationWithMessages({
@@ -283,8 +320,8 @@ export class SupportAssistantService {
 
     return {
       conversationId,
-      userMessage,
-      assistantMessage,
+      userMessage: toSupportChatMessage(userMessage),
+      assistantMessage: toSupportChatMessage(assistantMessage),
       needsHuman,
       proposedAction,
     };
@@ -295,7 +332,7 @@ export class SupportAssistantService {
     user: User,
     dto: { proposalId: string; confirmCancelConflicting?: boolean },
   ) {
-    this.config.assertReady();
+    this.assertSupportAiReady(context);
     return this.actionsService.executeProposal({
       context,
       userId: user.id,
@@ -309,7 +346,7 @@ export class SupportAssistantService {
     user: User,
     dto: { proposalId: string },
   ) {
-    this.config.assertReady();
+    this.assertSupportAiReady(context);
     return this.actionsService.dismissProposal({
       context,
       userId: user.id,
@@ -323,6 +360,8 @@ export class SupportAssistantService {
     conversationId: string,
     dto: EscalateSupportConversationDto,
   ): Promise<{ success: true }> {
+    this.assertSupportAiReady(context);
+
     const conversation = await this.repository.getConversationWithMessages({
       conversationId,
       tenantId: context.tenant.id,
@@ -369,5 +408,14 @@ export class SupportAssistantService {
     });
 
     return { success: true };
+  }
+
+  private assertSupportAiReady(context: TenantAccessContext): void {
+    this.config.assertReady();
+
+    const access = resolveSupportAiAccess(context.tenant);
+    if (!access.allowed) {
+      throw new ForbiddenException(getSupportAiDenialMessage(access.reason));
+    }
   }
 }

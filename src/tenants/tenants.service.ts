@@ -17,6 +17,8 @@ import {
   normalizeBookingSlotIntervalMinutes,
 } from '../booking/utils/booking-slot-interval.util';
 import type { PlanTier } from './entities/plan-tier.type';
+import type { SupportAiStatus } from './entities/support-ai-status.type';
+import { normalizeSupportAiStatus } from './entities/support-ai-status.type';
 import type { SubscriptionStatus } from './entities/subscription-status.type';
 import { Tenant } from './entities/tenant.entity';
 import {
@@ -41,6 +43,7 @@ import { TenantUsersService } from './tenant-users.service';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
 import type { TenantUser } from './entities/tenant-user.entity';
+import { canAccessPanelWithLinkedProfessional } from './utils/inactive-professional-access.util';
 
 export interface TenantSubscriptionUpdatePayload {
   stripeCustomerId?: string | null;
@@ -108,6 +111,12 @@ function mapTenantRow(row: Tenant): Tenant {
       row.allow_customer_self_cancellation,
     ),
     deposit_feature_enabled: Boolean(row.deposit_feature_enabled),
+    support_ai_enabled: Boolean(row.support_ai_enabled),
+    support_ai_stripe_subscription_item_id:
+      typeof row.support_ai_stripe_subscription_item_id === 'string'
+        ? row.support_ai_stripe_subscription_item_id
+        : null,
+    support_ai_status: normalizeSupportAiStatus(row.support_ai_status),
     deposit_application_fee_percent:
       row.deposit_application_fee_percent === null ||
       row.deposit_application_fee_percent === undefined
@@ -193,6 +202,23 @@ export class TenantsService {
 
       if (!tenant) {
         return null;
+      }
+
+      const linkedProfessionalIsArchived =
+        await this.tenantUsersService.findLinkedProfessionalArchivedStatus(
+          tenantUser.tenant_id,
+          tenantUser.professional_id,
+        );
+
+      if (
+        !canAccessPanelWithLinkedProfessional(
+          tenantUser.role,
+          linkedProfessionalIsArchived,
+        )
+      ) {
+        throw new ForbiddenException(
+          'Seu acesso ao painel foi revogado porque o perfil profissional foi excluído.',
+        );
       }
 
       return {
@@ -600,6 +626,49 @@ export class TenantsService {
     }
 
     return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async updateSupportAiEntitlement(
+    tenantId: string,
+    payload: {
+      supportAiEnabled: boolean;
+      supportAiStripeSubscriptionItemId?: string | null;
+      supportAiStatus?: SupportAiStatus | null;
+    },
+  ): Promise<Tenant> {
+    const updatePayload: Record<string, string | boolean | null> = {
+      support_ai_enabled: payload.supportAiEnabled,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (payload.supportAiStripeSubscriptionItemId !== undefined) {
+      updatePayload.support_ai_stripe_subscription_item_id =
+        payload.supportAiStripeSubscriptionItemId;
+    }
+
+    if (payload.supportAiStatus !== undefined) {
+      updatePayload.support_ai_status = payload.supportAiStatus;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update(updatePayload)
+      .eq('id', tenantId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    return mapTenantRow(data as Tenant);
   }
 
   async checkSlugAvailability(

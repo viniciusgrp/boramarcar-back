@@ -45,16 +45,43 @@ export interface SupportConversationWithMessages extends SupportConversation {
   messages: SupportMessage[];
 }
 
+export type SupportAssistantStatusReason =
+  | 'disabled'
+  | 'subscription_required'
+  | 'addon_required'
+  | 'addon_past_due'
+  | 'addon_canceled';
+
 export interface SupportAssistantStatus {
   enabled: boolean;
+  reason: SupportAssistantStatusReason | null;
   remainingQuotaTenant: number | null;
   remainingQuotaUser: number | null;
+  dailyLimitTenant: number | null;
+  dailyLimitUser: number | null;
+}
+
+/** Payload público de mensagem no chat (sem provider/tokens/flags). */
+export interface SupportChatMessage {
+  id: string;
+  role: SupportMessageRole;
+  content: string;
+  created_at: string;
 }
 
 export interface SupportAssistantMessageResponse {
   conversationId: string;
-  userMessage: SupportMessage;
-  assistantMessage: SupportMessage;
+  userMessage: SupportChatMessage;
+  assistantMessage: SupportChatMessage;
   needsHuman: boolean;
   proposedAction?: SupportProposedActionCard | null;
+}
+
+export function toSupportChatMessage(message: SupportMessage): SupportChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    created_at: message.created_at,
+  };
 }

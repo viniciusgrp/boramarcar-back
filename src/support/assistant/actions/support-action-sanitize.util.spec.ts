@@ -16,8 +16,27 @@ describe('support-action-sanitize', () => {
       reason: 'Folga',
     });
     expect(buildAbsenceRangeIso(payload as { date: string; allDay?: boolean })).toEqual({
-      startsAt: '2026-07-18T00:00:00',
-      endsAt: '2026-07-18T23:59:59',
+      startsAt: '2026-07-18T00:00:00.000Z',
+      endsAt: '2026-07-18T23:59:59.000Z',
+    });
+  });
+
+  it('builds partial-day absence as wall-clock UTC storage', () => {
+    const payload = sanitizeSupportActionPayload(
+      'create_absence',
+      '{"date":"2026-07-18","startTime":"08:00","endTime":"12:00"}',
+    );
+    expect(
+      buildAbsenceRangeIso(
+        payload as {
+          date: string;
+          startTime: string;
+          endTime: string;
+        },
+      ),
+    ).toEqual({
+      startsAt: '2026-07-18T08:00:00.000Z',
+      endsAt: '2026-07-18T12:00:00.000Z',
     });
   });
 
@@ -57,5 +76,23 @@ describe('support-action-sanitize', () => {
       time: '15:00',
       customerNameHint: 'João',
     });
+  });
+
+  it('accepts delete_absence payload and extracts marker', () => {
+    const payload = sanitizeSupportActionPayload(
+      'delete_absence',
+      '{"date":"2026-07-18","startTime":"08:00","endTime":"12:00"}',
+    );
+    expect(payload).toEqual({
+      date: '2026-07-18',
+      startTime: '08:00',
+      endTime: '12:00',
+    });
+
+    const extracted = extractSupportActionPropose(
+      'Removendo.\n[ACTION_PROPOSE:delete_absence|{"date":"2026-07-18","allDay":true}]',
+    );
+    expect(extracted.action?.type).toBe('delete_absence');
+    expect(extracted.displayContent).toContain('Removendo.');
   });
 });

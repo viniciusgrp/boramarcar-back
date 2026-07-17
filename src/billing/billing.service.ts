@@ -25,8 +25,10 @@ import type {
   StripeEvent,
   StripeSubscription,
 } from './types/stripe-api.types';
+import { findSubscriptionItemByPriceId } from './utils/extract-subscription-items.util';
 import { extractSubscriptionPriceId } from './utils/extract-subscription-price-id.util';
 import { mapStripeSubscriptionStatus } from './utils/map-stripe-subscription-status';
+import type { SupportAiStatus } from '../tenants/entities/support-ai-status.type';
 import {
   buildStripePriceTierMap,
   resolvePlanTierFromPriceId,
@@ -501,7 +503,9 @@ export class BillingService {
     const subscriptionExpiresAt = stripePeriodEndToIso(
       extractSubscriptionPeriodEnd(stripeSubscription),
     );
-    const priceId = extractSubscriptionPriceId(stripeSubscription);
+    const priceId = extractSubscriptionPriceId(stripeSubscription, {
+      excludePriceIds: this.getSupportAiPriceIdsToExclude(),
+    });
     const planTier = this.resolvePlanTierFromStripePrice(priceId, {
       metadataPlanTier: session.metadata?.plan_tier,
       allowMetadataFallback: true,
@@ -616,7 +620,9 @@ export class BillingService {
       options.applyPlanTierOnActive &&
       (stripeStatus === 'active' || stripeStatus === 'trialing')
     ) {
-      const priceId = extractSubscriptionPriceId(subscription);
+      const priceId = extractSubscriptionPriceId(subscription, {
+        excludePriceIds: this.getSupportAiPriceIdsToExclude(),
+      });
       planTier = this.resolvePlanTierFromStripePrice(priceId, {
         existingPlanTier: existingTenant?.plan_tier,
       });
@@ -653,6 +659,12 @@ export class BillingService {
       );
       return null;
     }
+
+    tenant = await this.syncSupportAiEntitlementFromSubscription(
+      tenant,
+      subscription,
+      subscriptionStatus,
+    );
 
     this.logger.log(
       `Subscription synced: tenant=${tenant.id} status=${subscriptionStatus}${
@@ -882,6 +894,194 @@ export class BillingService {
     } catch (error) {
       this.rethrowStripeCheckoutError(error, priceId);
     }
+  }
+
+  /**
+   * Adiciona o price do Assistente IA como item na subscription existente.
+   * Exige plano ACTIVE (não disponível no trial do produto).
+   */
+  async addSupportAiAddon(tenantId: string): Promise<Tenant> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException(
+        `Tenant with id "${tenantId}" was not found`,
+      );
+    }
+
+    if (tenant.subscription_status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'Assine um plano ativo antes de contratar o Assistente IA. O período de testes não inclui o complemento.',
+      );
+    }
+
+    if (!tenant.stripe_subscription_id?.trim()) {
+      throw new BadRequestException(
+        'Não encontramos uma assinatura Stripe para este estabelecimento.',
+      );
+    }
+
+    const supportAiPriceId = this.resolveSupportAiPriceId();
+
+    if (
+      tenant.support_ai_enabled &&
+      tenant.support_ai_status === 'active' &&
+      tenant.support_ai_stripe_subscription_item_id
+    ) {
+      throw new BadRequestException(
+        'O Assistente IA já está ativo neste estabelecimento.',
+      );
+    }
+
+    const subscription = await this.stripe.subscriptions.retrieve(
+      tenant.stripe_subscription_id,
+      { expand: ['items.data.price'] },
+    );
+
+    const existingItem = findSubscriptionItemByPriceId(
+      subscription,
+      supportAiPriceId,
+    );
+
+    if (existingItem) {
+      return this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+        supportAiEnabled: true,
+        supportAiStripeSubscriptionItemId: existingItem.itemId,
+        supportAiStatus: this.mapSupportAiStatusFromSubscription(
+          mapStripeSubscriptionStatus(subscription.status),
+        ),
+      });
+    }
+
+    try {
+      const createdItem = await this.stripe.subscriptionItems.create({
+        subscription: tenant.stripe_subscription_id,
+        price: supportAiPriceId,
+        quantity: 1,
+        proration_behavior: 'create_prorations',
+      });
+
+      const freshSubscription = await this.stripe.subscriptions.retrieve(
+        tenant.stripe_subscription_id,
+        { expand: ['items.data.price'] },
+      );
+
+      const synced = await this.syncSubscriptionFromStripe(freshSubscription, {
+        applyPlanTierOnActive: true,
+      });
+
+      if (synced) {
+        return synced;
+      }
+
+      return this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+        supportAiEnabled: true,
+        supportAiStripeSubscriptionItemId: createdItem.id,
+        supportAiStatus: 'active',
+      });
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof InternalServerErrorException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `Failed to add Support AI addon for tenant ${tenant.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+
+      throw new InternalServerErrorException(
+        'Não foi possível adicionar o Assistente IA à assinatura. Tente novamente ou use o portal Stripe.',
+      );
+    }
+  }
+
+  private async syncSupportAiEntitlementFromSubscription(
+    tenant: Tenant,
+    subscription: StripeSubscription,
+    subscriptionStatus: SubscriptionStatus,
+  ): Promise<Tenant> {
+    const supportAiPriceId = this.getOptionalSupportAiPriceId();
+
+    if (!supportAiPriceId) {
+      return tenant;
+    }
+
+    const aiItem = findSubscriptionItemByPriceId(subscription, supportAiPriceId);
+
+    if (aiItem) {
+      const supportAiStatus = this.mapSupportAiStatusFromSubscription(
+        subscriptionStatus,
+      );
+
+      return this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+        supportAiEnabled: true,
+        supportAiStripeSubscriptionItemId: aiItem.itemId,
+        supportAiStatus,
+      });
+    }
+
+    // Item removido: só limpa se o entitlement vinha do Stripe (havia item id).
+    if (tenant.support_ai_stripe_subscription_item_id) {
+      return this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+        supportAiEnabled: false,
+        supportAiStripeSubscriptionItemId: null,
+        supportAiStatus: 'canceled',
+      });
+    }
+
+    return tenant;
+  }
+
+  private mapSupportAiStatusFromSubscription(
+    subscriptionStatus: SubscriptionStatus,
+  ): SupportAiStatus {
+    switch (subscriptionStatus) {
+      case 'ACTIVE':
+        return 'active';
+      case 'PAST_DUE':
+        return 'past_due';
+      case 'CANCELED':
+        return 'canceled';
+      case 'INACTIVE':
+      default:
+        return 'inactive';
+    }
+  }
+
+  private getSupportAiPriceIdsToExclude(): string[] {
+    const priceId = this.getOptionalSupportAiPriceId();
+    return priceId ? [priceId] : [];
+  }
+
+  private getOptionalSupportAiPriceId(): string | null {
+    const raw = this.configService
+      .get<string>('STRIPE_SUPPORT_AI_PRICE_ID')
+      ?.trim();
+
+    if (!raw || !raw.startsWith('price_')) {
+      return null;
+    }
+
+    return raw;
+  }
+
+  private resolveSupportAiPriceId(): string {
+    const raw = this.configService
+      .get<string>('STRIPE_SUPPORT_AI_PRICE_ID')
+      ?.trim();
+
+    if (!raw) {
+      throw new InternalServerErrorException(
+        'STRIPE_SUPPORT_AI_PRICE_ID is not configured',
+      );
+    }
+
+    return this.assertStripePriceId(raw, 'STRIPE_SUPPORT_AI_PRICE_ID');
   }
 
   private resolveStripePriceId(planTier: PlanTier): string {

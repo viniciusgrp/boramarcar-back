@@ -1,4 +1,8 @@
 import {
+  buildWallClockDateTime,
+  wallClockToStorageIso,
+} from '../../../schedule/utils/wall-clock-datetime.util';
+import {
   SUPPORT_ACTION_TYPES,
   type SupportActionPayload,
   type SupportActionType,
@@ -9,7 +13,7 @@ import {
 
 /** [ACTION_PROPOSE:create_absence|{...json...}] */
 export const SUPPORT_ACTION_PROPOSE_REGEX =
-  /\[ACTION_PROPOSE:(create_absence|cancel_appointment)\|(\{[\s\S]*?\})\]/gi;
+  /\[ACTION_PROPOSE:(create_absence|delete_absence|cancel_appointment)\|(\{[\s\S]*?\})\]/gi;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -117,7 +121,7 @@ export function sanitizeSupportActionPayload(
 
   const record = parsed as Record<string, unknown>;
 
-  if (type === 'create_absence') {
+  if (type === 'create_absence' || type === 'delete_absence') {
     return sanitizeCreateAbsence(record);
   }
 
@@ -171,15 +175,26 @@ export function buildAbsenceRangeIso(payload: SupportCreateAbsencePayload): {
   startsAt: string;
   endsAt: string;
 } {
+  // Mesma convenção do restante do app: hora de parede no componente UTC
+  // (ex.: 08:00 no salão → …T08:00:00.000Z). Ver wall-clock-datetime.util.ts.
   if (payload.allDay !== false && (!payload.startTime || !payload.endTime)) {
+    const dayEnd = buildWallClockDateTime(payload.date, '23:59');
+    dayEnd.setSeconds(59);
+
     return {
-      startsAt: `${payload.date}T00:00:00`,
-      endsAt: `${payload.date}T23:59:59`,
+      startsAt: wallClockToStorageIso(
+        buildWallClockDateTime(payload.date, '00:00'),
+      ),
+      endsAt: wallClockToStorageIso(dayEnd),
     };
   }
 
   return {
-    startsAt: `${payload.date}T${payload.startTime}:00`,
-    endsAt: `${payload.date}T${payload.endTime}:00`,
+    startsAt: wallClockToStorageIso(
+      buildWallClockDateTime(payload.date, payload.startTime as string),
+    ),
+    endsAt: wallClockToStorageIso(
+      buildWallClockDateTime(payload.date, payload.endTime as string),
+    ),
   };
 }

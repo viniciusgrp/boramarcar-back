@@ -18,6 +18,7 @@ export interface StoredSupportActionProposal {
   /** Resolved ids after preview (authoritative for execute). */
   resolvedProfessionalId?: string;
   resolvedAppointmentId?: string;
+  resolvedAbsenceId?: string;
   cancelConflicting: boolean;
   conflictCount: number;
   expiresAt: number;
@@ -34,6 +35,7 @@ export class SupportActionProposalStore {
     action: SupportParsedActionPropose;
     resolvedProfessionalId?: string;
     resolvedAppointmentId?: string;
+    resolvedAbsenceId?: string;
     cancelConflicting?: boolean;
     conflictCount?: number;
   }): StoredSupportActionProposal {
@@ -48,6 +50,7 @@ export class SupportActionProposalStore {
       payload: params.action.payload,
       resolvedProfessionalId: params.resolvedProfessionalId,
       resolvedAppointmentId: params.resolvedAppointmentId,
+      resolvedAbsenceId: params.resolvedAbsenceId,
       cancelConflicting: params.cancelConflicting ?? false,
       conflictCount: params.conflictCount ?? 0,
       expiresAt: Date.now() + PROPOSAL_TTL_MS,

@@ -13,7 +13,7 @@ Acessível em `/admin`, com estas áreas principais:
 - **Equipe**: profissionais que atendem ("Quem atende") e quem tem acesso ao painel ("Acesso ao painel").
 - **Configurações**: perfil do estabelecimento, horário de funcionamento, marca/identidade visual, aparência do painel, regras de operação (aceitação automática/manual) e pagamentos (Stripe Connect).
 - **Recebimentos**: status do Stripe Connect e acesso ao Express Dashboard (sinais).
-- **Faturamento (Meu plano)**: assinatura do estabelecimento (Solo/Pro/Elite), trial, portal do cliente Stripe.
+- **Faturamento (Meu plano)**: assinatura do estabelecimento (Solo/Pro/Elite), trial, portal do cliente Stripe e complemento **Assistente IA** (R$ 29,90/mês).
 - **Financeiro**: relatório de BI com filtros e exportação em CSV.
 - **Finanças (Fluxo de caixa)**: abertura/fechamento de caixa, suprimento, sangria, repasses.
 - **Despesas fixas**: templates de despesas recorrentes (semanais/mensais).
@@ -32,6 +32,8 @@ Acessível em `/admin`, com estas áreas principais:
 ## Suporte
 
 - Este assistente responde dúvidas frequentes sobre o uso do produto, com base na documentação e no contexto do estabelecimento do usuário logado.
+- O chat do Assistente IA é um **complemento pago** (não incluso nos planos). O dono contrata em **Faturamento → Assistente IA**, somente com plano ativo (não no trial). Sem o complemento, o chat não aparece.
+- Cotas diárias acompanham o plano base (Solo/Pro/Elite). Detalhes em `faq-planos.md`.
 - Para problemas urgentes, casos de cobrança específicos, bugs ou dúvidas fora da documentação, oriente **falar com o time humano** (WhatsApp ou formulário em Suporte).
 - Nunca prometa reembolsos, descontos ou mudanças de cobrança em nome da empresa: isso é decisão do time humano.
 

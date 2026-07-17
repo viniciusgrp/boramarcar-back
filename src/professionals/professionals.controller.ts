@@ -144,9 +144,14 @@ export class ProfessionalsController {
 
   @Get('managed')
   @UseGuards(AuthGuard, TenantAccessGuard)
-  async findManaged(@CurrentUser() user: User): Promise<Professional[]> {
+  async findManaged(
+    @CurrentUser() user: User,
+    @Query('archived') archived?: string,
+  ): Promise<Professional[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.findAllManagedByTenant(tenant.id);
+    return this.professionalsService.findAllManagedByTenant(tenant.id, {
+      archived: archived === 'true' || archived === '1',
+    });
   }
 
   @Get('managed/:id')
@@ -191,16 +196,12 @@ export class ProfessionalsController {
 
   @Delete(':id')
   @UseGuards(AuthGuard, TenantAccessGuard)
-  async softDelete(
+  async archive(
     @CurrentUser() user: User,
     @Param('id') id: string,
   ): Promise<Professional> {
     const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.softDeleteForTenant(
-      tenant.id,
-      tenant.plan_tier,
-      id,
-    );
+    return this.professionalsService.archiveForTenant(tenant.id, id);
   }
 
   private async resolveOwnerTenant(userId: string) {

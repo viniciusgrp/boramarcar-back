@@ -4,8 +4,11 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { parseISO } from 'date-fns';
 import { SupabaseService } from '../supabase/supabase.service';
+import {
+  parseWallClockDateTime,
+  wallClockToStorageIso,
+} from '../schedule/utils/wall-clock-datetime.util';
 import { CreateProfessionalAbsenceDto } from './dto/create-professional-absence.dto';
 import { ProfessionalAbsenceRangeDto } from './dto/professional-absence-range.dto';
 import {
@@ -61,8 +64,8 @@ export class ProfessionalAbsencesService {
       .insert({
         tenant_id: tenantId,
         professional_id: professionalId,
-        starts_at: startsAt.toISOString(),
-        ends_at: endsAt.toISOString(),
+        starts_at: wallClockToStorageIso(startsAt),
+        ends_at: wallClockToStorageIso(endsAt),
         reason: dto.reason?.trim() || null,
       })
       .select('*')
@@ -134,8 +137,8 @@ export class ProfessionalAbsencesService {
     professionalId: string,
     date: string,
   ): Promise<ProfessionalAbsence[]> {
-    const dayStartIso = `${date}T00:00:00`;
-    const dayEndIso = `${date}T23:59:59`;
+    const dayStartIso = `${date}T00:00:00.000Z`;
+    const dayEndIso = `${date}T23:59:59.000Z`;
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -168,8 +171,8 @@ export class ProfessionalAbsencesService {
       .select('id')
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
-      .lt('starts_at', rangeEnd.toISOString())
-      .gt('ends_at', rangeStart.toISOString())
+      .lt('starts_at', wallClockToStorageIso(rangeEnd))
+      .gt('ends_at', wallClockToStorageIso(rangeStart))
       .limit(1);
 
     if (error) {
@@ -184,8 +187,8 @@ export class ProfessionalAbsencesService {
     professionalId: string,
     date: string,
   ): Promise<boolean> {
-    const dayStartIso = `${date}T00:00:00`;
-    const dayEndIso = `${date}T23:59:59`;
+    const dayStartIso = `${date}T00:00:00.000Z`;
+    const dayEndIso = `${date}T23:59:59.000Z`;
 
     const absences = await this.findOverlappingForProfessionalOnDate(
       tenantId,
@@ -213,8 +216,8 @@ export class ProfessionalAbsencesService {
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
       .in('status', [...ACTIVE_APPOINTMENT_STATUSES])
-      .lt('start_time', endsAt.toISOString())
-      .gt('end_time', startsAt.toISOString())
+      .lt('start_time', wallClockToStorageIso(endsAt))
+      .gt('end_time', wallClockToStorageIso(startsAt))
       .order('start_time', { ascending: true });
 
     if (error) {
@@ -228,8 +231,8 @@ export class ProfessionalAbsencesService {
     startsAt: Date;
     endsAt: Date;
   } {
-    const startsAt = parseISO(dto.startsAt);
-    const endsAt = parseISO(dto.endsAt);
+    const startsAt = parseWallClockDateTime(dto.startsAt);
+    const endsAt = parseWallClockDateTime(dto.endsAt);
 
     if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
       throw new BadRequestException('Datas de ausência inválidas.');

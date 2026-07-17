@@ -13,5 +13,6 @@ export interface Professional {
   commission_percent: number;
   booking_acceptance_type: ProfessionalBookingAcceptanceType;
   is_active: boolean;
+  deleted_at: string | null;
   professional_services?: ProfessionalServiceLink[];
 }

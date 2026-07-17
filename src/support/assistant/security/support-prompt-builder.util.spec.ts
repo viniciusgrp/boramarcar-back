@@ -23,6 +23,13 @@ describe('support-prompt-builder', () => {
     expect(built.systemInstruction).toContain('/admin/servicos');
     expect(built.systemInstruction).toContain('ACTION_PROPOSE');
     expect(built.systemInstruction).toContain('create_absence');
+    expect(built.systemInstruction).toContain('delete_absence');
+    expect(built.systemInstruction).toContain('NUNCA create_absence');
+    expect(built.systemInstruction).toContain('MESMA resposta');
+    expect(built.systemInstruction).toContain('Confirmar/Cancelar');
+    expect(built.systemInstruction).not.toContain(
+      'O usuário ainda precisará confirmar no chat',
+    );
     expect(built.userTurn).toContain('<tenant_snapshot>');
     expect(built.userTurn).toContain('<analytics_snapshot>');
     expect(built.userTurn).toContain('"dataScope":"tenant"');

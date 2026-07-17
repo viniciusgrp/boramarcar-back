@@ -940,8 +940,8 @@ export class AppointmentsService {
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
       .in('status', [...CUSTOMER_CANCELLABLE_STATUSES])
-      .lt('start_time', endsAt.toISOString())
-      .gt('end_time', startsAt.toISOString())
+      .lt('start_time', wallClockToStorageIso(endsAt))
+      .gt('end_time', wallClockToStorageIso(startsAt))
       .order('start_time', { ascending: true });
 
     if (error) {
