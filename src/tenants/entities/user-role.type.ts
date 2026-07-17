@@ -4,7 +4,7 @@ export type UserRole = (typeof USER_ROLES)[number];
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   OWNER: 'Dono',
-  ADMIN: 'Administrador',
+  ADMIN: 'Gerente',
   PROFESSIONAL: 'Colaborador',
 };
 

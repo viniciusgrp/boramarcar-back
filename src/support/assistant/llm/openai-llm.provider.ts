@@ -10,19 +10,19 @@ import type {
 } from './llm-provider.interface';
 import { SupportAssistantConfigService } from '../support-assistant-config.service';
 
-interface GeminiGenerateContentResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{ text?: string }>;
+interface OpenAiChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
     };
   }>;
-  usageMetadata?: Record<string, unknown>;
+  usage?: Record<string, unknown>;
   error?: { message?: string };
 }
 
 @Injectable()
-export class GeminiLlmProvider implements LlmProvider {
-  private readonly logger = new Logger(GeminiLlmProvider.name);
+export class OpenAiLlmProvider implements LlmProvider {
+  private readonly logger = new Logger(OpenAiLlmProvider.name);
 
   constructor(private readonly config: SupportAssistantConfigService) {}
 
@@ -32,15 +32,7 @@ export class GeminiLlmProvider implements LlmProvider {
     const timeoutMs = this.config.getTimeoutMs();
     const maxTokens = this.config.getMaxTokens();
 
-    if (!this.config.isLikelyGeminiApiKey(apiKey)) {
-      this.logger.warn(
-        'SUPPORT_AI_API_KEY format looks unexpected. Create a Gemini key at https://aistudio.google.com/apikey (prefix AIza or AQ.)',
-      );
-    }
-
-    // Prefer header auth; query-string keys are still accepted but headers avoid URL leaks.
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-
+    const url = 'https://api.openai.com/v1/chat/completions';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -49,32 +41,32 @@ export class GeminiLlmProvider implements LlmProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+          Authorization: `Bearer ${apiKey}`,
         },
         signal: controller.signal,
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: request.systemInstruction }],
-          },
-          contents: [
+          model,
+          temperature: 0.2,
+          max_tokens: maxTokens,
+          messages: [
+            {
+              role: 'system',
+              content: request.systemInstruction,
+            },
             {
               role: 'user',
-              parts: [{ text: request.userTurn }],
+              content: request.userTurn,
             },
           ],
-          generationConfig: {
-            maxOutputTokens: maxTokens,
-            temperature: 0.2,
-          },
         }),
       });
 
-      const payload = (await response.json()) as GeminiGenerateContentResponse;
+      const payload = (await response.json()) as OpenAiChatCompletionResponse;
 
       if (!response.ok) {
         const apiMessage = payload.error?.message?.trim();
         this.logger.warn(
-          `Gemini request failed with status ${response.status}${
+          `OpenAI request failed with status ${response.status}${
             apiMessage ? `: ${apiMessage}` : ` (model=${model})`
           }`,
         );
@@ -83,11 +75,7 @@ export class GeminiLlmProvider implements LlmProvider {
         );
       }
 
-      const text =
-        payload.candidates?.[0]?.content?.parts
-          ?.map((part) => part.text ?? '')
-          .join('')
-          .trim() ?? '';
+      const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
 
       if (!text) {
         throw new ServiceUnavailableException(
@@ -97,9 +85,9 @@ export class GeminiLlmProvider implements LlmProvider {
 
       return {
         content: text,
-        provider: 'gemini',
+        provider: 'openai',
         model,
-        tokenUsage: payload.usageMetadata ?? null,
+        tokenUsage: payload.usage ?? null,
       };
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {
@@ -112,7 +100,7 @@ export class GeminiLlmProvider implements LlmProvider {
         );
       }
 
-      this.logger.warn('Gemini provider error');
+      this.logger.warn('OpenAI provider error');
       throw new ServiceUnavailableException(
         'O assistente está indisponível no momento. Tente novamente ou fale com nossa equipe.',
       );

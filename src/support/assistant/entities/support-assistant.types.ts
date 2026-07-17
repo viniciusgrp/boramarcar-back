@@ -1,3 +1,5 @@
+import type { SupportProposedActionCard } from '../actions/support-action.types';
+
 export type SupportConversationStatus =
   | 'open'
   | 'waiting_human'
@@ -34,7 +36,10 @@ export type SupportAiAuditEventType =
   | 'escalated'
   | 'quota_hit'
   | 'provider_error'
-  | 'blocked_input';
+  | 'blocked_input'
+  | 'action_previewed'
+  | 'action_executed'
+  | 'action_rejected';
 
 export interface SupportConversationWithMessages extends SupportConversation {
   messages: SupportMessage[];
@@ -50,4 +55,6 @@ export interface SupportAssistantMessageResponse {
   conversationId: string;
   userMessage: SupportMessage;
   assistantMessage: SupportMessage;
+  needsHuman: boolean;
+  proposedAction?: SupportProposedActionCard | null;
 }

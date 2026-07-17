@@ -9,12 +9,23 @@ describe('support-prompt-builder', () => {
     const built = buildSupportAssistantPrompt({
       knowledge: 'FAQ',
       tenantSnapshotJson: '{"tenantName":"Barbearia"}',
+      analyticsSnapshotJson:
+        '{"dataScope":"tenant","totals":{"revenue":100},"periodFrom":"2026-04-19","periodTo":"2026-07-17"}',
       history: [{ role: 'user', content: 'oi' }],
       userMessage: 'como cadastrar serviço?',
     });
 
     expect(built.systemInstruction).toContain('BoraMarcar');
+    expect(built.systemInstruction).toContain('markdown leve');
+    expect(built.systemInstruction).toContain('analytics_snapshot');
+    expect(built.systemInstruction).toContain('dataScope');
+    expect(built.systemInstruction).toContain('[GOTO:');
+    expect(built.systemInstruction).toContain('/admin/servicos');
+    expect(built.systemInstruction).toContain('ACTION_PROPOSE');
+    expect(built.systemInstruction).toContain('create_absence');
     expect(built.userTurn).toContain('<tenant_snapshot>');
+    expect(built.userTurn).toContain('<analytics_snapshot>');
+    expect(built.userTurn).toContain('"dataScope":"tenant"');
     expect(built.userTurn).toContain('<knowledge>');
     expect(built.userTurn).toContain('<user_message>');
     expect(built.userTurn).toContain('como cadastrar serviço?');
@@ -26,6 +37,7 @@ describe('support-prompt-builder', () => {
   });
 
   it('returns safe response for injection', () => {
-    expect(buildSafeInjectionResponse()).toContain('atendimento humano');
+    expect(buildSafeInjectionResponse()).toContain('equipe humana');
+    expect(buildSafeInjectionResponse()).toContain('[NEEDS_HUMAN]');
   });
 });

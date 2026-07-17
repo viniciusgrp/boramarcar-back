@@ -1,4 +1,6 @@
 import { redactSecrets } from './support-secret-patterns.util';
+import { sanitizeSupportGotoMarkers } from './support-goto.util';
+import { extractSupportActionPropose } from '../actions/support-action-sanitize.util';
 
 const FINANCIAL_POLICY_MARKERS = [
   'reembolso garantido',
@@ -37,6 +39,23 @@ export function filterSupportAssistantOutput(raw: string): FilterSupportOutputRe
     flags.push('financial_policy_heuristic');
     content =
       'Para dúvidas sobre sinal, estorno ou cobrança, nossa equipe pode confirmar o caso específico. Use o atendimento humano com os detalhes do agendamento.';
+  }
+
+  const gotoSanitized = sanitizeSupportGotoMarkers(content);
+  content = gotoSanitized.content;
+  if (gotoSanitized.removedInvalid > 0) {
+    flags.push('invalid_goto_stripped');
+  }
+
+  // Keep at most one valid ACTION_PROPOSE marker for the enrich step.
+  const actionProbe = extractSupportActionPropose(content);
+  if (actionProbe.removedInvalid > 0) {
+    flags.push('invalid_action_stripped');
+  }
+  if (actionProbe.action) {
+    content = `${actionProbe.displayContent}\n\n[ACTION_PROPOSE:${actionProbe.action.type}|${JSON.stringify(actionProbe.action.payload)}]`.trim();
+  } else {
+    content = actionProbe.displayContent;
   }
 
   const maxLength = 4000;

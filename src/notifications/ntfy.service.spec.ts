@@ -102,4 +102,32 @@ describe('NtfyService', () => {
       service.notifyNewTenant({ name: 'X', slug: 'x' }),
     ).resolves.toBeUndefined();
   });
+
+  it('notifies support needs-human with the user question', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    await service.notifySupportNeedsHuman({
+      tenantName: 'Barbearia Z',
+      tenantId: 'tenant-1',
+      userRole: 'Dono',
+      userEmail: 'dono@example.com',
+      question: 'Como estornar um sinal pago ontem?',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://ntfy.sh/boramarcar-test', {
+      method: 'POST',
+      headers: {
+        Title: 'Suporte IA: precisa de humano',
+        Priority: '4',
+        Tags: 'warning,speech_balloon',
+      },
+      body: expect.stringContaining('Pergunta: Como estornar um sinal pago ontem?'),
+    });
+  });
 });

@@ -72,7 +72,7 @@ export class ProfessionalsController {
 
   @Get('me')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER', 'PROFESSIONAL')
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async findMyProfile(
     @CurrentTenantContext() context: TenantAccessContext,
   ): Promise<Professional | null> {
@@ -92,7 +92,7 @@ export class ProfessionalsController {
 
   @Put('me')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER', 'PROFESSIONAL')
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async updateMyProfile(
     @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: UpdateProfessionalSelfDto,
