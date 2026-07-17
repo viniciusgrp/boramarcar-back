@@ -30,6 +30,7 @@ import type {
   TenantUserInvitePreview,
 } from './entities/tenant-user-invite.entity';
 import { USER_ROLE_LABELS } from './entities/user-role.type';
+import { resolveProfessionalIdForRole } from './utils/resolve-professional-id-for-role.util';
 import {
   normalizeAdminThemeMode,
   normalizeTenantUserPreferences,
@@ -228,7 +229,12 @@ export class TenantUsersService {
 
     await this.assertEmailCanReceiveInvite(tenantId, email);
 
-    const professionalId = this.resolveProfessionalIdForRole(role, dto);
+    const professionalId = resolveProfessionalIdForRole(role, dto.professionalId);
+
+    if (professionalId) {
+      await this.assertProfessionalNotLinkedToMember(tenantId, professionalId);
+    }
+
     const token = randomBytes(24).toString('hex');
     const expiresAt = addDays(new Date(), 7).toISOString();
 
@@ -541,14 +547,20 @@ export class TenantUsersService {
   private async assertProfessionalNotLinkedToMember(
     tenantId: string,
     professionalId: string,
+    excludeTenantUserId?: string,
   ): Promise<void> {
-    const { data, error } = await this.supabaseService
+    let query = this.supabaseService
       .getClient()
       .from('tenant_users')
       .select('id')
       .eq('tenant_id', tenantId)
-      .eq('professional_id', professionalId)
-      .maybeSingle();
+      .eq('professional_id', professionalId);
+
+    if (excludeTenantUserId) {
+      query = query.neq('id', excludeTenantUserId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -580,7 +592,15 @@ export class TenantUsersService {
       throw new ForbiddenException('A função do dono não pode ser alterada.');
     }
 
-    const professionalId = this.resolveProfessionalIdForRole(role, dto);
+    const professionalId = resolveProfessionalIdForRole(role, dto.professionalId);
+
+    if (professionalId && professionalId !== existing.professional_id) {
+      await this.assertProfessionalNotLinkedToMember(
+        tenantId,
+        professionalId,
+        tenantUserId,
+      );
+    }
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -632,25 +652,6 @@ export class TenantUsersService {
     }
 
     return mapTenantUserRow(data as TenantUserRow);
-  }
-
-  private resolveProfessionalIdForRole(
-    role: UserRole,
-    dto: UpdateTenantUserRoleDto,
-  ): string | null {
-    if (role !== 'PROFESSIONAL') {
-      return null;
-    }
-
-    const professionalId = dto.professionalId?.trim();
-
-    if (!professionalId) {
-      throw new BadRequestException(
-        'Informe o profissional vinculado para a função de colaborador.',
-      );
-    }
-
-    return professionalId;
   }
 
   private async assertEmailCanReceiveInvite(
