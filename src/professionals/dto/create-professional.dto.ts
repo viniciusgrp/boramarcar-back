@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -46,6 +47,6 @@ export class CreateProfessionalDto {
 
   /** Optional invite email used only to match an archived professional. */
   @IsOptional()
-  @IsString()
-  inviteEmail?: string | null;
+  @IsEmail()
+  inviteEmail?: string;
 }

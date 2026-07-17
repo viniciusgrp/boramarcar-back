@@ -586,6 +586,7 @@ export class ProfessionalsService {
   private mapProfessionalRow(row: Professional): Professional {
     return {
       ...row,
+      is_active: Boolean(row.is_active),
       commission_percent: Number(row.commission_percent ?? 0),
       deleted_at: row.deleted_at ?? null,
       booking_acceptance_type: this.normalizeProfessionalBookingAcceptanceType(
