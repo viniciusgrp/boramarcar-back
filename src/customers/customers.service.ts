@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import { ReferralService } from '../loyalty/referral.service';
 import { normalizePhoneKey } from '../loyalty/utils/loyalty-points.util';
 import {
@@ -45,6 +46,7 @@ export class CustomersService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly referralService: ReferralService,
+    private readonly loyaltyService: LoyaltyService,
     private readonly tenantsService: TenantsService,
   ) {}
 
@@ -324,9 +326,16 @@ export class CustomersService {
 
     const created = this.mapCustomerRow(data as Customer);
 
+    await this.loyaltyService.applyWelcomeBonusIfEligible(
+      tenantId,
+      created.id,
+    );
+
+    const refreshed = await this.findByIdForTenant(tenantId, created.id);
+
     return this.referralService.applyReferralLinkIfEligible(
       tenantId,
-      created,
+      refreshed ?? created,
       dto.referralCode?.trim() || null,
     );
   }

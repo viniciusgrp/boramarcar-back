@@ -621,12 +621,17 @@ export class AppointmentsService {
     );
 
     if (loyaltyRewardId) {
-      await this.loyaltyService.redeemRewardForAppointment({
-        tenantId: dto.tenantId,
-        customerId: customer.id,
-        rewardId: loyaltyRewardId,
-        appointmentId: appointment.id,
-      });
+      try {
+        await this.loyaltyService.redeemRewardForAppointment({
+          tenantId: dto.tenantId,
+          customerId: customer.id,
+          rewardId: loyaltyRewardId,
+          appointmentId: appointment.id,
+        });
+      } catch (redeemError) {
+        await this.deleteAppointmentCascade(dto.tenantId, appointment.id);
+        throw redeemError;
+      }
     }
 
     const serviceName = booking.items.map((item) => item.name).join(' + ');
@@ -1493,6 +1498,9 @@ export class AppointmentsService {
         customer_name,
         customer_phone,
         loyalty_reward_id,
+        deposit_paid,
+        payment_status,
+        commission_amount,
         services!service_id ( custom_commission_rate, price, loyalty_points_earned ),
         appointment_services (
           service_id,
@@ -1540,11 +1548,28 @@ export class AppointmentsService {
       status === 'CANCELLED' && existing.status !== 'CANCELLED';
     const isMarkingNoShow =
       status === 'NO_SHOW' && existing.status !== 'NO_SHOW';
-    const isReactivatingFromCancelled =
-      existing.status === 'CANCELLED' && status !== 'CANCELLED';
+    const isReactivatingFromCancelledOrNoShow =
+      (existing.status === 'CANCELLED' || existing.status === 'NO_SHOW') &&
+      status !== 'CANCELLED' &&
+      status !== 'NO_SHOW';
 
     if (isReactivatingCancelled) {
       updatePayload.cancellation_requested_at = null;
+    }
+
+    const hasLoyaltyRedemption =
+      Boolean(existing.loyalty_reward_id?.trim()) ||
+      Boolean(trimmedLoyaltyRewardId);
+
+    if (
+      hasLoyaltyRedemption &&
+      isReactivatingFromCancelledOrNoShow &&
+      existing.loyalty_reward_id
+    ) {
+      await this.loyaltyService.restoreRedeemedPointsForAppointment({
+        tenantId,
+        appointmentId,
+      });
     }
 
     let appliedLoyaltyRewardId: string | null =
@@ -1639,12 +1664,29 @@ export class AppointmentsService {
       trimmedLoyaltyRewardId &&
       existing.customer_id
     ) {
-      await this.loyaltyService.redeemRewardForAppointment({
-        tenantId,
-        customerId: existing.customer_id as string,
-        rewardId: trimmedLoyaltyRewardId,
-        appointmentId,
-      });
+      try {
+        await this.loyaltyService.redeemRewardForAppointment({
+          tenantId,
+          customerId: existing.customer_id as string,
+          rewardId: trimmedLoyaltyRewardId,
+          appointmentId,
+        });
+      } catch (redeemError) {
+        await this.supabaseService
+          .getClient()
+          .from('appointments')
+          .update({
+            status: existing.status,
+            loyalty_reward_id: existing.loyalty_reward_id,
+            total_price: existing.total_price,
+            deposit_paid: existing.deposit_paid,
+            payment_status: existing.payment_status,
+            commission_amount: existing.commission_amount ?? null,
+          })
+          .eq('id', appointmentId)
+          .eq('tenant_id', tenantId);
+        throw redeemError;
+      }
     }
 
     if (isCompletingAppointment) {
@@ -1717,11 +1759,6 @@ export class AppointmentsService {
             appointmentId,
           });
         }
-      } else if (isReactivatingFromCancelled) {
-        await this.loyaltyService.restoreRedeemedPointsForAppointment({
-          tenantId,
-          appointmentId,
-        });
       }
     }
 
@@ -2491,6 +2528,22 @@ export class AppointmentsService {
       payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
       commission_amount: Number(row.commission_amount ?? 0),
     };
+  }
+
+  private async deleteAppointmentCascade(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .delete()
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
   }
 
   private async insertAppointmentServices(
