@@ -21,6 +21,7 @@ import {
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
 import { CustomersService } from '../customers/customers.service';
+import { CouponsService } from '../coupons/coupons.service';
 import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
@@ -162,6 +163,7 @@ export class AppointmentsService {
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly couponsService: CouponsService,
     private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
     private readonly mailService: MailService,
@@ -521,7 +523,22 @@ export class AppointmentsService {
     }
 
     const isPaidWithPoints = Boolean(loyaltyRewardId);
-    const appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+    let appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+
+    const couponCode = dto.couponCode?.trim() || null;
+    let couponValidation: Awaited<
+      ReturnType<CouponsService['validateCouponForBooking']>
+    > | null = null;
+
+    if (couponCode && !isPaidWithPoints) {
+      couponValidation = await this.couponsService.validateCouponForBooking({
+        tenantId: dto.tenantId,
+        code: couponCode,
+        totalPrice: booking.totalPrice,
+        customerPhone: customer.phone,
+      });
+      appointmentTotalPrice = couponValidation.finalPrice;
+    }
 
     const requiresDepositPayment =
       !isPaidWithPoints &&
@@ -596,6 +613,8 @@ export class AppointmentsService {
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: appointmentTotalPrice,
         loyalty_reward_id: loyaltyRewardId,
+        coupon_id: couponValidation?.coupon.id ?? null,
+        coupon_discount_amount: couponValidation?.discountAmount ?? null,
         hold_expires_at: holdExpiresAt,
         guest_access_token: guestAccessToken,
       })
@@ -631,6 +650,22 @@ export class AppointmentsService {
       } catch (redeemError) {
         await this.deleteAppointmentCascade(dto.tenantId, appointment.id);
         throw redeemError;
+      }
+    }
+
+    if (couponCode && couponValidation) {
+      try {
+        await this.couponsService.redeemCouponForAppointment({
+          tenantId: dto.tenantId,
+          code: couponCode,
+          totalPrice: booking.totalPrice,
+          appointmentId: appointment.id,
+          customerId: customer.id,
+          customerPhone: customer.phone,
+        });
+      } catch (couponError) {
+        await this.deleteAppointmentCascade(dto.tenantId, appointment.id);
+        throw couponError;
       }
     }
 

@@ -49,6 +49,10 @@ export class CreateAppointmentDto {
   referralCode?: string;
 
   @IsOptional()
+  @IsString()
+  couponCode?: string;
+
+  @IsOptional()
   @IsBoolean()
   assignAnyProfessional?: boolean;
 }

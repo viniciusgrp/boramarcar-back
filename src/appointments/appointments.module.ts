@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { BusinessHoursModule } from '../business-hours/business-hours.module';
 import { CustomersModule } from '../customers/customers.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { FinanceModule } from '../finance/finance.module';
 import { MailModule } from '../mail/mail.module';
@@ -27,6 +28,7 @@ import { DepositPaymentService } from './deposit-payment.service';
     forwardRef(() => BillingModule),
     CustomersModule,
     LoyaltyModule,
+    CouponsModule,
     FinanceModule,
     MailModule,
   ],
