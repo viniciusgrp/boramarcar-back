@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -43,4 +44,9 @@ export class CreateProfessionalDto {
   @IsOptional()
   @IsEnum(['DEFAULT', 'AUTOMATIC', 'MANUAL'] as const)
   bookingAcceptanceType?: ProfessionalBookingAcceptanceType;
+
+  /** Optional invite email used only to match an archived professional. */
+  @IsOptional()
+  @IsEmail()
+  inviteEmail?: string;
 }

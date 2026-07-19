@@ -1,5 +1,6 @@
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { PlanTier } from './plan-tier.type';
+import type { SupportAiStatus } from './support-ai-status.type';
 import type { SubscriptionStatus } from './subscription-status.type';
 import type { CalendarCardPreferences } from './calendar-card-preferences.type';
 import type { PayoutFrequency } from './payout-frequency.type';
@@ -24,6 +25,9 @@ export interface Tenant {
   admin_secondary_color_dark: string;
   contact_phone: string | null;
   deposit_feature_enabled: boolean;
+  support_ai_enabled: boolean;
+  support_ai_stripe_subscription_item_id: string | null;
+  support_ai_status: SupportAiStatus | null;
   deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;
   require_customer_account: boolean;

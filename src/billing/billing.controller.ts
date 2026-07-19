@@ -84,6 +84,14 @@ export class BillingController {
     });
   }
 
+  @Post('support-ai/subscribe')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async subscribeSupportAi(@CurrentUser() user: User): Promise<Tenant> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.addSupportAiAddon(tenant.id);
+  }
+
   @Post('connect/status')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)

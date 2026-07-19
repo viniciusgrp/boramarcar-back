@@ -21,6 +21,22 @@ import {
   calculateAppointmentLoyaltyPoints,
   type AppointmentLoyaltyServiceLine,
 } from '../services/utils/service-loyalty-points.util';
+import { computePointsToExpire } from './utils/loyalty-expiration.util';
+import {
+  buildBookingRedeemDescription,
+  buildExpirationDescription,
+  buildStandaloneRedeemDescription,
+  isBookingRedeemDescription,
+  isCompletionEarnDescription,
+  isCompletionReverseDescription,
+  isRedeemRefundDescription,
+  isRewardRedeemDescription,
+  LOYALTY_COMPLETION_EARN_DESCRIPTION,
+  LOYALTY_COMPLETION_REVERSE_DESCRIPTION,
+  LOYALTY_REFUND_REDEEM_DESCRIPTION,
+  LOYALTY_RESTORE_REDEEM_DESCRIPTION,
+  LOYALTY_WELCOME_BONUS_DESCRIPTION,
+} from './utils/loyalty-ledger.constants';
 import {
   calculateEarnedPoints,
   normalizePhoneKey,
@@ -458,7 +474,13 @@ export class LoyaltyService {
     rewardId: string;
     appointmentId: string;
   }): Promise<void> {
-    const customer = await this.assertCustomerBelongsToTenant(
+    const settings = await this.getSettingsForTenant(params.tenantId);
+
+    if (!settings.is_active) {
+      throw new BadRequestException('Programa de fidelidade está desativado.');
+    }
+
+    await this.assertCustomerBelongsToTenant(
       params.customerId,
       params.tenantId,
     );
@@ -467,32 +489,22 @@ export class LoyaltyService {
       params.tenantId,
     );
 
-    if (customer.points_balance < reward.points_cost) {
-      throw new BadRequestException('Saldo de pontos insuficiente.');
+    if (!reward.is_active) {
+      throw new BadRequestException('Esta recompensa não está disponível.');
     }
 
-    const newBalance = customer.points_balance - reward.points_cost;
-
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: newBalance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', params.customerId)
-      .eq('tenant_id', params.tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+    await this.debitCustomerPointsAtomic({
+      tenantId: params.tenantId,
+      customerId: params.customerId,
+      points: reward.points_cost,
+    });
 
     await this.insertTransaction({
       tenantId: params.tenantId,
       customerId: params.customerId,
       type: 'REDEEMED',
       points: reward.points_cost,
-      description: `Resgate no agendamento: ${reward.title}`,
+      description: buildBookingRedeemDescription(reward.title),
       appointmentId: params.appointmentId,
     });
   }
@@ -508,39 +520,25 @@ export class LoyaltyService {
       throw new BadRequestException('Programa de fidelidade está desativado.');
     }
 
-    const customer = await this.assertCustomerBelongsToTenant(customerId, tenantId);
+    await this.assertCustomerBelongsToTenant(customerId, tenantId);
     const reward = await this.assertRewardBelongsToTenant(rewardId, tenantId);
 
     if (!reward.is_active) {
       throw new BadRequestException('Esta recompensa não está disponível.');
     }
 
-    if (customer.points_balance < reward.points_cost) {
-      throw new BadRequestException('Saldo de pontos insuficiente.');
-    }
-
-    const newBalance = customer.points_balance - reward.points_cost;
-
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: newBalance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', customerId)
-      .eq('tenant_id', tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+    await this.debitCustomerPointsAtomic({
+      tenantId,
+      customerId,
+      points: reward.points_cost,
+    });
 
     const transaction = await this.insertTransaction({
       tenantId,
       customerId,
       type: 'REDEEMED',
       points: reward.points_cost,
-      description: `Resgate: ${reward.title}`,
+      description: buildStandaloneRedeemDescription(reward.title),
     });
 
     const updatedCustomer = await this.assertCustomerBelongsToTenant(
@@ -700,6 +698,15 @@ export class LoyaltyService {
       customerId = resolved.customer.id;
     }
 
+    const alreadyAwarded = await this.hasCompletionEarnForAppointment(
+      params.tenantId,
+      params.appointmentId,
+    );
+
+    if (alreadyAwarded) {
+      return;
+    }
+
     const earnedPoints = params.serviceLines?.length
       ? calculateAppointmentLoyaltyPoints(
           params.serviceLines,
@@ -715,31 +722,20 @@ export class LoyaltyService {
       return;
     }
 
-    const customer = await this.assertCustomerBelongsToTenant(
+    await this.assertCustomerBelongsToTenant(customerId, params.tenantId);
+
+    await this.creditCustomerPointsAtomic({
+      tenantId: params.tenantId,
       customerId,
-      params.tenantId,
-    );
-
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: customer.points_balance + earnedPoints,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', customerId)
-      .eq('tenant_id', params.tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+      points: earnedPoints,
+    });
 
     await this.insertTransaction({
       tenantId: params.tenantId,
       customerId,
       type: 'EARNED',
       points: earnedPoints,
-      description: `Pontos pelo atendimento concluído`,
+      description: LOYALTY_COMPLETION_EARN_DESCRIPTION,
       appointmentId: params.appointmentId,
     });
   }
@@ -751,63 +747,68 @@ export class LoyaltyService {
     const { data: transactions, error } = await this.supabaseService
       .getClient()
       .from('loyalty_transactions')
-      .select('customer_id, points')
+      .select('customer_id, points, type, description')
       .eq('tenant_id', params.tenantId)
-      .eq('appointment_id', params.appointmentId)
-      .eq('type', 'EARNED');
+      .eq('appointment_id', params.appointmentId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    const earnedRows = transactions ?? [];
-
-    if (earnedRows.length === 0) {
-      return;
-    }
-
     const pointsByCustomer = new Map<string, number>();
 
-    for (const row of earnedRows) {
+    for (const row of transactions ?? []) {
       const customerId = row.customer_id as string;
       const points = Number(row.points ?? 0);
+      const description = String(row.description ?? '');
 
       if (!customerId || points <= 0) {
         continue;
       }
 
-      pointsByCustomer.set(
-        customerId,
-        (pointsByCustomer.get(customerId) ?? 0) + points,
-      );
+      if (
+        row.type === 'EARNED' &&
+        isCompletionEarnDescription(description)
+      ) {
+        pointsByCustomer.set(
+          customerId,
+          (pointsByCustomer.get(customerId) ?? 0) + points,
+        );
+      }
+
+      if (
+        row.type === 'REDEEMED' &&
+        isCompletionReverseDescription(description)
+      ) {
+        pointsByCustomer.set(
+          customerId,
+          (pointsByCustomer.get(customerId) ?? 0) - points,
+        );
+      }
     }
 
-    for (const [customerId, pointsToReverse] of pointsByCustomer) {
-      const customer = await this.assertCustomerBelongsToTenant(
+    for (const [customerId, netPointsToReverse] of pointsByCustomer) {
+      if (netPointsToReverse <= 0) {
+        continue;
+      }
+
+      const debited = await this.debitCustomerPointsAtomic({
+        tenantId: params.tenantId,
         customerId,
-        params.tenantId,
-      );
+        points: netPointsToReverse,
+        allowPartialClamp: true,
+      });
 
-      const { error: updateError } = await this.supabaseService
-        .getClient()
-        .from('customers')
-        .update({
-          points_balance: Math.max(0, customer.points_balance - pointsToReverse),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', customerId)
-        .eq('tenant_id', params.tenantId);
-
-      if (updateError) {
-        throw new InternalServerErrorException(updateError.message);
+      if (debited <= 0) {
+        continue;
       }
 
       await this.insertTransaction({
         tenantId: params.tenantId,
         customerId,
         type: 'REDEEMED',
-        points: pointsToReverse,
-        description: 'Estorno — conclusão revertida',
+        points: debited,
+        description: LOYALTY_COMPLETION_REVERSE_DESCRIPTION,
         appointmentId: params.appointmentId,
       });
     }
@@ -826,31 +827,23 @@ export class LoyaltyService {
       return;
     }
 
-    const customer = await this.assertCustomerBelongsToTenant(
+    await this.assertCustomerBelongsToTenant(
       state.customerId,
       params.tenantId,
     );
 
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: customer.points_balance + state.netChargedPoints,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', state.customerId)
-      .eq('tenant_id', params.tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+    await this.creditCustomerPointsAtomic({
+      tenantId: params.tenantId,
+      customerId: state.customerId,
+      points: state.netChargedPoints,
+    });
 
     await this.insertTransaction({
       tenantId: params.tenantId,
       customerId: state.customerId,
       type: 'EARNED',
       points: state.netChargedPoints,
-      description: 'Estorno de resgate: agendamento cancelado',
+      description: LOYALTY_REFUND_REDEEM_DESCRIPTION,
       appointmentId: params.appointmentId,
     });
   }
@@ -868,34 +861,23 @@ export class LoyaltyService {
       return;
     }
 
-    const customer = await this.assertCustomerBelongsToTenant(
+    await this.assertCustomerBelongsToTenant(
       state.customerId,
       params.tenantId,
     );
 
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: Math.max(
-          0,
-          customer.points_balance - state.baseRedeemedPoints,
-        ),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', state.customerId)
-      .eq('tenant_id', params.tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+    await this.debitCustomerPointsAtomic({
+      tenantId: params.tenantId,
+      customerId: state.customerId,
+      points: state.baseRedeemedPoints,
+    });
 
     await this.insertTransaction({
       tenantId: params.tenantId,
       customerId: state.customerId,
       type: 'REDEEMED',
       points: state.baseRedeemedPoints,
-      description: 'Resgate reaplicado: agendamento reativado',
+      description: LOYALTY_RESTORE_REDEEM_DESCRIPTION,
       appointmentId: params.appointmentId,
     });
   }
@@ -935,16 +917,16 @@ export class LoyaltyService {
       const points = Number(row.points ?? 0);
       const description = row.description ?? '';
 
-      if (row.type === 'REDEEMED' && description.startsWith('Resgate')) {
+      if (row.type === 'REDEEMED' && isRewardRedeemDescription(description)) {
         redeemedPoints += points;
         customerId = customerId ?? row.customer_id;
 
-        if (description.startsWith('Resgate no agendamento')) {
+        if (isBookingRedeemDescription(description)) {
           baseRedeemedPoints += points;
         }
       }
 
-      if (row.type === 'EARNED' && description.startsWith('Estorno de resgate')) {
+      if (row.type === 'EARNED' && isRedeemRefundDescription(description)) {
         refundedPoints += points;
       }
     }
@@ -990,64 +972,75 @@ export class LoyaltyService {
   ): Promise<void> {
     const cutoffIso = subDays(new Date(), expirationDays).toISOString();
 
-    const { data: earnedRows, error } = await this.supabaseService
-      .getClient()
-      .from('loyalty_transactions')
-      .select('id, customer_id, points')
-      .eq('tenant_id', tenantId)
-      .eq('type', 'EARNED')
-      .lte('created_at', cutoffIso);
+    const { data: customerRows, error: customersError } =
+      await this.supabaseService
+        .getClient()
+        .from('customers')
+        .select('id, points_balance')
+        .eq('tenant_id', tenantId)
+        .gt('points_balance', 0);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (customersError) {
+      throw new InternalServerErrorException(customersError.message);
     }
 
-    const grouped = new Map<string, number>();
+    for (const customerRow of customerRows ?? []) {
+      const customerId = customerRow.id as string;
+      const currentBalance = Number(customerRow.points_balance ?? 0);
 
-    for (const row of earnedRows ?? []) {
-      const customerId = row.customer_id as string;
-      const points = Number(row.points ?? 0);
-      grouped.set(customerId, (grouped.get(customerId) ?? 0) + points);
-    }
-
-    for (const [customerId, stalePoints] of grouped.entries()) {
-      const customer = await this.assertCustomerBelongsToTenant(
-        customerId,
-        tenantId,
-      );
-
-      if (customer.points_balance <= 0 || stalePoints <= 0) {
+      if (!customerId || currentBalance <= 0) {
         continue;
       }
 
-      const pointsToExpire = Math.min(customer.points_balance, stalePoints);
-      const newBalance = customer.points_balance - pointsToExpire;
-
-      const { error: updateError } = await this.supabaseService
+      const { data: txRows, error: txError } = await this.supabaseService
         .getClient()
-        .from('customers')
-        .update({
-          points_balance: newBalance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', customerId)
-        .eq('tenant_id', tenantId);
+        .from('loyalty_transactions')
+        .select('type, points, description, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: true });
 
-      if (updateError) {
-        throw new InternalServerErrorException(updateError.message);
+      if (txError) {
+        throw new InternalServerErrorException(txError.message);
+      }
+
+      const pointsToExpire = computePointsToExpire({
+        transactions: (txRows ?? []) as Array<{
+          type: string;
+          points: number;
+          description: string | null;
+          created_at: string;
+        }>,
+        cutoffIso,
+        currentBalance,
+      });
+
+      if (pointsToExpire <= 0) {
+        continue;
+      }
+
+      const debited = await this.debitCustomerPointsAtomic({
+        tenantId,
+        customerId,
+        points: pointsToExpire,
+        allowPartialClamp: true,
+      });
+
+      if (debited <= 0) {
+        continue;
       }
 
       await this.insertTransaction({
         tenantId,
         customerId,
         type: 'EXPIRED',
-        points: pointsToExpire,
-        description: `Pontos expirados após ${expirationDays} dias`,
+        points: debited,
+        description: buildExpirationDescription(expirationDays),
       });
     }
   }
 
-  private async applyWelcomeBonusIfEligible(
+  async applyWelcomeBonusIfEligible(
     tenantId: string,
     customerId: string,
   ): Promise<void> {
@@ -1057,28 +1050,29 @@ export class LoyaltyService {
       return;
     }
 
-    const customer = await this.assertCustomerBelongsToTenant(customerId, tenantId);
+    const alreadyAwarded = await this.resolveWelcomeBonusPointsForCustomer(
+      tenantId,
+      customerId,
+    );
 
-    const { error: updateError } = await this.supabaseService
-      .getClient()
-      .from('customers')
-      .update({
-        points_balance: customer.points_balance + settings.welcome_bonus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', customerId)
-      .eq('tenant_id', tenantId);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
+    if (alreadyAwarded > 0) {
+      return;
     }
+
+    await this.assertCustomerBelongsToTenant(customerId, tenantId);
+
+    await this.creditCustomerPointsAtomic({
+      tenantId,
+      customerId,
+      points: settings.welcome_bonus,
+    });
 
     await this.insertTransaction({
       tenantId,
       customerId,
       type: 'EARNED',
       points: settings.welcome_bonus,
-      description: 'Bônus de cadastro',
+      description: LOYALTY_WELCOME_BONUS_DESCRIPTION,
     });
   }
 
@@ -1122,7 +1116,7 @@ export class LoyaltyService {
       .eq('tenant_id', tenantId)
       .eq('customer_id', customerId)
       .eq('type', 'EARNED')
-      .eq('description', 'Bônus de cadastro')
+      .eq('description', LOYALTY_WELCOME_BONUS_DESCRIPTION)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1132,6 +1126,97 @@ export class LoyaltyService {
     }
 
     return data ? Number(data.points ?? 0) : 0;
+  }
+
+  private async hasCompletionEarnForAppointment(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<boolean> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('loyalty_transactions')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('appointment_id', appointmentId)
+      .eq('type', 'EARNED')
+      .eq('description', LOYALTY_COMPLETION_EARN_DESCRIPTION)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return Boolean(data);
+  }
+
+  private async debitCustomerPointsAtomic(params: {
+    tenantId: string;
+    customerId: string;
+    points: number;
+    /** When true, debit min(balance, points) instead of failing on shortfall. */
+    allowPartialClamp?: boolean;
+  }): Promise<number> {
+    if (params.points <= 0) {
+      throw new BadRequestException('Pontos a debitar devem ser positivos.');
+    }
+
+    let pointsToDebit = params.points;
+
+    if (params.allowPartialClamp) {
+      const customer = await this.assertCustomerBelongsToTenant(
+        params.customerId,
+        params.tenantId,
+      );
+      pointsToDebit = Math.min(customer.points_balance, params.points);
+
+      if (pointsToDebit <= 0) {
+        return 0;
+      }
+    }
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .rpc('debit_customer_loyalty_points', {
+        p_customer_id: params.customerId,
+        p_tenant_id: params.tenantId,
+        p_points: pointsToDebit,
+      });
+
+    if (error) {
+      const message = error.message ?? '';
+      if (message.includes('insufficient_loyalty_points')) {
+        throw new BadRequestException('Saldo de pontos insuficiente.');
+      }
+
+      throw new InternalServerErrorException(message);
+    }
+
+    return pointsToDebit;
+  }
+
+  private async creditCustomerPointsAtomic(params: {
+    tenantId: string;
+    customerId: string;
+    points: number;
+  }): Promise<number> {
+    if (params.points <= 0) {
+      throw new BadRequestException('Pontos a creditar devem ser positivos.');
+    }
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .rpc('credit_customer_loyalty_points', {
+        p_customer_id: params.customerId,
+        p_tenant_id: params.tenantId,
+        p_points: params.points,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return params.points;
   }
 
   private async findCustomerByPhone(
