@@ -3016,6 +3016,9 @@ export class AppointmentsService {
       initial_setup_settings_visited_at: null,
       initial_setup_customer_account_decided_at: null,
       initial_setup_booking_link_shared_at: null,
+      support_ai_enabled: false,
+      support_ai_stripe_subscription_item_id: null,
+      support_ai_status: null,
       created_at: '',
       updated_at: '',
     };
