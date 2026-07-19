@@ -335,7 +335,7 @@ export class CustomersService {
 
     return this.referralService.applyReferralLinkIfEligible(
       tenantId,
-      refreshed ?? created,
+      refreshed,
       dto.referralCode?.trim() || null,
     );
   }
