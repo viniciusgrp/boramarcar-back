@@ -6,7 +6,7 @@ import type { InitialSetupStatus } from '../../../tenants/entities/initial-setup
 import type { TenantAccessContext } from '../../../tenants/entities/tenant-access-context.entity';
 
 const setup: InitialSetupStatus = {
-  checklistVersion: 8,
+  checklistVersion: 9,
   isComplete: false,
   isPersistedComplete: false,
   hasProfessional: true,
@@ -17,6 +17,7 @@ const setup: InitialSetupStatus = {
   hasVisitedSettings: true,
   hasSharedBookingLink: false,
   hasCustomerAccountPolicy: true,
+  hasReviewsEnabled: false,
   hasStripeConnect: false,
   requiresStripeConnect: false,
   hasActiveSubscription: true,

@@ -1,4 +1,5 @@
 import {
+  isCustomerReschedulableAppointment,
   isUpcomingCustomerAppointment,
   matchesCustomerAppointmentScope,
 } from './customer-appointment-scope.util';
@@ -37,6 +38,42 @@ describe('customer-appointment-scope.util', () => {
         {
           status: 'COMPLETED',
           start_time: '2026-07-16T18:00:00.000Z',
+        },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('allows reschedule for confirmed future appointments', () => {
+    expect(
+      isCustomerReschedulableAppointment(
+        {
+          status: 'CONFIRMED',
+          start_time: '2026-07-16T15:00:00.000Z',
+        },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks reschedule while deposit payment is pending', () => {
+    expect(
+      isCustomerReschedulableAppointment(
+        {
+          status: 'PENDING_PAYMENT',
+          start_time: '2026-07-16T15:00:00.000Z',
+        },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('blocks reschedule for past start times', () => {
+    expect(
+      isCustomerReschedulableAppointment(
+        {
+          status: 'CONFIRMED',
+          start_time: '2026-07-16T13:00:00.000Z',
         },
         now,
       ),

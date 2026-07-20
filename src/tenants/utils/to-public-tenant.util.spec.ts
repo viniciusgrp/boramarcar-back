@@ -28,6 +28,7 @@ function buildTenant(): Tenant {
     require_customer_email_confirmation: false,
     require_customer_account: true,
     allow_customer_self_cancellation: false,
+    allow_customer_reschedule: false,
     booking_acceptance_type: 'AUTOMATIC',
     booking_slot_interval_minutes: 15,
     owner_id: 'owner-secret',
@@ -48,6 +49,8 @@ function buildTenant(): Tenant {
     enable_referral_program: true,
     referrer_points_bonus: 10,
     referee_points_bonus: 5,
+    reviews_enabled: true,
+    reviews_auto_publish: false,
     initial_setup_completed_at: null,
     initial_setup_version: 5,
     initial_setup_settings_visited_at: null,
@@ -114,6 +117,8 @@ describe('toPublicTenant', () => {
       plan_tier: tenant.plan_tier,
       booking_acceptance_type: tenant.booking_acceptance_type,
       enable_referral_program: tenant.enable_referral_program,
+      reviews_enabled: tenant.reviews_enabled,
+      allow_customer_reschedule: tenant.allow_customer_reschedule,
     });
   });
 });

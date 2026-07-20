@@ -103,6 +103,8 @@ function mapTenantRow(row: Tenant): Tenant {
     enable_referral_program: Boolean(row.enable_referral_program),
     referrer_points_bonus: Number(row.referrer_points_bonus ?? 0),
     referee_points_bonus: Number(row.referee_points_bonus ?? 0),
+    reviews_enabled: Boolean(row.reviews_enabled),
+    reviews_auto_publish: Boolean(row.reviews_auto_publish),
     require_customer_email_confirmation: Boolean(
       row.require_customer_email_confirmation,
     ),
@@ -114,6 +116,7 @@ function mapTenantRow(row: Tenant): Tenant {
     allow_customer_self_cancellation: Boolean(
       row.allow_customer_self_cancellation,
     ),
+    allow_customer_reschedule: Boolean(row.allow_customer_reschedule),
     deposit_feature_enabled: Boolean(row.deposit_feature_enabled),
     support_ai_enabled: Boolean(row.support_ai_enabled),
     support_ai_stripe_subscription_item_id:
@@ -379,6 +382,8 @@ export class TenantsService {
         allow_customer_self_cancellation:
           dto.allowCustomerSelfCancellation ??
           tenant.allow_customer_self_cancellation,
+        allow_customer_reschedule:
+          dto.allowCustomerReschedule ?? tenant.allow_customer_reschedule,
         ...(dto.requireCustomerAccount !== undefined &&
         !tenant.initial_setup_customer_account_decided_at
           ? {
@@ -411,6 +416,9 @@ export class TenantsService {
           dto.refereePointsBonus,
           tenant.referee_points_bonus,
         ),
+        reviews_enabled: dto.reviewsEnabled ?? tenant.reviews_enabled,
+        reviews_auto_publish:
+          dto.reviewsAutoPublish ?? tenant.reviews_auto_publish,
         updated_at: new Date().toISOString(),
       })
       .eq('id', tenant.id)

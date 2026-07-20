@@ -38,6 +38,7 @@ export interface CustomerWithTenantSummary {
   tenantName: string;
   tenantSlug: string;
   allowCustomerSelfCancellation: boolean;
+  allowCustomerReschedule: boolean;
   isProfileComplete: boolean;
 }
 
@@ -121,7 +122,9 @@ export class CustomersService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('customers')
-      .select('*, tenants ( id, name, slug, allow_customer_self_cancellation )')
+      .select(
+        '*, tenants ( id, name, slug, allow_customer_self_cancellation, allow_customer_reschedule )',
+      )
       .eq('auth_user_id', authUserId);
 
     if (error) {
@@ -136,12 +139,14 @@ export class CustomersService {
               name: string;
               slug: string;
               allow_customer_self_cancellation?: boolean;
+              allow_customer_reschedule?: boolean;
             }
           | {
               id: string;
               name: string;
               slug: string;
               allow_customer_self_cancellation?: boolean;
+              allow_customer_reschedule?: boolean;
             }[]
           | null;
         const tenant = Array.isArray(tenantRelation)
@@ -162,6 +167,7 @@ export class CustomersService {
           allowCustomerSelfCancellation: Boolean(
             tenant.allow_customer_self_cancellation,
           ),
+          allowCustomerReschedule: Boolean(tenant.allow_customer_reschedule),
           isProfileComplete: isCustomerProfileComplete(customer),
         };
       })

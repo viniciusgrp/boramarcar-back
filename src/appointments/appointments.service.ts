@@ -25,7 +25,9 @@ import { CouponsService } from '../coupons/coupons.service';
 import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
+import { ReviewsService } from '../reviews/reviews.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
+import { ConfigService } from '@nestjs/config';
 import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-card-preferences.type';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
@@ -83,12 +85,14 @@ import {
 } from './utils/booking-slot-overlap.util';
 import {
   CUSTOMER_CANCELLABLE_STATUSES,
+  isCustomerReschedulableAppointment,
   isUpcomingCustomerAppointment,
   matchesCustomerAppointmentScope,
 } from './utils/customer-appointment-scope.util';
 import { DEPOSIT_HOLD_MINUTES } from './utils/deposit-payment-policy';
 import { normalizeServiceIds } from './utils/normalize-service-ids.util';
 import { resolveInitialAppointmentStatus } from './utils/resolve-initial-appointment-status.util';
+import type { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 
 const REMINDER_APPOINTMENT_SELECT = `
   id,
@@ -130,6 +134,7 @@ const ADMIN_APPOINTMENT_SELECT = `
   id,
   customer_id,
   professional_id,
+  service_id,
   customer_name,
   customer_phone,
   start_time,
@@ -141,11 +146,14 @@ const ADMIN_APPOINTMENT_SELECT = `
   loyalty_reward_id,
   coupon_id,
   coupon_discount_amount,
+  deposit_paid,
+  payment_status,
   cancellation_requested_at,
   professionals ( name ),
   services!service_id ( name, duration_minutes, price ),
   coupons ( code ),
   appointment_services (
+    service_id,
     sort_order,
     duration_minutes,
     price,
@@ -172,6 +180,8 @@ export class AppointmentsService {
     private readonly financeService: FinanceService,
     private readonly mailService: MailService,
     private readonly depositPaymentService: DepositPaymentService,
+    private readonly reviewsService: ReviewsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getAvailability(
@@ -179,6 +189,7 @@ export class AppointmentsService {
     professionalId: string,
     serviceIds: string[],
     date: string,
+    excludeAppointmentId?: string,
   ): Promise<string[]> {
     const booking = await this.resolveBookingServices(tenantId, serviceIds);
     const tenant = await this.tenantsService.findById(tenantId);
@@ -192,6 +203,7 @@ export class AppointmentsService {
       date,
       booking.totalDurationMinutes,
       slotIntervalMinutes,
+      excludeAppointmentId,
     );
   }
 
@@ -199,6 +211,7 @@ export class AppointmentsService {
     tenantId: string,
     serviceIds: string[],
     date: string,
+    excludeAppointmentId?: string,
   ): Promise<string[]> {
     const professionals =
       await this.professionalsService.findActivePerformingAllServices(
@@ -225,6 +238,7 @@ export class AppointmentsService {
         date,
         booking.totalDurationMinutes,
         slotIntervalMinutes,
+        excludeAppointmentId,
       );
 
       for (const slot of slots) {
@@ -335,6 +349,7 @@ export class AppointmentsService {
     date: string,
     durationMinutes: number,
     slotIntervalMinutes: number,
+    excludeAppointmentId?: string,
   ): Promise<string[]> {
     const schedule =
       await this.professionalHoursService.getEffectiveScheduleForDate(
@@ -357,7 +372,7 @@ export class AppointmentsService {
       await this.supabaseService
         .getClient()
         .from('appointments')
-        .select('start_time, end_time')
+        .select('id, start_time, end_time')
         .eq('tenant_id', tenantId)
         .eq('professional_id', professionalId)
         .in('status', [
@@ -373,10 +388,12 @@ export class AppointmentsService {
       throw new InternalServerErrorException(appointmentsError.message);
     }
 
-    const bookedSlots = (appointments ?? []) as Pick<
-      Appointment,
-      'start_time' | 'end_time'
-    >[];
+    const excludeId = excludeAppointmentId?.trim() || null;
+    const bookedSlots = (
+      (appointments ?? []) as Array<
+        Pick<Appointment, 'start_time' | 'end_time'> & { id?: string }
+      >
+    ).filter((appointment) => !(excludeId && appointment.id === excludeId));
 
     const dayAbsences =
       await this.professionalAbsencesService.findOverlappingForProfessionalOnDate(
@@ -1223,12 +1240,17 @@ export class AppointmentsService {
       return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
     });
 
-    return filtered.map((row) =>
-      this.mapCustomerAppointmentRow(row, now, {
-        id: tenant.id,
-        slug: tenant.slug,
-        allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
-      }),
+    return this.enrichCustomerAppointmentsWithReviews(
+      tenant.id,
+      tenant.reviews_enabled,
+      filtered.map((row) =>
+        this.mapCustomerAppointmentRow(row, now, {
+          id: tenant.id,
+          slug: tenant.slug,
+          allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+          allowCustomerReschedule: tenant.allow_customer_reschedule,
+        }),
+      ),
     );
   }
 
@@ -1255,6 +1277,7 @@ export class AppointmentsService {
           name: context.tenantName,
           slug: context.tenantSlug,
           allowCustomerSelfCancellation: context.allowCustomerSelfCancellation,
+          allowCustomerReschedule: context.allowCustomerReschedule,
         },
       ]),
     );
@@ -1274,6 +1297,7 @@ export class AppointmentsService {
         name: string;
         slug: string;
         allowCustomerSelfCancellation: boolean;
+        allowCustomerReschedule: boolean;
       }
     >();
 
@@ -1327,6 +1351,7 @@ export class AppointmentsService {
           id: tenant.id,
           slug: tenant.slug,
           allowCustomerSelfCancellation: tenant.allowCustomerSelfCancellation,
+          allowCustomerReschedule: tenant.allowCustomerReschedule,
         }),
       );
       grouped.set(tenant.id, existingGroup);
@@ -1340,6 +1365,13 @@ export class AppointmentsService {
         const rightTime = new Date(right.startTime).getTime();
         return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
       });
+
+      const tenantEntity = await this.tenantsService.findById(group.tenantId);
+      group.appointments = await this.enrichCustomerAppointmentsWithReviews(
+        group.tenantId,
+        Boolean(tenantEntity?.reviews_enabled),
+        group.appointments,
+      );
     }
 
     groups.sort((left, right) => {
@@ -1465,6 +1497,7 @@ export class AppointmentsService {
           id: tenant.id,
           slug: tenant.slug,
           allowCustomerSelfCancellation: true,
+          allowCustomerReschedule: tenant.allow_customer_reschedule,
         },
       );
     }
@@ -1500,6 +1533,7 @@ export class AppointmentsService {
         id: tenant.id,
         slug: tenant.slug,
         allowCustomerSelfCancellation: false,
+        allowCustomerReschedule: tenant.allow_customer_reschedule,
       },
     );
   }
@@ -1536,6 +1570,7 @@ export class AppointmentsService {
         customer_id,
         customer_name,
         customer_phone,
+        guest_access_token,
         loyalty_reward_id,
         deposit_paid,
         payment_status,
@@ -1747,6 +1782,40 @@ export class AppointmentsService {
         commissionAmount: Number(updatePayload.commission_amount ?? 0),
         enablePayoutControl: tenant.enable_payout_control,
       });
+
+      if (tenant.reviews_enabled) {
+        let customerEmail: string | null = null;
+
+        if (existing.customer_id) {
+          try {
+            const customer = await this.customersService.findByIdForTenant(
+              tenantId,
+              existing.customer_id as string,
+            );
+            customerEmail = customer.email?.trim() || null;
+          } catch {
+            customerEmail = null;
+          }
+        }
+
+        const serviceName =
+          this.extractReminderServiceName(
+            existing as unknown as Parameters<
+              typeof this.extractReminderServiceName
+            >[0],
+          ) || 'seu atendimento';
+
+        this.dispatchReviewInviteEmail({
+          tenant,
+          appointmentId,
+          customerName: existing.customer_name,
+          customerEmail,
+          guestAccessToken:
+            (existing as { guest_access_token?: string | null })
+              .guest_access_token ?? null,
+          serviceName,
+        });
+      }
     }
 
     if (isCompletingAppointment && !appliedLoyaltyRewardId) {
@@ -1961,7 +2030,7 @@ export class AppointmentsService {
       }
     >;
 
-    return rows
+    const mapped = rows
       .filter((row) => {
         const expected = tokenById.get(row.id);
         return Boolean(
@@ -1976,6 +2045,7 @@ export class AppointmentsService {
           id: tenant.id,
           slug: tenant.slug,
           allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+          allowCustomerReschedule: tenant.allow_customer_reschedule,
         }),
       )
       .sort((left, right) => {
@@ -1985,6 +2055,12 @@ export class AppointmentsService {
           ? leftTime - rightTime
           : rightTime - leftTime;
       });
+
+    return this.enrichCustomerAppointmentsWithReviews(
+      tenant.id,
+      tenant.reviews_enabled,
+      mapped,
+    );
   }
 
   async requestCancellationForGuest(params: {
@@ -2081,6 +2157,7 @@ export class AppointmentsService {
           id: tenant.id,
           slug: tenant.slug,
           allowCustomerSelfCancellation: true,
+          allowCustomerReschedule: tenant.allow_customer_reschedule,
         },
       );
     }
@@ -2107,6 +2184,339 @@ export class AppointmentsService {
         id: tenant.id,
         slug: tenant.slug,
         allowCustomerSelfCancellation: false,
+        allowCustomerReschedule: tenant.allow_customer_reschedule,
+      },
+    );
+  }
+
+  async rescheduleForCustomer(
+    authUserId: string,
+    tenantId: string,
+    appointmentId: string,
+    dto: RescheduleAppointmentDto,
+  ): Promise<CustomerAppointment> {
+    const trimmedTenantId = tenantId.trim();
+    const trimmedAppointmentId = appointmentId.trim();
+
+    if (!trimmedTenantId || !trimmedAppointmentId) {
+      throw new BadRequestException(
+        'Tenant and appointment identifiers are required.',
+      );
+    }
+
+    const customer = await this.customersService.getMe(
+      authUserId,
+      trimmedTenantId,
+    );
+
+    if (!customer.customer?.id || !customer.isProfileComplete) {
+      throw new BadRequestException(
+        'Complete seu perfil antes de reagendar.',
+      );
+    }
+
+    const tenant = await this.tenantsService.findById(trimmedTenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    if (!tenant.allow_customer_reschedule) {
+      throw new BadRequestException(
+        'Este estabelecimento não permite reagendamento pelo cliente.',
+      );
+    }
+
+    const customerIds =
+      await this.customersService.findEquivalentCustomerIdsForTenant(
+        trimmedTenantId,
+        customer.customer.phone,
+      );
+    const scopedCustomerIds =
+      customerIds.length > 0 ? customerIds : [customer.customer.id];
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('id', trimmedAppointmentId)
+      .eq('tenant_id', trimmedTenantId)
+      .in('customer_id', scopedCustomerIds)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (!existing) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const row = existing as SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    };
+
+    return this.applyCustomerReschedule({
+      tenant,
+      appointmentId: trimmedAppointmentId,
+      row,
+      dto,
+    });
+  }
+
+  async rescheduleForGuest(params: {
+    tenantId: string;
+    appointmentId: string;
+    accessToken: string;
+    dto: RescheduleAppointmentDto;
+  }): Promise<CustomerAppointment> {
+    const tenantId = params.tenantId.trim();
+    const appointmentId = params.appointmentId.trim();
+    const accessToken = params.accessToken.trim();
+
+    if (!tenantId || !appointmentId || !accessToken) {
+      throw new BadRequestException(
+        'Tenant, agendamento e token de acesso são obrigatórios.',
+      );
+    }
+
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    if (!tenant.allow_customer_reschedule) {
+      throw new BadRequestException(
+        'Este estabelecimento não permite reagendamento pelo cliente.',
+      );
+    }
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(`${ADMIN_APPOINTMENT_SELECT}, guest_access_token`)
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (
+      !existing ||
+      !(existing as { guest_access_token?: string }).guest_access_token ||
+      (existing as { guest_access_token?: string }).guest_access_token !==
+        accessToken
+    ) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const row = existing as SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+      guest_access_token?: string | null;
+    };
+
+    return this.applyCustomerReschedule({
+      tenant,
+      appointmentId,
+      row,
+      dto: params.dto,
+    });
+  }
+
+  private async applyCustomerReschedule(params: {
+    tenant: Tenant;
+    appointmentId: string;
+    row: SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    };
+    dto: RescheduleAppointmentDto;
+  }): Promise<CustomerAppointment> {
+    const { tenant, appointmentId, row, dto } = params;
+    const now = getWallClockNow();
+
+    if (!this.canCustomerReschedule(row, now)) {
+      throw new BadRequestException(
+        'Este agendamento não pode mais ser reagendado por aqui.',
+      );
+    }
+
+    const serviceIds = normalizeServiceIds(dto);
+
+    if (serviceIds.length === 0) {
+      throw new BadRequestException(
+        'Informe ao menos um serviço para reagendar.',
+      );
+    }
+
+    const booking = await this.resolveBookingServices(tenant.id, serviceIds);
+    const startTime = parseWallClockDateTime(dto.startTime);
+    const endTime = addMinutes(startTime, booking.totalDurationMinutes);
+
+    let professionalId = dto.professionalId?.trim() ?? '';
+
+    if (dto.assignAnyProfessional) {
+      professionalId = await this.assignRandomAvailableProfessional(
+        tenant.id,
+        serviceIds,
+        startTime,
+        endTime,
+        appointmentId,
+      );
+    } else {
+      if (!professionalId) {
+        throw new BadRequestException('Field "professionalId" is required');
+      }
+
+      await this.professionalsService.assertProfessionalPerformsAllServices(
+        tenant.id,
+        professionalId,
+        serviceIds,
+      );
+    }
+
+    const hasConflict = await this.hasBookingConflict(
+      tenant.id,
+      professionalId,
+      startTime,
+      endTime,
+      appointmentId,
+    );
+
+    if (hasConflict) {
+      throw new ConflictException(
+        'Este horário não está mais disponível. Escolha outro horário.',
+      );
+    }
+
+    const hasAbsenceConflict =
+      await this.professionalAbsencesService.hasAbsenceOverlap(
+        tenant.id,
+        professionalId,
+        startTime,
+        endTime,
+      );
+
+    if (hasAbsenceConflict) {
+      throw new ConflictException(
+        'Este horário não está disponível. O profissional estará ausente.',
+      );
+    }
+
+    const isPaidWithPoints = Boolean(row.loyalty_reward_id);
+    const depositAlreadyPaid =
+      row.payment_status === 'PAID' || Boolean(row.deposit_paid);
+
+    const wouldRequireDeposit =
+      !isPaidWithPoints &&
+      canAccessDepositFeatures(
+        tenant.plan_tier,
+        tenant.deposit_feature_enabled,
+      ) &&
+      booking.requiresDeposit &&
+      booking.totalDepositAmount > 0;
+
+    if (wouldRequireDeposit && !depositAlreadyPaid) {
+      throw new BadRequestException(
+        'Este reagendamento exigiria sinal. Cancele e agende novamente para pagar o sinal.',
+      );
+    }
+
+    let appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+    const existingDiscount = Number(row.coupon_discount_amount ?? 0);
+
+    if (!isPaidWithPoints && row.coupon_id && existingDiscount > 0) {
+      appointmentTotalPrice = Math.max(0, booking.totalPrice - existingDiscount);
+    }
+
+    const professionalBookingSettings =
+      await this.resolveProfessionalBookingSettings(tenant.id, professionalId);
+    const effectiveBookingAcceptance = resolveEffectiveBookingAcceptance(
+      tenant.booking_acceptance_type,
+      professionalBookingSettings.bookingAcceptanceType,
+    );
+
+    const nextStatus = resolveInitialAppointmentStatus({
+      requiresDepositPayment: false,
+      isPaidWithPoints,
+      bookingAcceptanceType: effectiveBookingAcceptance,
+    });
+
+    const primaryServiceId = booking.items[0].id;
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({
+        professional_id: professionalId,
+        service_id: primaryServiceId,
+        start_time: wallClockToStorageIso(startTime),
+        end_time: wallClockToStorageIso(endTime),
+        status: nextStatus,
+        total_duration_minutes: booking.totalDurationMinutes,
+        total_price: appointmentTotalPrice,
+        cancellation_requested_at: null,
+      })
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenant.id);
+
+    if (updateError) {
+      if (isBookingOverlapConstraintError(updateError)) {
+        throw new ConflictException(
+          'Este horário não está mais disponível. Escolha outro horário.',
+        );
+      }
+
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    const { error: deleteServicesError } = await this.supabaseService
+      .getClient()
+      .from('appointment_services')
+      .delete()
+      .eq('appointment_id', appointmentId)
+      .eq('tenant_id', tenant.id);
+
+    if (deleteServicesError) {
+      throw new InternalServerErrorException(deleteServicesError.message);
+    }
+
+    await this.insertAppointmentServices(appointmentId, tenant.id, booking);
+
+    const { data: updated, error: reloadError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenant.id)
+      .maybeSingle();
+
+    if (reloadError) {
+      throw new InternalServerErrorException(reloadError.message);
+    }
+
+    if (!updated) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const context = await this.loadAppointmentEmailContext(
+      tenant.id,
+      appointmentId,
+    );
+    this.dispatchCustomerRescheduledEmail(context);
+
+    return this.mapCustomerAppointmentRow(
+      updated as SupabaseAppointmentWithRelations & {
+        cancellation_requested_at?: string | null;
+      },
+      now,
+      {
+        id: tenant.id,
+        slug: tenant.slug,
+        allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+        allowCustomerReschedule: true,
       },
     );
   }
@@ -2249,6 +2659,7 @@ export class AppointmentsService {
     professionalId: string,
     startTime: Date,
     endTime: Date,
+    excludeAppointmentId?: string,
   ): Promise<boolean> {
     const dayStartIso = `${formatWallClockDate(startTime)}T00:00:00`;
     const dayEndIso = `${formatWallClockDate(startTime)}T23:59:59`;
@@ -2256,7 +2667,7 @@ export class AppointmentsService {
     const { data: appointments, error } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select('start_time, end_time')
+      .select('id, start_time, end_time')
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
       .in('status', [
@@ -2272,12 +2683,17 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const bookedSlots = (appointments ?? []) as Pick<
-      Appointment,
-      'start_time' | 'end_time'
-    >[];
+    const bookedSlots = (appointments ?? []) as Array<
+      Pick<Appointment, 'start_time' | 'end_time'> & { id?: string }
+    >;
+
+    const excludeId = excludeAppointmentId?.trim() || null;
 
     return bookedSlots.some((appointment) => {
+      if (excludeId && appointment.id === excludeId) {
+        return false;
+      }
+
       const appointmentStart = parseWallClockDateTime(appointment.start_time);
       const appointmentEnd = parseWallClockDateTime(appointment.end_time);
       return doTimeRangesOverlap(
@@ -2298,26 +2714,141 @@ export class AppointmentsService {
       id: string;
       slug: string;
       allowCustomerSelfCancellation?: boolean;
+      allowCustomerReschedule?: boolean;
     },
   ): CustomerAppointment {
     const adminAppointment = this.mapAdminAppointmentRow(row);
+    const allowsCustomerReschedule = Boolean(tenant?.allowCustomerReschedule);
 
     return {
       id: adminAppointment.id,
       startTime: adminAppointment.startTime,
       endTime: adminAppointment.endTime,
       status: adminAppointment.status,
+      professionalId: adminAppointment.professionalId,
       professionalName: adminAppointment.professionalName,
+      serviceIds: this.extractAppointmentServiceIds(row),
       serviceName: adminAppointment.serviceName,
       durationMinutes: adminAppointment.durationMinutes,
       cancellationRequestedAt: row.cancellation_requested_at ?? null,
       canRequestCancellation: this.canCustomerRequestCancellation(row, now),
       allowsAutomaticCancellation: Boolean(tenant?.allowCustomerSelfCancellation),
+      canReschedule:
+        allowsCustomerReschedule &&
+        this.canCustomerReschedule(row, now),
+      allowsCustomerReschedule,
+      canLeaveReview: false,
+      reviewStatus: null,
       tenantId: tenant?.id ?? '',
       tenantSlug: tenant?.slug ?? '',
       customerName: adminAppointment.customerName,
       customerPhone: adminAppointment.customerPhone,
     };
+  }
+
+  private extractAppointmentServiceIds(
+    row: SupabaseAppointmentWithRelations,
+  ): string[] {
+    const junction = row.appointment_services;
+    const rows = Array.isArray(junction)
+      ? junction
+      : junction
+        ? [junction]
+        : [];
+
+    const fromJunction = rows
+      .slice()
+      .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0))
+      .map((item) => item.service_id?.trim())
+      .filter((id): id is string => Boolean(id));
+
+    if (fromJunction.length > 0) {
+      return [...new Set(fromJunction)];
+    }
+
+    const primary = row.service_id?.trim();
+    return primary ? [primary] : [];
+  }
+
+  private async enrichCustomerAppointmentsWithReviews(
+    tenantId: string,
+    reviewsEnabled: boolean,
+    appointments: CustomerAppointment[],
+  ): Promise<CustomerAppointment[]> {
+    if (!reviewsEnabled || appointments.length === 0) {
+      return appointments;
+    }
+
+    const completedIds = appointments
+      .filter((item) => item.status === 'COMPLETED')
+      .map((item) => item.id);
+
+    if (completedIds.length === 0) {
+      return appointments;
+    }
+
+    const statusByAppointmentId =
+      await this.reviewsService.findStatusesByAppointmentIds(
+        tenantId,
+        completedIds,
+      );
+
+    return appointments.map((item) => {
+      if (item.status !== 'COMPLETED') {
+        return item;
+      }
+
+      const reviewStatus = statusByAppointmentId.get(item.id) ?? null;
+
+      return {
+        ...item,
+        reviewStatus,
+        canLeaveReview: reviewStatus === null,
+      };
+    });
+  }
+
+  private dispatchReviewInviteEmail(params: {
+    tenant: Tenant;
+    appointmentId: string;
+    customerName: string;
+    customerEmail: string | null;
+    guestAccessToken: string | null;
+    serviceName: string;
+  }): void {
+    const email = params.customerEmail?.trim();
+
+    if (!email) {
+      return;
+    }
+
+    const frontendUrl = (
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      'http://localhost:5173'
+    ).replace(/\/$/, '');
+
+    const tokenQuery = params.guestAccessToken
+      ? `?token=${encodeURIComponent(params.guestAccessToken)}`
+      : '';
+    const reviewUrl = `${frontendUrl}/${params.tenant.slug}/avaliar/${params.appointmentId}${tokenQuery}`;
+
+    void this.mailService
+      .sendReviewInvite({
+        customerEmail: email,
+        customerName: params.customerName,
+        tenant: params.tenant,
+        reviewUrl,
+        serviceName: params.serviceName,
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown review invite email error';
+        this.logger.error(
+          `Failed to send review invite for appointment ${params.appointmentId}: ${message}`,
+        );
+      });
   }
 
   private canCustomerRequestCancellation(
@@ -2331,6 +2862,13 @@ export class AppointmentsService {
     }
 
     return isUpcomingCustomerAppointment(row, now);
+  }
+
+  private canCustomerReschedule(
+    row: { start_time: string; status: string },
+    now: Date,
+  ): boolean {
+    return isCustomerReschedulableAppointment(row, now);
   }
 
   private dispatchCancellationRequestEmail(context: {
@@ -2401,6 +2939,42 @@ export class AppointmentsService {
             : 'Unknown customer cancellation email error';
         this.logger.error(
           `Failed to send customer cancellation for appointment ${context.appointment.id}: ${message}`,
+        );
+      });
+  }
+
+  private dispatchCustomerRescheduledEmail(context: {
+    tenant: Tenant;
+    customer: Customer;
+    appointment: Appointment;
+    serviceName: string;
+    professionalName: string;
+  }): void {
+    void this.resolveTenantOwnerEmail(context.tenant.owner_id)
+      .then((ownerEmail) => {
+        if (!ownerEmail) {
+          return;
+        }
+
+        return this.mailService.sendAppointmentRescheduledByCustomerOwner(
+          ownerEmail,
+          {
+            customerName: context.appointment.customer_name,
+            customerEmail: context.customer.email?.trim() ?? '',
+            serviceName: context.serviceName,
+            professionalName: context.professionalName,
+            startTime: context.appointment.start_time,
+          },
+          context.tenant,
+        );
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown customer reschedule email error';
+        this.logger.error(
+          `Failed to send customer reschedule for appointment ${context.appointment.id}: ${message}`,
         );
       });
   }
@@ -3034,6 +3608,7 @@ export class AppointmentsService {
       require_customer_email_confirmation: false,
       require_customer_account: true,
       allow_customer_self_cancellation: false,
+      allow_customer_reschedule: false,
       booking_acceptance_type: 'AUTOMATIC',
       booking_slot_interval_minutes: 15,
       owner_id: null,
@@ -3054,6 +3629,8 @@ export class AppointmentsService {
       enable_referral_program: false,
       referrer_points_bonus: 0,
       referee_points_bonus: 0,
+      reviews_enabled: false,
+      reviews_auto_publish: false,
       initial_setup_completed_at: null,
       initial_setup_version: null,
       initial_setup_settings_visited_at: null,
@@ -3143,6 +3720,7 @@ export class AppointmentsService {
     serviceIds: string[],
     startTime: Date,
     endTime: Date,
+    excludeAppointmentId?: string,
   ): Promise<string> {
     const professionals =
       await this.professionalsService.findActivePerformingAllServices(
@@ -3180,6 +3758,7 @@ export class AppointmentsService {
         professional.id,
         startTime,
         endTime,
+        excludeAppointmentId,
       );
 
       if (hasConflict) {

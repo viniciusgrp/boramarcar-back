@@ -7,6 +7,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { FinanceModule } from '../finance/finance.module';
 import { MailModule } from '../mail/mail.module';
+import { ReviewsModule } from '../reviews/reviews.module';
 import { ProfessionalHoursModule } from '../professional-hours/professional-hours.module';
 import { ProfessionalAbsencesModule } from '../professional-absences/professional-absences.module';
 import { ProfessionalsModule } from '../professionals/professionals.module';
@@ -29,6 +30,7 @@ import { DepositPaymentService } from './deposit-payment.service';
     CustomersModule,
     LoyaltyModule,
     CouponsModule,
+    ReviewsModule,
     FinanceModule,
     MailModule,
   ],

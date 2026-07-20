@@ -10,11 +10,31 @@ export const CUSTOMER_CANCELLABLE_STATUSES: AppointmentStatus[] = [
   'CONFIRMED',
 ];
 
+/** Statuses that allow customer reschedule (excludes PENDING_PAYMENT hold/checkout). */
+export const CUSTOMER_RESCHEDULABLE_STATUSES: AppointmentStatus[] = [
+  'PENDING',
+  'PENDING_APPROVAL',
+  'CONFIRMED',
+];
+
 export function isUpcomingCustomerAppointment(
   row: { start_time: string; status: string },
   now: Date,
 ): boolean {
   if (!CUSTOMER_CANCELLABLE_STATUSES.includes(row.status as AppointmentStatus)) {
+    return false;
+  }
+
+  return !isAfter(now, parseWallClockDateTime(row.start_time));
+}
+
+export function isCustomerReschedulableAppointment(
+  row: { start_time: string; status: string },
+  now: Date,
+): boolean {
+  if (
+    !CUSTOMER_RESCHEDULABLE_STATUSES.includes(row.status as AppointmentStatus)
+  ) {
     return false;
   }
 
