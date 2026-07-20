@@ -28,6 +28,11 @@ export class UpdateTenantDto {
   @MaxLength(80)
   slug!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  description?: string | null;
+
   @IsString()
   @Matches(/^#[0-9a-fA-F]{6}$/)
   primaryColor!: string;

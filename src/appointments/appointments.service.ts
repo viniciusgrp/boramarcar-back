@@ -21,6 +21,7 @@ import {
 } from 'date-fns';
 import { BillingService } from '../billing/billing.service';
 import { CustomersService } from '../customers/customers.service';
+import { CouponsService } from '../coupons/coupons.service';
 import type { Customer } from '../loyalty/entities/customer.entity';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MailService } from '../mail/mail.service';
@@ -29,6 +30,7 @@ import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
+import { mapAppointmentCouponFields } from './utils/appointment-coupon.util';
 import { BusinessHoursService } from '../business-hours/business-hours.service';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
@@ -137,9 +139,12 @@ const ADMIN_APPOINTMENT_SELECT = `
   total_duration_minutes,
   total_price,
   loyalty_reward_id,
+  coupon_id,
+  coupon_discount_amount,
   cancellation_requested_at,
   professionals ( name ),
   services!service_id ( name, duration_minutes, price ),
+  coupons ( code ),
   appointment_services (
     sort_order,
     duration_minutes,
@@ -162,6 +167,7 @@ export class AppointmentsService {
     @Inject(forwardRef(() => BillingService))
     private readonly billingService: BillingService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly couponsService: CouponsService,
     private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
     private readonly mailService: MailService,
@@ -521,7 +527,22 @@ export class AppointmentsService {
     }
 
     const isPaidWithPoints = Boolean(loyaltyRewardId);
-    const appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+    let appointmentTotalPrice = isPaidWithPoints ? 0 : booking.totalPrice;
+
+    const couponCode = dto.couponCode?.trim() || null;
+    let couponValidation: Awaited<
+      ReturnType<CouponsService['validateCouponForBooking']>
+    > | null = null;
+
+    if (couponCode && !isPaidWithPoints) {
+      couponValidation = await this.couponsService.validateCouponForBooking({
+        tenantId: dto.tenantId,
+        code: couponCode,
+        totalPrice: booking.totalPrice,
+        customerPhone: customer.phone,
+      });
+      appointmentTotalPrice = couponValidation.finalPrice;
+    }
 
     const requiresDepositPayment =
       !isPaidWithPoints &&
@@ -596,6 +617,8 @@ export class AppointmentsService {
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: appointmentTotalPrice,
         loyalty_reward_id: loyaltyRewardId,
+        coupon_id: couponValidation?.coupon.id ?? null,
+        coupon_discount_amount: couponValidation?.discountAmount ?? null,
         hold_expires_at: holdExpiresAt,
         guest_access_token: guestAccessToken,
       })
@@ -631,6 +654,22 @@ export class AppointmentsService {
       } catch (redeemError) {
         await this.deleteAppointmentCascade(dto.tenantId, appointment.id);
         throw redeemError;
+      }
+    }
+
+    if (couponCode && couponValidation) {
+      try {
+        await this.couponsService.redeemCouponForAppointment({
+          tenantId: dto.tenantId,
+          code: couponCode,
+          totalPrice: booking.totalPrice,
+          appointmentId: appointment.id,
+          customerId: customer.id,
+          customerPhone: customer.phone,
+        });
+      } catch (couponError) {
+        await this.deleteAppointmentCascade(dto.tenantId, appointment.id);
+        throw couponError;
       }
     }
 
@@ -2370,6 +2409,7 @@ export class AppointmentsService {
     row: SupabaseAppointmentWithRelations,
   ): AdminAppointment {
     const lineItems = this.extractAppointmentLineItems(row);
+    const couponFields = mapAppointmentCouponFields(row);
 
     return {
       id: row.id,
@@ -2386,6 +2426,8 @@ export class AppointmentsService {
       servicePrice: lineItems.servicePrice,
       bookingSource: this.normalizeBookingSource(row.booking_source),
       paidWithPoints: Boolean(row.loyalty_reward_id),
+      couponCode: couponFields.couponCode,
+      couponDiscountAmount: couponFields.couponDiscountAmount,
     };
   }
 
@@ -2971,6 +3013,7 @@ export class AppointmentsService {
       id: row.id,
       name: row.name,
       slug: '',
+      description: null,
       logo_url: null,
       banner_url: null,
       banner_overlay_color: '#000000',

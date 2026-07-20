@@ -21,6 +21,7 @@ export const SUPPORT_ASSISTANT_ALLOWED_GOTO_PATHS = [
   '/admin/financas/despesas-fixas',
   '/admin/comissoes',
   '/admin/fidelidade',
+  '/admin/cupons',
   '/admin/suporte',
   '/admin/recebimentos',
 ] as const;
@@ -42,6 +43,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/admin/financas/despesas-fixas': 'Abrir Despesas fixas',
   '/admin/comissoes': 'Abrir Minhas Comissões',
   '/admin/fidelidade': 'Abrir Fidelidade',
+  '/admin/cupons': 'Abrir Cupons',
   '/admin/suporte': 'Abrir Suporte',
   '/admin/recebimentos': 'Abrir Recebimentos',
 };

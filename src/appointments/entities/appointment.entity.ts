@@ -36,5 +36,7 @@ export interface Appointment {
   commission_amount: number;
   booking_source: BookingSource;
   loyalty_reward_id?: string | null;
+  coupon_id?: string | null;
+  coupon_discount_amount?: number | null;
   cancellation_requested_at?: string | null;
 }

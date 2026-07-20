@@ -16,4 +16,6 @@ export interface AdminAppointment {
   servicePrice: number;
   bookingSource: BookingSource;
   paidWithPoints: boolean;
+  couponCode: string | null;
+  couponDiscountAmount: number | null;
 }

@@ -19,6 +19,11 @@ export type AppointmentServiceRelation =
       services: RelationName;
     }[];
 
+type CouponRelation =
+  | { code: string }
+  | { code: string }[]
+  | null;
+
 export interface SupabaseAppointmentWithRelations {
   id: string;
   professional_id: string;
@@ -32,8 +37,11 @@ export interface SupabaseAppointmentWithRelations {
   total_duration_minutes?: number | null;
   total_price?: number | null;
   loyalty_reward_id?: string | null;
+  coupon_id?: string | null;
+  coupon_discount_amount?: number | string | null;
   guest_access_token?: string | null;
   professionals: RelationName;
   services: ServiceRelation;
+  coupons?: CouponRelation;
   appointment_services?: AppointmentServiceRelation | null;
 }
