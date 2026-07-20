@@ -28,6 +28,7 @@ export interface PublicTenant {
   require_customer_email_confirmation: boolean;
   require_customer_account: boolean;
   allow_customer_self_cancellation: boolean;
+  allow_customer_reschedule: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
   subscription_status: SubscriptionStatus;
@@ -36,4 +37,5 @@ export interface PublicTenant {
   enable_referral_program: boolean;
   referrer_points_bonus: number;
   referee_points_bonus: number;
+  reviews_enabled: boolean;
 }

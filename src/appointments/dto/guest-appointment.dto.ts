@@ -1,7 +1,10 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsISO8601,
+  IsOptional,
   IsString,
   IsUUID,
   ValidateNested,
@@ -34,4 +37,33 @@ export class GuestAppointmentCancelDto {
 
   @IsString()
   accessToken!: string;
+}
+
+export class GuestAppointmentRescheduleDto {
+  @IsUUID()
+  tenantId!: string;
+
+  @IsString()
+  accessToken!: string;
+
+  @IsOptional()
+  @IsUUID()
+  professionalId?: string;
+
+  /** @deprecated Use serviceIds. */
+  @IsOptional()
+  @IsUUID()
+  serviceId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  serviceIds?: string[];
+
+  @IsISO8601()
+  startTime!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  assignAnyProfessional?: boolean;
 }

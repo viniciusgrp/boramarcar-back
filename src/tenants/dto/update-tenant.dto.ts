@@ -100,6 +100,10 @@ export class UpdateTenantDto {
   @IsBoolean()
   allowCustomerSelfCancellation?: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  allowCustomerReschedule?: boolean;
+
   @IsEnum(['AUTOMATIC', 'MANUAL'] as const)
   bookingAcceptanceType!: TenantBookingAcceptanceType;
 
@@ -134,4 +138,12 @@ export class UpdateTenantDto {
   @IsInt()
   @Min(0)
   refereePointsBonus?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  reviewsEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reviewsAutoPublish?: boolean;
 }

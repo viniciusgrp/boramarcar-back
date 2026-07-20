@@ -14,6 +14,7 @@ import { CustomersModule } from './customers/customers.module';
 import { UsersModule } from './users/users.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { CouponsModule } from './coupons/coupons.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { BusinessHoursModule } from './business-hours/business-hours.module';
 import { ProfessionalHoursModule } from './professional-hours/professional-hours.module';
 import { ProfessionalAbsencesModule } from './professional-absences/professional-absences.module';
@@ -60,6 +61,7 @@ import { SupportModule } from './support/support.module';
     UsersModule,
     LoyaltyModule,
     CouponsModule,
+    ReviewsModule,
     UploadModule,
     SupportModule,
   ],

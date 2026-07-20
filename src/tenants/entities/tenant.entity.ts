@@ -33,6 +33,7 @@ export interface Tenant {
   require_customer_email_confirmation: boolean;
   require_customer_account: boolean;
   allow_customer_self_cancellation: boolean;
+  allow_customer_reschedule: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
   owner_id: string | null;
@@ -53,6 +54,8 @@ export interface Tenant {
   enable_referral_program: boolean;
   referrer_points_bonus: number;
   referee_points_bonus: number;
+  reviews_enabled: boolean;
+  reviews_auto_publish: boolean;
   initial_setup_completed_at: string | null;
   initial_setup_version: number | null;
   initial_setup_settings_visited_at: string | null;

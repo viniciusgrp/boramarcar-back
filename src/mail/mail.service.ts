@@ -156,6 +156,24 @@ export class MailService {
     });
   }
 
+  async sendAppointmentRescheduledByCustomerOwner(
+    ownerEmail: string,
+    appointment: MailAppointment,
+    tenant: Tenant,
+  ): Promise<void> {
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Agendamento reagendado pelo cliente - ${tenant.name}`,
+      html: this.buildAppointmentEmailHtml({
+        title: 'Agendamento reagendado pelo cliente',
+        intro:
+          'Um cliente alterou o agendamento abaixo. Confira o novo horário, serviço e profissional na agenda.',
+        appointment,
+        tenant,
+      }),
+    });
+  }
+
   async sendTeamInvite(params: {
     recipientEmail: string;
     tenantName: string;
@@ -277,6 +295,40 @@ export class MailService {
           <h1 style="font-size: 20px; margin-bottom: 12px;">${title}</h1>
           <p style="margin: 0 0 16px;">${intro}</p>
           <p style="margin: 0; color: #6B7280;">Continue acumulando pontos e aproveite as recompensas do programa de fidelidade.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendReviewInvite(params: {
+    customerEmail: string;
+    customerName: string;
+    tenant: Tenant;
+    reviewUrl: string;
+    serviceName: string;
+  }): Promise<void> {
+    const recipient = params.customerEmail.trim();
+
+    if (!recipient) {
+      return;
+    }
+
+    const customerName = params.customerName.trim() || 'Cliente';
+
+    await this.sendMail({
+      to: recipient,
+      subject: `Como foi seu atendimento em ${params.tenant.name}?`,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h1 style="font-size: 20px; margin-bottom: 12px;">Avalie seu atendimento</h1>
+          <p style="margin: 0 0 16px;">Olá, ${customerName}! Seu atendimento de <strong>${params.serviceName}</strong> em ${params.tenant.name} foi concluído.</p>
+          <p style="margin: 0 0 20px;">Sua opinião ajuda outros clientes e o estabelecimento a melhorar.</p>
+          <p style="margin: 0 0 24px;">
+            <a href="${params.reviewUrl}" style="display: inline-block; padding: 12px 20px; border-radius: 10px; background: #111827; color: #ffffff; text-decoration: none; font-weight: 600;">
+              Deixar avaliação
+            </a>
+          </p>
+          <p style="margin: 0; color: #6B7280; font-size: 13px;">Se o botão não funcionar, copie e cole este link: ${params.reviewUrl}</p>
         </div>
       `,
     });

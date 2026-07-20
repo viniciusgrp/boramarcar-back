@@ -25,6 +25,7 @@ export function toPublicTenant(tenant: Tenant): PublicTenant {
       tenant.require_customer_email_confirmation,
     require_customer_account: tenant.require_customer_account,
     allow_customer_self_cancellation: tenant.allow_customer_self_cancellation,
+    allow_customer_reschedule: tenant.allow_customer_reschedule,
     booking_acceptance_type: tenant.booking_acceptance_type,
     booking_slot_interval_minutes: tenant.booking_slot_interval_minutes,
     subscription_status: tenant.subscription_status,
@@ -33,5 +34,6 @@ export function toPublicTenant(tenant: Tenant): PublicTenant {
     enable_referral_program: tenant.enable_referral_program,
     referrer_points_bonus: tenant.referrer_points_bonus,
     referee_points_bonus: tenant.referee_points_bonus,
+    reviews_enabled: tenant.reviews_enabled,
   };
 }

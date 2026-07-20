@@ -27,7 +27,9 @@ import { ReleaseDepositHoldDto } from './dto/release-deposit-hold.dto';
 import {
   GuestAppointmentCancelDto,
   GuestAppointmentLookupDto,
+  GuestAppointmentRescheduleDto,
 } from './dto/guest-appointment.dto';
+import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
 import type { AppointmentLoyaltyRedeemOptions } from './entities/appointment-loyalty-redeem-options.entity';
@@ -135,10 +137,12 @@ export class AppointmentsController {
     @Query('serviceId') serviceId?: string,
     @Query('serviceIds') serviceIds?: string,
     @Query('date') date?: string,
+    @Query('excludeAppointmentId') excludeAppointmentId?: string,
   ): Promise<{ slots: string[] }> {
     const resolvedServiceIds = parseServiceIdsQuery(serviceId, serviceIds);
     const useAnyProfessional =
       anyProfessional === 'true' || professionalId?.trim() === 'any';
+    const excludeId = excludeAppointmentId?.trim() || undefined;
 
     if (!tenantId || !date || resolvedServiceIds.length === 0) {
       throw new BadRequestException(
@@ -152,6 +156,7 @@ export class AppointmentsController {
           tenantId,
           resolvedServiceIds,
           date,
+          excludeId,
         )
         .then((slots) => ({ slots }));
     }
@@ -163,7 +168,13 @@ export class AppointmentsController {
     }
 
     return this.appointmentsService
-      .getAvailability(tenantId, professionalId, resolvedServiceIds, date)
+      .getAvailability(
+        tenantId,
+        professionalId,
+        resolvedServiceIds,
+        date,
+        excludeId,
+      )
       .then((slots) => ({ slots }));
   }
 
@@ -256,6 +267,26 @@ export class AppointmentsController {
       resolveAuthUserId(user),
       tenantId.trim(),
       id,
+    );
+  }
+
+  @Patch(':id/reschedule')
+  @UseGuards(AuthGuard)
+  reschedule(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: RescheduleAppointmentDto,
+  ): Promise<CustomerAppointment> {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('Query parameter "tenantId" is required');
+    }
+
+    return this.appointmentsService.rescheduleForCustomer(
+      resolveAuthUserId(user),
+      tenantId.trim(),
+      id,
+      dto,
     );
   }
 
@@ -360,6 +391,31 @@ export class AppointmentsController {
       tenantId: dto.tenantId,
       appointmentId: id,
       accessToken: dto.accessToken,
+    });
+  }
+
+  @Patch('guest/:id/reschedule')
+  rescheduleGuestAppointment(
+    @Param('id') id: string,
+    @Body() dto: GuestAppointmentRescheduleDto,
+  ): Promise<CustomerAppointment> {
+    if (!dto.tenantId?.trim() || !dto.accessToken?.trim()) {
+      throw new BadRequestException(
+        'Fields "tenantId" and "accessToken" are required',
+      );
+    }
+
+    return this.appointmentsService.rescheduleForGuest({
+      tenantId: dto.tenantId,
+      appointmentId: id,
+      accessToken: dto.accessToken,
+      dto: {
+        professionalId: dto.professionalId,
+        serviceId: dto.serviceId,
+        serviceIds: dto.serviceIds,
+        startTime: dto.startTime,
+        assignAnyProfessional: dto.assignAnyProfessional,
+      },
     });
   }
 

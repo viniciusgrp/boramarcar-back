@@ -17,6 +17,7 @@ export interface SupportTenantSnapshot {
     hasVisitedSettings: boolean;
     hasSharedBookingLink: boolean;
     hasCustomerAccountPolicy: boolean;
+    hasReviewsEnabled: boolean;
     hasStripeConnect: boolean;
     requiresStripeConnect: boolean;
     hasActiveSubscription: boolean;
@@ -43,6 +44,7 @@ export function buildSupportTenantSnapshot(
       hasVisitedSettings: setup.hasVisitedSettings,
       hasSharedBookingLink: setup.hasSharedBookingLink,
       hasCustomerAccountPolicy: setup.hasCustomerAccountPolicy,
+      hasReviewsEnabled: setup.hasReviewsEnabled,
       hasStripeConnect: setup.hasStripeConnect,
       requiresStripeConnect: setup.requiresStripeConnect,
       hasActiveSubscription: setup.hasActiveSubscription,

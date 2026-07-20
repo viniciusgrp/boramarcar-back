@@ -125,6 +125,7 @@ export class InitialSetupService {
         hasVisitedSettings: true,
         hasSharedBookingLink: true,
         hasCustomerAccountPolicy: true,
+        hasReviewsEnabled: true,
         hasStripeConnect: true,
         requiresStripeConnect,
         hasActiveSubscription: true,
@@ -153,6 +154,7 @@ export class InitialSetupService {
     const hasCustomerAccountPolicy = Boolean(
       tenant.initial_setup_customer_account_decided_at,
     );
+    const hasReviewsEnabled = Boolean(tenant.reviews_enabled);
     const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
     const hasActiveSubscription = isSubscriptionActive(
       tenant.subscription_status,
@@ -165,6 +167,7 @@ export class InitialSetupService {
       hasContactPhone &&
       hasVisitedSettings &&
       hasCustomerAccountPolicy &&
+      hasReviewsEnabled &&
       hasTestBooking &&
       (!requiresStripeConnect || hasStripeConnect) &&
       hasActiveSubscription;
@@ -185,6 +188,7 @@ export class InitialSetupService {
       hasVisitedSettings,
       hasSharedBookingLink,
       hasCustomerAccountPolicy,
+      hasReviewsEnabled,
       hasStripeConnect,
       requiresStripeConnect,
       hasActiveSubscription,

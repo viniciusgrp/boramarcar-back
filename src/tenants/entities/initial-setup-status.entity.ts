@@ -10,6 +10,7 @@ export interface InitialSetupStatus {
   hasVisitedSettings: boolean;
   hasSharedBookingLink: boolean;
   hasCustomerAccountPolicy: boolean;
+  hasReviewsEnabled: boolean;
   hasStripeConnect: boolean;
   requiresStripeConnect: boolean;
   hasActiveSubscription: boolean;
