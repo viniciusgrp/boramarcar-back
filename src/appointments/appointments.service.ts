@@ -30,6 +30,7 @@ import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
 import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
+import { mapAppointmentCouponFields } from './utils/appointment-coupon.util';
 import { BusinessHoursService } from '../business-hours/business-hours.service';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
 import { ProfessionalAbsencesService } from '../professional-absences/professional-absences.service';
@@ -138,9 +139,12 @@ const ADMIN_APPOINTMENT_SELECT = `
   total_duration_minutes,
   total_price,
   loyalty_reward_id,
+  coupon_id,
+  coupon_discount_amount,
   cancellation_requested_at,
   professionals ( name ),
   services!service_id ( name, duration_minutes, price ),
+  coupons ( code ),
   appointment_services (
     sort_order,
     duration_minutes,
@@ -2405,6 +2409,7 @@ export class AppointmentsService {
     row: SupabaseAppointmentWithRelations,
   ): AdminAppointment {
     const lineItems = this.extractAppointmentLineItems(row);
+    const couponFields = mapAppointmentCouponFields(row);
 
     return {
       id: row.id,
@@ -2421,6 +2426,8 @@ export class AppointmentsService {
       servicePrice: lineItems.servicePrice,
       bookingSource: this.normalizeBookingSource(row.booking_source),
       paidWithPoints: Boolean(row.loyalty_reward_id),
+      couponCode: couponFields.couponCode,
+      couponDiscountAmount: couponFields.couponDiscountAmount,
     };
   }
 
