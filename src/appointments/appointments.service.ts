@@ -3013,6 +3013,7 @@ export class AppointmentsService {
       id: row.id,
       name: row.name,
       slug: '',
+      description: null,
       logo_url: null,
       banner_url: null,
       banner_overlay_color: '#000000',

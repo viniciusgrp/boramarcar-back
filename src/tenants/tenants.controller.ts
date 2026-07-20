@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   NotFoundException,
   Param,
   Post,
   Put,
   Patch,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import type { User } from '@supabase/supabase-js';
@@ -27,7 +29,9 @@ import { TenantMeResponse } from './entities/tenant-me-response.entity';
 import { Tenant } from './entities/tenant.entity';
 import type { PublicTenant } from './entities/public-tenant.entity';
 import type { InitialSetupStatus } from './entities/initial-setup-status.entity';
+import type { TenantOpenGraphPayload } from './utils/tenant-open-graph.util';
 import { InitialSetupService } from './initial-setup.service';
+import { TenantOpenGraphService } from './tenant-open-graph.service';
 import { TenantsService } from './tenants.service';
 import { toPublicTenant } from './utils/to-public-tenant.util';
 
@@ -36,6 +40,7 @@ export class TenantsController {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly initialSetupService: InitialSetupService,
+    private readonly tenantOpenGraphService: TenantOpenGraphService,
   ) {}
 
   @Post('register')
@@ -127,6 +132,22 @@ export class TenantsController {
     @Body() dto: UpdateTenantAdminThemeDto,
   ): Promise<Tenant> {
     return this.tenantsService.updateAdminThemeForOwner(user.id, dto);
+  }
+
+  @Get(':slug/open-graph')
+  getOpenGraph(@Param('slug') slug: string): Promise<TenantOpenGraphPayload> {
+    return this.tenantOpenGraphService.getOpenGraphPayload(slug);
+  }
+
+  @Get(':slug/og-image')
+  @Header('Content-Type', 'image/png')
+  @Header('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
+  async getOgImage(@Param('slug') slug: string): Promise<StreamableFile> {
+    const png = await this.tenantOpenGraphService.getOgImagePng(slug);
+    return new StreamableFile(png, {
+      type: 'image/png',
+      disposition: 'inline',
+    });
   }
 
   @Get(':slug')

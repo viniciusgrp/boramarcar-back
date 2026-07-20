@@ -77,6 +77,10 @@ function mapTenantRow(row: Tenant): Tenant {
 
   return {
     ...row,
+    description:
+      typeof row.description === 'string' && row.description.trim()
+        ? row.description.trim()
+        : null,
     pre_subscription_trial_ends_at: row.pre_subscription_trial_ends_at ?? null,
     banner_overlay_color: normalizeOverlayColor(row.banner_overlay_color),
     banner_overlay_opacity: normalizeOverlayOpacity(row.banner_overlay_opacity),
@@ -344,6 +348,10 @@ export class TenantsService {
       .update({
         name: dto.name.trim(),
         slug: slugToSave,
+        description:
+          dto.description !== undefined
+            ? this.normalizeOptionalText(dto.description)
+            : tenant.description,
         primary_color: dto.primaryColor.trim(),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         logo_url: this.normalizeOptionalText(dto.logoUrl),

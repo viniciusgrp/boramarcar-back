@@ -9,11 +9,25 @@ import { RolesGuard } from './guards/roles.guard';
 import { TenantsService } from './tenants.service';
 import { TenantUsersService } from './tenant-users.service';
 import { InitialSetupService } from './initial-setup.service';
+import { TenantOpenGraphService } from './tenant-open-graph.service';
 
 @Module({
   imports: [AuthModule, MailModule, NtfyModule],
   controllers: [TenantsController, TenantUsersController],
-  providers: [TenantsService, TenantUsersService, InitialSetupService, TenantAccessGuard, RolesGuard],
-  exports: [TenantsService, TenantUsersService, InitialSetupService, TenantAccessGuard, RolesGuard],
+  providers: [
+    TenantsService,
+    TenantUsersService,
+    InitialSetupService,
+    TenantOpenGraphService,
+    TenantAccessGuard,
+    RolesGuard,
+  ],
+  exports: [
+    TenantsService,
+    TenantUsersService,
+    InitialSetupService,
+    TenantAccessGuard,
+    RolesGuard,
+  ],
 })
 export class TenantsModule {}

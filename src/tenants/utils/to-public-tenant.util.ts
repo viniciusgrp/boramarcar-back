@@ -6,6 +6,7 @@ export function toPublicTenant(tenant: Tenant): PublicTenant {
     id: tenant.id,
     name: tenant.name,
     slug: tenant.slug,
+    description: tenant.description,
     logo_url: tenant.logo_url,
     banner_url: tenant.banner_url,
     banner_overlay_color: tenant.banner_overlay_color,
