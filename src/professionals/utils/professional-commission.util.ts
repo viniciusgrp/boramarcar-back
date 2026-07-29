@@ -32,6 +32,33 @@ export function resolveProfessionalCommissionPercent(
   return Math.round(commissionPercent * 100) / 100;
 }
 
+export function resolveProfessionalProductCommissionPercent(
+  planTier: PlanTier,
+  productCommissionPercent?: number,
+): number | null {
+  if (!canConfigureCommissions(planTier)) {
+    if (productCommissionPercent !== undefined && productCommissionPercent > 0) {
+      throw new BadRequestException(
+        'Comissões estão disponíveis a partir do plano Pro.',
+      );
+    }
+
+    return null;
+  }
+
+  if (productCommissionPercent === undefined) {
+    return null;
+  }
+
+  if (productCommissionPercent < 0 || productCommissionPercent > 100) {
+    throw new BadRequestException(
+      'A comissão de vendas de produtos deve estar entre 0 e 100.',
+    );
+  }
+
+  return Math.round(productCommissionPercent * 100) / 100;
+}
+
 export function calculateCommissionAmount(
   totalPrice: number,
   commissionPercent: number,

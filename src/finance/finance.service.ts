@@ -554,6 +554,64 @@ export class FinanceService {
     }
   }
 
+  /** Mirrors recordCompletedAppointmentCashFlow for product sales (direct or linked to an appointment). */
+  async recordProductSaleCashFlow(params: {
+    tenantId: string;
+    productSaleId: string;
+    professionalId: string | null;
+    totalAmount: number;
+    commissionAmount: number;
+    enablePayoutControl: boolean;
+  }): Promise<void> {
+    const cashRegisterId =
+      await this.cashRegisterService.resolveOpenCashRegisterId(params.tenantId);
+    const revenueAmount = this.roundCurrency(params.totalAmount);
+
+    if (revenueAmount > 0) {
+      const { error: revenueError } = await this.supabaseService
+        .getClient()
+        .from('cash_flow_entries')
+        .insert({
+          tenant_id: params.tenantId,
+          cash_register_id: cashRegisterId,
+          type: 'REVENUE',
+          amount: revenueAmount,
+          description: 'Receita de venda de produtos',
+          category: 'PRODUCT_SALE',
+          is_recurring: false,
+        });
+
+      if (revenueError) {
+        throw new InternalServerErrorException(revenueError.message);
+      }
+    }
+
+    if (!params.enablePayoutControl || !params.professionalId) {
+      return;
+    }
+
+    const payoutAmount = this.roundCurrency(params.commissionAmount);
+
+    if (payoutAmount <= 0) {
+      return;
+    }
+
+    const { error: payoutError } = await this.supabaseService
+      .getClient()
+      .from('employee_payouts')
+      .insert({
+        tenant_id: params.tenantId,
+        professional_id: params.professionalId,
+        product_sale_id: params.productSaleId,
+        amount: payoutAmount,
+        status: 'PENDING',
+      });
+
+    if (payoutError) {
+      throw new InternalServerErrorException(payoutError.message);
+    }
+  }
+
   async getCommissionReport(
     tenantId: string,
     planTier: PlanTier,

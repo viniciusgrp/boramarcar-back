@@ -23,7 +23,10 @@ import {
 } from './entities/archived-professional-match.entity';
 import { Professional } from './entities/professional.entity';
 import type { OwnerProfessionalMembershipResponse } from './entities/owner-professional-membership-response.entity';
-import { resolveProfessionalCommissionPercent } from './utils/professional-commission.util';
+import {
+  resolveProfessionalCommissionPercent,
+  resolveProfessionalProductCommissionPercent,
+} from './utils/professional-commission.util';
 import { professionalPerformsAllServices } from './utils/professional-service-links.util';
 import { professionalPhonesMatch } from './utils/professional-phone-match.util';
 import { sortProfessionalsActiveFirst } from './utils/sort-professionals-active-first.util';
@@ -182,6 +185,10 @@ export class ProfessionalsService {
       planTier,
       dto.commissionPercent,
     );
+    const productCommissionPercent = resolveProfessionalProductCommissionPercent(
+      planTier,
+      dto.productCommissionPercent,
+    );
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -192,6 +199,7 @@ export class ProfessionalsService {
         contact_phone: contactPhone,
         avatar_url: dto.avatarUrl?.trim() || null,
         commission_percent: commissionPercent,
+        product_commission_percent: productCommissionPercent,
         booking_acceptance_type: this.normalizeProfessionalBookingAcceptanceType(
           dto.bookingAcceptanceType,
         ),
@@ -259,6 +267,13 @@ export class ProfessionalsService {
       payload.commission_percent = resolveProfessionalCommissionPercent(
         planTier,
         dto.commissionPercent,
+      );
+    }
+
+    if (dto.productCommissionPercent !== undefined) {
+      payload.product_commission_percent = resolveProfessionalProductCommissionPercent(
+        planTier,
+        dto.productCommissionPercent,
       );
     }
 
@@ -588,6 +603,11 @@ export class ProfessionalsService {
       ...row,
       is_active: Boolean(row.is_active),
       commission_percent: Number(row.commission_percent ?? 0),
+      product_commission_percent:
+        row.product_commission_percent === null ||
+        row.product_commission_percent === undefined
+          ? null
+          : Number(row.product_commission_percent),
       deleted_at: row.deleted_at ?? null,
       booking_acceptance_type: this.normalizeProfessionalBookingAcceptanceType(
         row.booking_acceptance_type,

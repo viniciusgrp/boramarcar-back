@@ -23,6 +23,7 @@ import { ServicesModule } from './services/services.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UploadModule } from './upload/upload.module';
 import { SupportModule } from './support/support.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { SupportModule } from './support/support.module';
     ReviewsModule,
     UploadModule,
     SupportModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [
