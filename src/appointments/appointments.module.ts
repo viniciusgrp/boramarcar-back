@@ -6,6 +6,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { FinanceModule } from '../finance/finance.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { MailModule } from '../mail/mail.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { ProfessionalHoursModule } from '../professional-hours/professional-hours.module';
@@ -32,6 +33,7 @@ import { DepositPaymentService } from './deposit-payment.service';
     CouponsModule,
     ReviewsModule,
     FinanceModule,
+    InventoryModule,
     MailModule,
   ],
   controllers: [AppointmentsController],

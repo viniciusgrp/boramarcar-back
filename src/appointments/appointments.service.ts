@@ -54,6 +54,8 @@ import {
 } from '../tenants/utils/tenant-user-scope.util';
 import { canAccessDepositFeatures } from '../tenants/utils/plan-tier.util';
 import { FinanceService } from '../finance/finance.service';
+import { StockMovementsService } from '../inventory/stock-movements.service';
+import { resolveAppointmentServiceIds } from '../inventory/utils/service-bom.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
@@ -178,6 +180,7 @@ export class AppointmentsService {
     private readonly couponsService: CouponsService,
     private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
+    private readonly stockMovementsService: StockMovementsService,
     private readonly mailService: MailService,
     private readonly depositPaymentService: DepositPaymentService,
     private readonly reviewsService: ReviewsService,
@@ -1732,6 +1735,26 @@ export class AppointmentsService {
 
     if (isRevertingCompletion) {
       updatePayload.commission_amount = 0;
+    }
+
+    if (isCompletingAppointment) {
+      const bomServiceIds = resolveAppointmentServiceIds({
+        appointmentServices: Array.isArray(existing.appointment_services)
+          ? existing.appointment_services
+          : [],
+        primaryServiceId:
+          typeof existing.service_id === 'string' ? existing.service_id : null,
+      });
+
+      await this.stockMovementsService.consumeAppointmentServiceBom({
+        tenantId,
+        appointmentId,
+        serviceIds: bomServiceIds,
+        professionalId:
+          typeof existing.professional_id === 'string'
+            ? existing.professional_id
+            : null,
+      });
     }
 
     const { error: updateError } = await this.supabaseService

@@ -21,6 +21,10 @@ import {
 
 const EXPIRY_ALERT_WINDOW_DAYS = 30;
 
+function roundQuantity(value: number): number {
+  return Math.round(value);
+}
+
 interface ProductRow extends Product {
   product_categories?: { name: string } | { name: string }[] | null;
 }
@@ -121,7 +125,7 @@ export class ProductsService {
         cost_price: dto.costPrice ?? 0,
         sale_price: dto.salePrice,
         current_stock: 0,
-        min_stock_alert: dto.minStockAlert ?? 0,
+        min_stock_alert: roundQuantity(dto.minStockAlert ?? 0),
         track_lots: dto.trackLots ?? false,
         custom_commission_rate: dto.customCommissionRate ?? null,
         image_url: dto.imageUrl?.trim() || null,
@@ -163,7 +167,9 @@ export class ProductsService {
     if (dto.unit !== undefined) payload.unit = dto.unit;
     if (dto.costPrice !== undefined) payload.cost_price = dto.costPrice;
     if (dto.salePrice !== undefined) payload.sale_price = dto.salePrice;
-    if (dto.minStockAlert !== undefined) payload.min_stock_alert = dto.minStockAlert;
+    if (dto.minStockAlert !== undefined) {
+      payload.min_stock_alert = roundQuantity(dto.minStockAlert);
+    }
     if (dto.trackLots !== undefined) payload.track_lots = dto.trackLots;
     if (dto.customCommissionRate !== undefined) payload.custom_commission_rate = dto.customCommissionRate;
     if (dto.imageUrl !== undefined) payload.image_url = dto.imageUrl?.trim() || null;
@@ -227,7 +233,7 @@ export class ProductsService {
     newAverageCostPrice?: number,
   ): Promise<void> {
     const product = await this.assertProductBelongsToTenant(productId, tenantId);
-    const nextStock = Math.round((Number(product.current_stock) + quantityDelta) * 1000) / 1000;
+    const nextStock = Math.round(Number(product.current_stock) + quantityDelta);
 
     if (nextStock < 0) {
       throw new BadRequestException(
@@ -301,10 +307,10 @@ export class ProductsService {
     const category = Array.isArray(categoryRelation)
       ? categoryRelation[0]
       : categoryRelation;
-    const currentStock = Number(row.current_stock ?? 0);
+    const currentStock = roundQuantity(Number(row.current_stock ?? 0));
     const costPrice = Number(row.cost_price ?? 0);
     const salePrice = Number(row.sale_price ?? 0);
-    const minStockAlert = Number(row.min_stock_alert ?? 0);
+    const minStockAlert = roundQuantity(Number(row.min_stock_alert ?? 0));
 
     return {
       ...row,

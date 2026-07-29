@@ -29,6 +29,6 @@ import { ProductSalesService } from './product-sales.service';
     StockMovementsService,
     ProductSalesService,
   ],
-  exports: [ProductsService, ProductSalesService],
+  exports: [ProductsService, ProductSalesService, StockMovementsService],
 })
 export class InventoryModule {}

@@ -1,4 +1,12 @@
-import { IsIn, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export const STOCK_ADJUSTMENT_TYPES = [
   'ADJUSTMENT_IN',
@@ -16,8 +24,8 @@ export class CreateStockAdjustmentDto {
   @IsIn(STOCK_ADJUSTMENT_TYPES)
   type!: StockAdjustmentType;
 
-  @IsNumber()
-  @Min(0.001)
+  @IsInt()
+  @Min(1)
   quantity!: number;
 
   @IsString()

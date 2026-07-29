@@ -1,4 +1,6 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -6,7 +8,9 @@ import {
   IsString,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { ServiceProductItemDto } from './service-product-item.dto';
 
 export class UpdateServiceDto {
   @IsOptional()
@@ -50,4 +54,14 @@ export class UpdateServiceDto {
   @IsInt()
   @Min(0)
   loyaltyPointsEarned?: number | null;
+
+  /**
+   * Quando enviado (incluindo `[]`), substitui a ficha técnica.
+   * Omitir o campo preserva os vínculos atuais.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceProductItemDto)
+  products?: ServiceProductItemDto[];
 }

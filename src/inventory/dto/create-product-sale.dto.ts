@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -15,8 +16,8 @@ export class ProductSaleItemInputDto {
   @IsString()
   productId!: string;
 
-  @IsNumber()
-  @Min(0.001)
+  @IsInt()
+  @Min(1)
   quantity!: number;
 
   /** Sobrescreve products.sale_price para esta linha, quando informado. */

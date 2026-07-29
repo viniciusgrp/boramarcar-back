@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -44,7 +45,7 @@ export class CreateProductDto {
   salePrice!: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(0)
   minStockAlert?: number;
 

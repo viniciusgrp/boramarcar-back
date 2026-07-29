@@ -1,5 +1,6 @@
 import {
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -27,7 +28,7 @@ export class CreateStockEntryDto {
   @Min(0)
   unitCost!: number;
 
-  @IsNumber()
-  @Min(0.001)
+  @IsInt()
+  @Min(1)
   quantity!: number;
 }

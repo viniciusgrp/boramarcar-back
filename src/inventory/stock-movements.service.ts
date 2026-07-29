@@ -17,6 +17,7 @@ import {
   LotConsumption,
   selectLotsForConsumptionFefo,
 } from './utils/fefo-consumption.util';
+import { aggregateBomQuantitiesByProduct } from './utils/service-bom.util';
 
 export interface StockMovementFilters {
   productId?: string;
@@ -136,7 +137,7 @@ export class StockMovementsService {
 
     const currentStock = Number(product.current_stock);
     const currentCost = Number(product.cost_price);
-    const nextStock = Math.round((currentStock + dto.quantity) * 1000) / 1000;
+    const nextStock = Math.round(currentStock + dto.quantity);
     const newAverageCost =
       nextStock > 0
         ? Math.round(
@@ -343,6 +344,88 @@ export class StockMovementsService {
     return movements;
   }
 
+  /**
+   * Debita a ficha técnica (BOM) dos serviços do atendimento ao concluir.
+   * Idempotente: se já existir INTERNAL_USE_OUT para o appointment, não faz nada.
+   * Deve ser chamado ANTES de persistir o status COMPLETED.
+   */
+  async consumeAppointmentServiceBom(params: {
+    tenantId: string;
+    appointmentId: string;
+    serviceIds: string[];
+    professionalId?: string | null;
+    performedBy?: string | null;
+  }): Promise<StockMovement[]> {
+    if (params.serviceIds.length === 0) {
+      return [];
+    }
+
+    const { data: existingMovements, error: existingError } =
+      await this.supabaseService
+        .getClient()
+        .from('stock_movements')
+        .select('id')
+        .eq('tenant_id', params.tenantId)
+        .eq('appointment_id', params.appointmentId)
+        .eq('type', 'INTERNAL_USE_OUT')
+        .limit(1);
+
+    if (existingError) {
+      throw new InternalServerErrorException(existingError.message);
+    }
+
+    if ((existingMovements ?? []).length > 0) {
+      return [];
+    }
+
+    const { data: bomRows, error: bomError } = await this.supabaseService
+      .getClient()
+      .from('service_products')
+      .select('service_id, product_id, quantity')
+      .eq('tenant_id', params.tenantId)
+      .in('service_id', params.serviceIds);
+
+    if (bomError) {
+      throw new InternalServerErrorException(bomError.message);
+    }
+
+    const aggregated = aggregateBomQuantitiesByProduct(
+      (bomRows ?? []).map(
+        (row: {
+          service_id: string;
+          product_id: string;
+          quantity: number;
+        }) => ({
+          serviceId: row.service_id,
+          productId: row.product_id,
+          quantity: Number(row.quantity),
+        }),
+      ),
+    );
+
+    if (aggregated.length === 0) {
+      return [];
+    }
+
+    const movements: StockMovement[] = [];
+
+    for (const item of aggregated) {
+      const created = await this.consumeStock({
+        tenantId: params.tenantId,
+        productId: item.productId,
+        quantity: item.quantity,
+        type: 'INTERNAL_USE_OUT',
+        reason: 'Consumo automático da ficha técnica do serviço',
+        appointmentId: params.appointmentId,
+        professionalId: params.professionalId ?? null,
+        performedBy: params.performedBy ?? null,
+      });
+      movements.push(...created);
+    }
+
+    return movements;
+  }
+
   private async fetchConsumableLots(
     tenantId: string,
     productId: string,
@@ -383,10 +466,9 @@ export class StockMovementsService {
       throw new InternalServerErrorException(fetchError.message);
     }
 
-    const nextRemaining =
-      Math.round(
-        (Number(lot.quantity_remaining) - consumption.quantity) * 1000,
-      ) / 1000;
+    const nextRemaining = Math.round(
+      Number(lot.quantity_remaining) - consumption.quantity,
+    );
 
     const { error: updateError } = await this.supabaseService
       .getClient()
