@@ -27,6 +27,10 @@ import { UpdateProfessionalSelfDto } from './dto/update-professional-self.dto';
 import { UpdateProfessionalDto } from './dto/update-professional.dto';
 import { Professional } from './entities/professional.entity';
 import type { OwnerProfessionalMembershipResponse } from './entities/owner-professional-membership-response.entity';
+import {
+  toPublicProfessional,
+  type PublicProfessional,
+} from './entities/public-professional.entity';
 import { ProfessionalsService } from './professionals.service';
 
 @Controller('professionals')
@@ -39,12 +43,14 @@ export class ProfessionalsController {
   @Get()
   async findAllByTenant(
     @Query('tenantId') tenantId?: string,
-  ): Promise<Professional[]> {
+  ): Promise<PublicProfessional[]> {
     if (!tenantId) {
       throw new BadRequestException('Query parameter "tenantId" is required');
     }
 
-    return this.professionalsService.findAllByTenant(tenantId);
+    const professionals =
+      await this.professionalsService.findAllByTenant(tenantId);
+    return professionals.map(toPublicProfessional);
   }
 
   @Get('agenda')
@@ -143,7 +149,8 @@ export class ProfessionalsController {
   }
 
   @Get('managed')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async findManaged(
     @CurrentUser() user: User,
     @Query('archived') archived?: string,
@@ -155,7 +162,8 @@ export class ProfessionalsController {
   }
 
   @Get('managed/:id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async findManagedOne(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -165,7 +173,8 @@ export class ProfessionalsController {
   }
 
   @Post()
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async create(
     @CurrentUser() user: User,
     @Body() dto: CreateProfessionalDto,
@@ -179,7 +188,8 @@ export class ProfessionalsController {
   }
 
   @Put(':id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async update(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -195,7 +205,8 @@ export class ProfessionalsController {
   }
 
   @Delete(':id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async archive(
     @CurrentUser() user: User,
     @Param('id') id: string,

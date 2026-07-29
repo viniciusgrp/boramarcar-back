@@ -23,6 +23,10 @@ import { TenantsService } from '../tenants/tenants.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
+import {
+  toPublicService,
+  type PublicService,
+} from './entities/public-service.entity';
 import { ServicesService } from './services.service';
 
 @Controller('services')
@@ -35,16 +39,18 @@ export class ServicesController {
   @Get()
   async findAllByTenant(
     @Query('tenantId') tenantId?: string,
-  ): Promise<Service[]> {
+  ): Promise<PublicService[]> {
     if (!tenantId) {
       throw new BadRequestException('Query parameter "tenantId" is required');
     }
 
-    return this.servicesService.findAllByTenant(tenantId);
+    const services = await this.servicesService.findAllByTenant(tenantId);
+    return services.map(toPublicService);
   }
 
   @Get('managed')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async findManaged(@CurrentUser() user: User): Promise<Service[]> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.servicesService.findAllManagedByTenant(tenant.id);
@@ -60,7 +66,8 @@ export class ServicesController {
   }
 
   @Post()
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async create(
     @CurrentUser() user: User,
     @Body() dto: CreateServiceDto,
@@ -85,7 +92,8 @@ export class ServicesController {
   }
 
   @Put(':id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async update(
     @CurrentUser() user: User,
     @Param('id') id: string,
@@ -102,7 +110,8 @@ export class ServicesController {
   }
 
   @Delete(':id')
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async softDelete(
     @CurrentUser() user: User,
     @Param('id') id: string,

@@ -39,4 +39,6 @@ export interface Appointment {
   coupon_id?: string | null;
   coupon_discount_amount?: number | null;
   cancellation_requested_at?: string | null;
+  hold_expires_at?: string | null;
+  guest_access_token?: string | null;
 }

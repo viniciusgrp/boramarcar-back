@@ -667,7 +667,12 @@ export class SupportAssistantActionsService {
         .maybeSingle();
 
       if (error) {
-        throw new BadRequestException(error.message);
+        this.logger.error(
+          `Support assistant appointment lookup failed: ${error.message}`,
+        );
+        throw new BadRequestException(
+          'Não foi possível carregar o agendamento agora. Tente novamente.',
+        );
       }
       if (!data) {
         return { kind: 'none' };
@@ -725,7 +730,12 @@ export class SupportAssistantActionsService {
 
     const { data, error } = await query;
     if (error) {
-      throw new BadRequestException(error.message);
+      this.logger.error(
+        `Support assistant appointment list failed: ${error.message}`,
+      );
+      throw new BadRequestException(
+        'Não foi possível listar os agendamentos agora. Tente novamente.',
+      );
     }
 
     let rows = data ?? [];

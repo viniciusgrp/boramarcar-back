@@ -1,5 +1,6 @@
 import type { PublicTenant } from '../entities/public-tenant.entity';
 import type { Tenant } from '../entities/tenant.entity';
+import { hasTenantAdminAccess } from './tenant-access.util';
 
 export function toPublicTenant(tenant: Tenant): PublicTenant {
   return {
@@ -28,9 +29,7 @@ export function toPublicTenant(tenant: Tenant): PublicTenant {
     allow_customer_reschedule: tenant.allow_customer_reschedule,
     booking_acceptance_type: tenant.booking_acceptance_type,
     booking_slot_interval_minutes: tenant.booking_slot_interval_minutes,
-    subscription_status: tenant.subscription_status,
-    trial_ends_at: tenant.trial_ends_at,
-    plan_tier: tenant.plan_tier,
+    accepts_public_bookings: hasTenantAdminAccess(tenant),
     enable_referral_program: tenant.enable_referral_program,
     referrer_points_bonus: tenant.referrer_points_bonus,
     referee_points_bonus: tenant.referee_points_bonus,

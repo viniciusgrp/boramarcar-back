@@ -8,7 +8,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import { randomInt, randomBytes } from 'crypto';
+import { randomInt, randomBytes, timingSafeEqual } from 'crypto';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
@@ -611,9 +611,10 @@ export class AppointmentsService {
       ? addMinutes(new Date(), DEPOSIT_HOLD_MINUTES).toISOString()
       : null;
 
-    const guestAccessToken = authUserId
-      ? null
-      : randomBytes(32).toString('hex');
+    const guestAccessToken =
+      requiresDepositPayment || !authUserId
+        ? randomBytes(32).toString('hex')
+        : null;
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -728,6 +729,7 @@ export class AppointmentsService {
         tenantName: tenant.name,
         tenantSlug: tenant.slug,
         depositAmountBrl: booking.totalDepositAmount,
+        accessToken: guestAccessToken as string,
       });
     } catch (checkoutError: unknown) {
       await this.depositPaymentService.releasePendingDepositHold(appointment.id);
@@ -815,6 +817,16 @@ export class AppointmentsService {
 
   async releasePendingDepositHold(appointmentId: string): Promise<boolean> {
     return this.depositPaymentService.releasePendingDepositHold(appointmentId);
+  }
+
+  async releasePendingDepositHoldWithAccessToken(
+    appointmentId: string,
+    accessToken: string,
+  ): Promise<boolean> {
+    return this.depositPaymentService.releasePendingDepositHoldWithAccessToken(
+      appointmentId,
+      accessToken,
+    );
   }
 
   async markDepositRefunded(appointmentId: string): Promise<Appointment | null> {
@@ -2034,9 +2046,7 @@ export class AppointmentsService {
       .filter((row) => {
         const expected = tokenById.get(row.id);
         return Boolean(
-          expected &&
-            row.guest_access_token &&
-            row.guest_access_token === expected,
+          expected && this.guestAccessTokensMatch(row.guest_access_token, expected),
         );
       })
       .filter((row) => matchesCustomerAppointmentScope(row, params.scope, now))
@@ -2098,9 +2108,10 @@ export class AppointmentsService {
 
     if (
       !existing ||
-      !(existing as { guest_access_token?: string }).guest_access_token ||
-      (existing as { guest_access_token?: string }).guest_access_token !==
-        accessToken
+      !this.guestAccessTokensMatch(
+        (existing as { guest_access_token?: string }).guest_access_token,
+        accessToken,
+      )
     ) {
       throw new NotFoundException('Agendamento não encontrado.');
     }
@@ -2306,9 +2317,10 @@ export class AppointmentsService {
 
     if (
       !existing ||
-      !(existing as { guest_access_token?: string }).guest_access_token ||
-      (existing as { guest_access_token?: string }).guest_access_token !==
-        accessToken
+      !this.guestAccessTokensMatch(
+        (existing as { guest_access_token?: string }).guest_access_token,
+        accessToken,
+      )
     ) {
       throw new NotFoundException('Agendamento não encontrado.');
     }
@@ -3139,11 +3151,28 @@ export class AppointmentsService {
   }
 
   private mapAppointmentRow(row: Appointment): Appointment {
+    const { guest_access_token: _guestAccessToken, ...safeRow } = row;
+
     return {
-      ...row,
+      ...safeRow,
       payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
       commission_amount: Number(row.commission_amount ?? 0),
+      guest_access_token: null,
     };
+  }
+
+  private guestAccessTokensMatch(
+    expected: string | null | undefined,
+    provided: string | null | undefined,
+  ): boolean {
+    const left = expected?.trim() ?? '';
+    const right = provided?.trim() ?? '';
+
+    if (!left || !right || left.length !== right.length) {
+      return false;
+    }
+
+    return timingSafeEqual(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
   }
 
   private async deleteAppointmentCascade(

@@ -114,6 +114,7 @@ export class LoyaltyController {
   @Get('public/booking-feedback')
   async getBookingFeedback(
     @Query('appointmentId') appointmentId?: string,
+    @Query('accessToken') accessToken?: string,
   ): Promise<BookingLoyaltyFeedback> {
     if (!appointmentId?.trim()) {
       throw new BadRequestException(
@@ -121,8 +122,15 @@ export class LoyaltyController {
       );
     }
 
+    if (!accessToken?.trim()) {
+      throw new BadRequestException(
+        'Query parameter "accessToken" is required',
+      );
+    }
+
     return this.loyaltyService.getBookingLoyaltyFeedbackByAppointmentId(
       appointmentId.trim(),
+      accessToken.trim(),
     );
   }
 

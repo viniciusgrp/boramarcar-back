@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -33,6 +34,7 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Post('auth/signup')
+  @Throttle({ medium: { limit: 5, ttl: 60_000 } })
   registerWithEmail(
     @Body() dto: RegisterCustomerDto,
   ): Promise<{ success: true }> {

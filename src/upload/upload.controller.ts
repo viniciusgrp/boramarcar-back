@@ -14,6 +14,8 @@ import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { resolveAuthUserId } from '../auth/utils/resolve-auth-user-id.util';
 import { CustomersService } from '../customers/customers.service';
+import { Roles } from '../tenants/decorators/roles.decorator';
+import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { TenantsService } from '../tenants/tenants.service';
 import { MAX_FILE_SIZE_BYTES } from './upload.constants';
@@ -66,7 +68,8 @@ export class UploadController {
   }
 
   @Post()
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: MAX_FILE_SIZE_BYTES },

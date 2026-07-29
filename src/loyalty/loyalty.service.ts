@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { timingSafeEqual } from 'crypto';
 import { subDays } from 'date-fns';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateLoyaltyRewardDto } from './dto/create-loyalty-reward.dto';
@@ -310,12 +311,13 @@ export class LoyaltyService {
 
   async getBookingLoyaltyFeedbackByAppointmentId(
     appointmentId: string,
+    accessToken: string,
   ): Promise<BookingLoyaltyFeedback> {
     const { data: appointment, error: appointmentError } =
       await this.supabaseService
         .getClient()
         .from('appointments')
-        .select('tenant_id, total_price, customer_id')
+        .select('tenant_id, total_price, customer_id, guest_access_token')
         .eq('id', appointmentId)
         .maybeSingle();
 
@@ -325,6 +327,22 @@ export class LoyaltyService {
 
     if (!appointment) {
       throw new NotFoundException('Appointment not found');
+    }
+
+    const expected =
+      typeof appointment.guest_access_token === 'string'
+        ? appointment.guest_access_token.trim()
+        : '';
+    const provided = accessToken.trim();
+
+    if (
+      !expected ||
+      expected.length !== provided.length ||
+      !timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(provided, 'utf8'))
+    ) {
+      throw new ForbiddenException(
+        'Token de acesso inválido para este agendamento.',
+      );
     }
 
     const tenantId = appointment.tenant_id as string;
