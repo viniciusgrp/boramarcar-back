@@ -1,8 +1,11 @@
 import {
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
+import { timingSafeEqual } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { Appointment } from './entities/appointment.entity';
 import {
@@ -109,6 +112,10 @@ export class DepositPaymentService {
     return (data as Appointment | null) ?? null;
   }
 
+  /**
+   * Internal release (checkout creation failure, cron, Stripe expired webhook).
+   * Do not expose without an access-token check.
+   */
   async releasePendingDepositHold(appointmentId: string): Promise<boolean> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -124,6 +131,42 @@ export class DepositPaymentService {
     }
 
     return Boolean(data);
+  }
+
+  /**
+   * Public release: requires guest_access_token match (timing-safe).
+   */
+  async releasePendingDepositHoldWithAccessToken(
+    appointmentId: string,
+    accessToken: string,
+  ): Promise<boolean> {
+    const existing = await this.findById(appointmentId);
+
+    if (!existing) {
+      throw new NotFoundException('Agendamento não encontrado.');
+    }
+
+    const expected = existing.guest_access_token?.trim() ?? '';
+    const provided = accessToken.trim();
+
+    if (!expected || !this.tokensMatch(expected, provided)) {
+      throw new ForbiddenException(
+        'Token de acesso inválido para liberar este horário.',
+      );
+    }
+
+    return this.releasePendingDepositHold(appointmentId);
+  }
+
+  private tokensMatch(expected: string, provided: string): boolean {
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+
+    if (expectedBuffer.length !== providedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(expectedBuffer, providedBuffer);
   }
 
   async expireAbandonedDepositHolds(): Promise<number> {

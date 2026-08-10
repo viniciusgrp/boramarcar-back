@@ -68,12 +68,6 @@ export class CustomersService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
-    if (tenant.require_customer_email_confirmation) {
-      throw new BadRequestException(
-        'Este estabelecimento exige confirmação de e-mail antes do primeiro acesso.',
-      );
-    }
-
     const normalizedEmail = email?.trim().toLowerCase() ?? '';
 
     if (!normalizedEmail) {
@@ -91,7 +85,7 @@ export class CustomersService {
       .auth.admin.createUser({
         email: normalizedEmail,
         password,
-        email_confirm: true,
+        email_confirm: false,
       });
 
     if (authError || !authData.user) {
@@ -379,12 +373,27 @@ export class CustomersService {
       );
     }
 
-    const escaped = trimmed.replace(/[\\%_]/g, '\\$&');
-    const phoneDigits = trimmed.replace(/\D/g, '');
-    const filters = [`name.ilike.%${escaped}%`];
+    // Strip PostgREST filter metacharacters; keep letters/digits/spaces for name.
+    const safeName = trimmed
+      .replace(/[%_,.()\\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+    const phoneDigits = trimmed.replace(/\D/g, '').slice(0, 20);
+    const filters: string[] = [];
+
+    if (safeName.length >= 3) {
+      filters.push(`name.ilike.%${safeName}%`);
+    }
 
     if (phoneDigits.length >= 3) {
       filters.push(`phone.ilike.%${phoneDigits}%`);
+    }
+
+    if (filters.length === 0) {
+      throw new BadRequestException(
+        'Informe um nome ou telefone válido para buscar clientes.',
+      );
     }
 
     const { data, error } = await this.supabaseService

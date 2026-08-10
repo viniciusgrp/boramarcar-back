@@ -11,6 +11,7 @@ export interface Professional {
   contact_phone: string | null;
   avatar_url: string | null;
   commission_percent: number;
+  product_commission_percent: number | null;
   booking_acceptance_type: ProfessionalBookingAcceptanceType;
   is_active: boolean;
   deleted_at: string | null;

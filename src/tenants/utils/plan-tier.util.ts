@@ -74,3 +74,8 @@ export function canAccessDepositFeatures(
 export function canAccessLoyaltyFeatures(_planTier: PlanTier): boolean {
   return true;
 }
+
+/** Inventory (Estoque) is available on every plan for now; centralized here to gate later with one line. */
+export function canAccessInventoryFeatures(_planTier: PlanTier): boolean {
+  return true;
+}

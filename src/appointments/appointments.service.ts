@@ -8,7 +8,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import { randomInt, randomBytes } from 'crypto';
+import { randomInt, randomBytes, timingSafeEqual } from 'crypto';
 import type { ProfessionalBookingAcceptanceType } from '../booking/entities/booking-acceptance-type.type';
 import { resolveEffectiveBookingAcceptance } from '../booking/utils/resolve-booking-acceptance.util';
 import {
@@ -54,6 +54,8 @@ import {
 } from '../tenants/utils/tenant-user-scope.util';
 import { canAccessDepositFeatures } from '../tenants/utils/plan-tier.util';
 import { FinanceService } from '../finance/finance.service';
+import { StockMovementsService } from '../inventory/stock-movements.service';
+import { resolveAppointmentServiceIds } from '../inventory/utils/service-bom.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
@@ -178,6 +180,7 @@ export class AppointmentsService {
     private readonly couponsService: CouponsService,
     private readonly customersService: CustomersService,
     private readonly financeService: FinanceService,
+    private readonly stockMovementsService: StockMovementsService,
     private readonly mailService: MailService,
     private readonly depositPaymentService: DepositPaymentService,
     private readonly reviewsService: ReviewsService,
@@ -611,9 +614,10 @@ export class AppointmentsService {
       ? addMinutes(new Date(), DEPOSIT_HOLD_MINUTES).toISOString()
       : null;
 
-    const guestAccessToken = authUserId
-      ? null
-      : randomBytes(32).toString('hex');
+    const guestAccessToken =
+      requiresDepositPayment || !authUserId
+        ? randomBytes(32).toString('hex')
+        : null;
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -728,6 +732,7 @@ export class AppointmentsService {
         tenantName: tenant.name,
         tenantSlug: tenant.slug,
         depositAmountBrl: booking.totalDepositAmount,
+        accessToken: guestAccessToken as string,
       });
     } catch (checkoutError: unknown) {
       await this.depositPaymentService.releasePendingDepositHold(appointment.id);
@@ -815,6 +820,16 @@ export class AppointmentsService {
 
   async releasePendingDepositHold(appointmentId: string): Promise<boolean> {
     return this.depositPaymentService.releasePendingDepositHold(appointmentId);
+  }
+
+  async releasePendingDepositHoldWithAccessToken(
+    appointmentId: string,
+    accessToken: string,
+  ): Promise<boolean> {
+    return this.depositPaymentService.releasePendingDepositHoldWithAccessToken(
+      appointmentId,
+      accessToken,
+    );
   }
 
   async markDepositRefunded(appointmentId: string): Promise<Appointment | null> {
@@ -1722,6 +1737,26 @@ export class AppointmentsService {
       updatePayload.commission_amount = 0;
     }
 
+    if (isCompletingAppointment) {
+      const bomServiceIds = resolveAppointmentServiceIds({
+        appointmentServices: Array.isArray(existing.appointment_services)
+          ? existing.appointment_services
+          : [],
+        primaryServiceId:
+          typeof existing.service_id === 'string' ? existing.service_id : null,
+      });
+
+      await this.stockMovementsService.consumeAppointmentServiceBom({
+        tenantId,
+        appointmentId,
+        serviceIds: bomServiceIds,
+        professionalId:
+          typeof existing.professional_id === 'string'
+            ? existing.professional_id
+            : null,
+      });
+    }
+
     const { error: updateError } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -2034,9 +2069,7 @@ export class AppointmentsService {
       .filter((row) => {
         const expected = tokenById.get(row.id);
         return Boolean(
-          expected &&
-            row.guest_access_token &&
-            row.guest_access_token === expected,
+          expected && this.guestAccessTokensMatch(row.guest_access_token, expected),
         );
       })
       .filter((row) => matchesCustomerAppointmentScope(row, params.scope, now))
@@ -2098,9 +2131,10 @@ export class AppointmentsService {
 
     if (
       !existing ||
-      !(existing as { guest_access_token?: string }).guest_access_token ||
-      (existing as { guest_access_token?: string }).guest_access_token !==
-        accessToken
+      !this.guestAccessTokensMatch(
+        (existing as { guest_access_token?: string }).guest_access_token,
+        accessToken,
+      )
     ) {
       throw new NotFoundException('Agendamento não encontrado.');
     }
@@ -2306,9 +2340,10 @@ export class AppointmentsService {
 
     if (
       !existing ||
-      !(existing as { guest_access_token?: string }).guest_access_token ||
-      (existing as { guest_access_token?: string }).guest_access_token !==
-        accessToken
+      !this.guestAccessTokensMatch(
+        (existing as { guest_access_token?: string }).guest_access_token,
+        accessToken,
+      )
     ) {
       throw new NotFoundException('Agendamento não encontrado.');
     }
@@ -3139,11 +3174,28 @@ export class AppointmentsService {
   }
 
   private mapAppointmentRow(row: Appointment): Appointment {
+    const { guest_access_token: _guestAccessToken, ...safeRow } = row;
+
     return {
-      ...row,
+      ...safeRow,
       payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
       commission_amount: Number(row.commission_amount ?? 0),
+      guest_access_token: null,
     };
+  }
+
+  private guestAccessTokensMatch(
+    expected: string | null | undefined,
+    provided: string | null | undefined,
+  ): boolean {
+    const left = expected?.trim() ?? '';
+    const right = provided?.trim() ?? '';
+
+    if (!left || !right || left.length !== right.length) {
+      return false;
+    }
+
+    return timingSafeEqual(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
   }
 
   private async deleteAppointmentCascade(

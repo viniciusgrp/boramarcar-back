@@ -11,6 +11,7 @@ import {
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -44,6 +45,7 @@ export class TenantsController {
   ) {}
 
   @Post('register')
+  @Throttle({ medium: { limit: 5, ttl: 60_000 } })
   async register(
     @Body() dto: RegisterTenantDto,
   ): Promise<RegisterTenantResponseDto> {

@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { User } from '@supabase/supabase-js';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -36,6 +37,7 @@ export class BillingController {
   ) {}
 
   @Post('webhook')
+  @SkipThrottle()
   async handleWebhook(
     @Headers('stripe-signature') signature: string | undefined,
     @Req() request: RawBodyRequest<Request>,

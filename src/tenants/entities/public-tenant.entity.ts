@@ -1,10 +1,9 @@
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
-import type { PlanTier } from './plan-tier.type';
-import type { SubscriptionStatus } from './subscription-status.type';
 
 /**
  * Safe subset of Tenant exposed on public booking routes (GET /tenants/:slug).
- * Omits Stripe IDs, owner, payout prefs, and internal onboarding fields.
+ * Omits Stripe IDs, owner, payout prefs, plan/subscription commercial details,
+ * and internal onboarding fields. Use accepts_public_bookings instead of plan/trial.
  */
 export interface PublicTenant {
   id: string;
@@ -31,9 +30,8 @@ export interface PublicTenant {
   allow_customer_reschedule: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
-  subscription_status: SubscriptionStatus;
-  trial_ends_at: string | null;
-  plan_tier: PlanTier;
+  /** Server-computed: active subscription or trial (no plan/trial leak). */
+  accepts_public_bookings: boolean;
   enable_referral_program: boolean;
   referrer_points_bonus: number;
   referee_points_bonus: number;

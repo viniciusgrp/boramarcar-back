@@ -33,6 +33,12 @@ export class CreateProfessionalDto {
   commissionPercent?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  productCommissionPercent?: number;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 

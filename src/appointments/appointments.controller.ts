@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -345,17 +346,21 @@ export class AppointmentsController {
   }
 
   @Post('public/release-deposit-hold')
+  @Throttle({ medium: { limit: 10, ttl: 60_000 } })
   async releaseDepositHold(
     @Body() dto: ReleaseDepositHoldDto,
   ): Promise<{ released: boolean }> {
-    const released = await this.appointmentsService.releasePendingDepositHold(
-      dto.appointmentId,
-    );
+    const released =
+      await this.appointmentsService.releasePendingDepositHoldWithAccessToken(
+        dto.appointmentId,
+        dto.accessToken,
+      );
 
     return { released };
   }
 
   @Post('guest/lookup')
+  @Throttle({ medium: { limit: 20, ttl: 60_000 } })
   lookupGuestAppointments(
     @Body() dto: GuestAppointmentLookupDto,
   ): Promise<CustomerAppointment[]> {
@@ -377,6 +382,7 @@ export class AppointmentsController {
   }
 
   @Patch('guest/:id/request-cancellation')
+  @Throttle({ medium: { limit: 10, ttl: 60_000 } })
   requestGuestCancellation(
     @Param('id') id: string,
     @Body() dto: GuestAppointmentCancelDto,
@@ -395,6 +401,7 @@ export class AppointmentsController {
   }
 
   @Patch('guest/:id/reschedule')
+  @Throttle({ medium: { limit: 10, ttl: 60_000 } })
   rescheduleGuestAppointment(
     @Param('id') id: string,
     @Body() dto: GuestAppointmentRescheduleDto,
@@ -463,6 +470,7 @@ export class AppointmentsController {
   }
 
   @Post()
+  @Throttle({ medium: { limit: 20, ttl: 60_000 } })
   @UseGuards(OptionalAuthGuard)
   create(
     @Body() dto: CreateAppointmentDto,

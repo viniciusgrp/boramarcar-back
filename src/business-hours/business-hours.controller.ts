@@ -37,7 +37,8 @@ export class BusinessHoursController {
   }
 
   @Put()
-  @UseGuards(AuthGuard, TenantAccessGuard)
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER')
   async updateMine(
     @CurrentUser() user: User,
     @Body() dto: UpdateBusinessHoursDto,

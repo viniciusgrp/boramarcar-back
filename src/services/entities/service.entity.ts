@@ -1,3 +1,8 @@
+export interface ServiceProductLink {
+  product_id: string;
+  quantity: number;
+}
+
 export interface Service {
   id: string;
   tenant_id: string;
@@ -10,4 +15,6 @@ export interface Service {
   custom_commission_rate: number | null;
   loyalty_points_earned: number;
   is_active: boolean;
+  /** Present on managed catalog responses when BOM is loaded. */
+  service_products?: ServiceProductLink[];
 }

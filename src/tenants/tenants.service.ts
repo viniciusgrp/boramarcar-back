@@ -40,6 +40,7 @@ import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { normalizePayoutFrequency } from './entities/payout-frequency.type';
 import { NtfyService } from '../notifications/ntfy.service';
 import { TenantUsersService } from './tenant-users.service';
+import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
 import type { TenantUser } from './entities/tenant-user.entity';
@@ -254,7 +255,10 @@ export class TenantsService {
     }
 
     return {
-      tenant: accessContext.tenant,
+      tenant: toSafeTenantForRole(
+        accessContext.tenant,
+        accessContext.tenantUser.role,
+      ),
       membership: this.tenantUsersService.mapMembershipSummary(
         accessContext.tenantUser,
       ),
@@ -734,7 +738,7 @@ export class TenantsService {
       .auth.admin.createUser({
         email,
         password,
-        email_confirm: true,
+        email_confirm: false,
         user_metadata: { full_name: ownerName },
       });
 

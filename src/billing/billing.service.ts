@@ -58,6 +58,8 @@ export interface CreateDepositCheckoutSessionParams {
   tenantName: string;
   tenantSlug: string;
   depositAmountBrl: number;
+  /** Capability token included in Stripe cancel_url for public hold release. */
+  accessToken: string;
 }
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -406,8 +408,8 @@ export class BillingService {
 
     const successBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_SUCCESS_URL');
     const cancelBaseUrl = this.getRequiredUrl('STRIPE_DEPOSIT_CANCEL_URL');
-    const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}`;
-    const cancelUrl = `${cancelBaseUrl}${cancelBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}&tenant_slug=${encodeURIComponent(params.tenantSlug)}`;
+    const successUrl = `${successBaseUrl}${successBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}&access_token=${encodeURIComponent(params.accessToken)}`;
+    const cancelUrl = `${cancelBaseUrl}${cancelBaseUrl.includes('?') ? '&' : '?'}appointment_id=${params.appointmentId}&tenant_slug=${encodeURIComponent(params.tenantSlug)}&access_token=${encodeURIComponent(params.accessToken)}`;
 
     const unitAmountCents = Math.round(params.depositAmountBrl * 100);
     const applicationFeePercent =
