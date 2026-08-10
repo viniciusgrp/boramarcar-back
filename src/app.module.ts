@@ -24,6 +24,7 @@ import { TenantsModule } from './tenants/tenants.module';
 import { UploadModule } from './upload/upload.module';
 import { SupportModule } from './support/support.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { PlatformModule } from './platform/platform.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { InventoryModule } from './inventory/inventory.module';
     UploadModule,
     SupportModule,
     InventoryModule,
+    PlatformModule,
   ],
   controllers: [AppController],
   providers: [
