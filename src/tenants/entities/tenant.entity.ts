@@ -22,6 +22,9 @@ export interface Tenant {
   address_city: string | null;
   address_state: string | null;
   primary_color: string;
+  background_pattern_id: string;
+  background_pattern_color: string;
+  background_pattern_icon_count: number;
   admin_secondary_color_light: string;
   admin_secondary_color_dark: string;
   contact_phone: string | null;

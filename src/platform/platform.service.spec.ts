@@ -21,6 +21,9 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     address_city: null,
     address_state: null,
     primary_color: '#000000',
+    background_pattern_id: 'barbershop',
+    background_pattern_color: '#64748b',
+    background_pattern_icon_count: 22,
     admin_secondary_color_light: '#000000',
     admin_secondary_color_dark: '#ffffff',
     contact_phone: '11999990000',
@@ -152,7 +155,7 @@ describe('PlatformService', () => {
       buildTenant({
         id: 'c',
         subscription_status: 'INACTIVE',
-        trial_ends_at: '2026-08-20T00:00:00.000Z',
+        trial_ends_at: '2026-12-20T00:00:00.000Z',
         plan_tier: 'SOLO',
         created_at: '2026-06-05T00:00:00.000Z',
       }),

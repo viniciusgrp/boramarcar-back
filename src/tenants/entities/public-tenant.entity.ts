@@ -22,6 +22,9 @@ export interface PublicTenant {
   address_city: string | null;
   address_state: string | null;
   primary_color: string;
+  background_pattern_id: string;
+  background_pattern_color: string;
+  background_pattern_icon_count: number;
   contact_phone: string | null;
   deposit_feature_enabled: boolean;
   require_customer_email_confirmation: boolean;

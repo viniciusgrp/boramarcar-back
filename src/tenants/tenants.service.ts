@@ -38,6 +38,11 @@ import {
 } from './utils/admin-theme.util';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
 import { normalizePayoutFrequency } from './entities/payout-frequency.type';
+import {
+  normalizeBackgroundPatternColor,
+  normalizeBackgroundPatternIconCount,
+  normalizeBackgroundPatternId,
+} from './utils/background-pattern.util';
 import { NtfyService } from '../notifications/ntfy.service';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
@@ -144,6 +149,13 @@ function mapTenantRow(row: Tenant): Tenant {
     admin_secondary_color_dark: normalizeAdminThemeColor(
       row.admin_secondary_color_dark,
       DEFAULT_ADMIN_SECONDARY_COLOR_DARK,
+    ),
+    background_pattern_id: normalizeBackgroundPatternId(row.background_pattern_id),
+    background_pattern_color: normalizeBackgroundPatternColor(
+      row.background_pattern_color,
+    ),
+    background_pattern_icon_count: normalizeBackgroundPatternIconCount(
+      row.background_pattern_icon_count,
     ),
   };
 }
@@ -360,6 +372,15 @@ export class TenantsService {
             ? this.normalizeOptionalText(dto.description)
             : tenant.description,
         primary_color: dto.primaryColor.trim(),
+        background_pattern_id: normalizeBackgroundPatternId(
+          dto.backgroundPatternId ?? tenant.background_pattern_id,
+        ),
+        background_pattern_color: normalizeBackgroundPatternColor(
+          dto.backgroundPatternColor ?? tenant.background_pattern_color,
+        ),
+        background_pattern_icon_count: normalizeBackgroundPatternIconCount(
+          dto.backgroundPatternIconCount ?? tenant.background_pattern_icon_count,
+        ),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         logo_url: this.normalizeOptionalText(dto.logoUrl),
         banner_url: this.normalizeOptionalText(dto.bannerUrl),
