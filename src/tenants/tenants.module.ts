@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { NtfyModule } from '../notifications/ntfy.module';
+import { AffiliatesModule } from '../affiliates/affiliates.module';
 import { TenantsController } from './tenants.controller';
 import { TenantUsersController } from './tenant-users.controller';
 import { TenantAccessGuard } from './guards/tenant-access.guard';
@@ -12,7 +13,7 @@ import { InitialSetupService } from './initial-setup.service';
 import { TenantOpenGraphService } from './tenant-open-graph.service';
 
 @Module({
-  imports: [AuthModule, MailModule, NtfyModule],
+  imports: [AuthModule, MailModule, NtfyModule, AffiliatesModule],
   controllers: [TenantsController, TenantUsersController],
   providers: [
     TenantsService,

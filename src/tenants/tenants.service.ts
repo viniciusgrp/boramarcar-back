@@ -44,6 +44,7 @@ import {
   normalizeBackgroundPatternId,
 } from './utils/background-pattern.util';
 import { NtfyService } from '../notifications/ntfy.service';
+import { AffiliatesService } from '../affiliates/affiliates.service';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -195,6 +196,7 @@ export class TenantsService {
     private readonly supabaseService: SupabaseService,
     private readonly tenantUsersService: TenantUsersService,
     private readonly ntfyService: NtfyService,
+    private readonly affiliatesService: AffiliatesService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -777,6 +779,11 @@ export class TenantsService {
 
     const ownerId = authData.user.id;
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
+    const attribution = await this.affiliatesService.resolveAttributionForSignup({
+      affiliateCode: dto.affiliate_code,
+      signupEmail: email,
+      signupUserId: ownerId,
+    });
 
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
@@ -790,6 +797,8 @@ export class TenantsService {
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
         trial_starts_at: trialStartsAt,
         trial_ends_at: trialEndsAt,
+        referred_by_affiliate_id: attribution?.affiliateId ?? null,
+        affiliate_attributed_at: attribution?.attributedAt ?? null,
       })
       .select('*')
       .single();
@@ -854,6 +863,10 @@ export class TenantsService {
     }
 
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
+    const attribution = await this.affiliatesService.resolveAttributionForSignup({
+      affiliateCode: dto.affiliate_code,
+      signupUserId: userId,
+    });
 
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
@@ -867,6 +880,8 @@ export class TenantsService {
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
         trial_starts_at: trialStartsAt,
         trial_ends_at: trialEndsAt,
+        referred_by_affiliate_id: attribution?.affiliateId ?? null,
+        affiliate_attributed_at: attribution?.attributedAt ?? null,
       })
       .select('*')
       .single();

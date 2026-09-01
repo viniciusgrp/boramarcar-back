@@ -25,6 +25,7 @@ import { UploadModule } from './upload/upload.module';
 import { SupportModule } from './support/support.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PlatformModule } from './platform/platform.module';
+import { AffiliatesModule } from './affiliates/affiliates.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { PlatformModule } from './platform/platform.module';
     SupportModule,
     InventoryModule,
     PlatformModule,
+    AffiliatesModule,
   ],
   controllers: [AppController],
   providers: [

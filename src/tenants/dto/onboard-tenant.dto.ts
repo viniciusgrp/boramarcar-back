@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class OnboardTenantDto {
   @IsString()
@@ -12,4 +12,8 @@ export class OnboardTenantDto {
   @IsString()
   @IsNotEmpty()
   slug!: string;
+
+  @IsOptional()
+  @IsString()
+  affiliate_code?: string;
 }
