@@ -20,6 +20,9 @@ export function toPublicTenant(tenant: Tenant): PublicTenant {
     address_city: tenant.address_city,
     address_state: tenant.address_state,
     primary_color: tenant.primary_color,
+    background_pattern_id: tenant.background_pattern_id,
+    background_pattern_color: tenant.background_pattern_color,
+    background_pattern_icon_count: tenant.background_pattern_icon_count,
     contact_phone: tenant.contact_phone,
     deposit_feature_enabled: tenant.deposit_feature_enabled,
     require_customer_email_confirmation:

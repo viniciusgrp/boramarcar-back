@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsObject,
@@ -16,6 +17,8 @@ import { IsBrazilianPhone } from '../../common/validators/is-brazilian-phone.val
 import type { TenantBookingAcceptanceType } from '../../booking/entities/booking-acceptance-type.type';
 import type { CalendarCardPreferences } from '../entities/calendar-card-preferences.type';
 import type { PayoutFrequency } from '../entities/payout-frequency.type';
+import { BACKGROUND_PATTERN_IDS } from '../entities/background-pattern.type';
+import type { BackgroundPatternId } from '../entities/background-pattern.type';
 
 export class UpdateTenantDto {
   @IsString()
@@ -36,6 +39,21 @@ export class UpdateTenantDto {
   @IsString()
   @Matches(/^#[0-9a-fA-F]{6}$/)
   primaryColor!: string;
+
+  @IsOptional()
+  @IsIn([...BACKGROUND_PATTERN_IDS])
+  backgroundPatternId?: BackgroundPatternId;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  backgroundPatternColor?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(8)
+  @Max(32)
+  backgroundPatternIconCount?: number;
 
   @IsOptional()
   @IsString()
