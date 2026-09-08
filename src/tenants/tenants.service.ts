@@ -45,6 +45,7 @@ import {
 } from './utils/background-pattern.util';
 import { NtfyService } from '../notifications/ntfy.service';
 import { AffiliatesService } from '../affiliates/affiliates.service';
+import { EmailFunnelService } from '../email-funnel/email-funnel.service';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -197,6 +198,7 @@ export class TenantsService {
     private readonly tenantUsersService: TenantUsersService,
     private readonly ntfyService: NtfyService,
     private readonly affiliatesService: AffiliatesService,
+    private readonly emailFunnelService: EmailFunnelService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -825,6 +827,10 @@ export class TenantsService {
       ownerEmail: email,
     }).catch(() => undefined);
 
+    void this.sendTrialWelcomeEmail(tenantData.id as string, email).catch(
+      () => undefined,
+    );
+
     return mapTenantRow(tenantData as Tenant);
   }
 
@@ -912,6 +918,12 @@ export class TenantsService {
       ownerUserId: userId,
     }).catch(() => undefined);
 
+    void this.sendTrialWelcomeEmail(
+      tenantData.id as string,
+      undefined,
+      userId,
+    ).catch(() => undefined);
+
     return mapTenantRow(tenantData as Tenant);
   }
 
@@ -938,6 +950,30 @@ export class TenantsService {
       name: params.name,
       slug: params.slug,
       ownerEmail,
+    });
+  }
+
+  private async sendTrialWelcomeEmail(
+    tenantId: string,
+    ownerEmail?: string,
+    ownerUserId?: string,
+  ): Promise<void> {
+    let email = ownerEmail?.trim().toLowerCase();
+
+    if (!email && ownerUserId) {
+      const { data: authUser } = await this.supabaseService
+        .getClient()
+        .auth.admin.getUserById(ownerUserId);
+      email = authUser?.user?.email?.trim().toLowerCase();
+    }
+
+    if (!email) {
+      return;
+    }
+
+    await this.emailFunnelService.sendWelcomeForNewTenant({
+      tenantId,
+      ownerEmail: email,
     });
   }
 
