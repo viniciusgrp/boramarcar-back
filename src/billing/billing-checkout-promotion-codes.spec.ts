@@ -42,6 +42,7 @@ function buildService() {
     tenantsService,
     {} as SupabaseService,
     {} as AppointmentsService,
+    {} as import('../affiliates/affiliates.service').AffiliatesService,
   );
 
   return { service, tenantsService };

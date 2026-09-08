@@ -27,6 +27,7 @@ function buildBillingService(appointments: Partial<AppointmentsService>) {
     {} as TenantsService,
     supabaseService,
     appointments as AppointmentsService,
+    {} as import('../affiliates/affiliates.service').AffiliatesService,
   );
 }
 

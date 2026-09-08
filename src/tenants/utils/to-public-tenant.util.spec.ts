@@ -98,6 +98,8 @@ describe('toPublicTenant', () => {
       'initial_setup_settings_visited_at',
       'initial_setup_customer_account_decided_at',
       'initial_setup_booking_link_shared_at',
+      'referred_by_affiliate_id',
+      'affiliate_attributed_at',
       'created_at',
       'updated_at',
     ];

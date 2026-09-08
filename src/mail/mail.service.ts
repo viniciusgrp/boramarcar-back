@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -361,17 +361,24 @@ export class MailService {
     subject: string;
     html: string;
     replyTo?: string;
+    failIfUnconfigured?: boolean;
   }): Promise<void> {
     const recipient = params.to.trim().toLowerCase();
 
     if (!recipient) {
+      if (params.failIfUnconfigured) {
+        throw new BadRequestException('Informe um e-mail de destino.');
+      }
       return;
     }
 
     if (!this.transporter) {
-      this.logger.warn(
-        `Skipped email "${params.subject}" because SMTP is not configured.`,
-      );
+      const message =
+        'SMTP não está configurado. Preencha SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no backend.';
+      this.logger.warn(`Skipped email "${params.subject}" because SMTP is not configured.`);
+      if (params.failIfUnconfigured) {
+        throw new ServiceUnavailableException(message);
+      }
       return;
     }
 
@@ -380,9 +387,11 @@ export class MailService {
       this.configService.get<string>('SMTP_USER')?.trim();
 
     if (!from) {
-      this.logger.warn(
-        `Skipped email "${params.subject}" because SMTP_FROM is not configured.`,
-      );
+      const message = 'SMTP_FROM não está configurado no backend.';
+      this.logger.warn(`Skipped email "${params.subject}" because SMTP_FROM is not configured.`);
+      if (params.failIfUnconfigured) {
+        throw new ServiceUnavailableException(message);
+      }
       return;
     }
 
@@ -395,6 +404,15 @@ export class MailService {
       html: params.html,
       ...(replyTo ? { replyTo } : {}),
     });
+  }
+
+  async sendHtmlEmail(params: {
+    to: string;
+    subject: string;
+    html: string;
+    failIfUnconfigured?: boolean;
+  }): Promise<void> {
+    await this.sendMail(params);
   }
 
   private buildAppointmentEmailHtml(params: {

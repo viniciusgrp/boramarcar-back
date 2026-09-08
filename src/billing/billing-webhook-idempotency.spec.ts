@@ -42,6 +42,7 @@ function buildService(insertResult: InsertResult) {
     {} as TenantsService,
     supabaseService,
     {} as AppointmentsService,
+    {} as import('../affiliates/affiliates.service').AffiliatesService,
   );
 
   return { service, insertMock, deleteEqMock };

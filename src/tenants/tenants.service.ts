@@ -44,6 +44,8 @@ import {
   normalizeBackgroundPatternId,
 } from './utils/background-pattern.util';
 import { NtfyService } from '../notifications/ntfy.service';
+import { AffiliatesService } from '../affiliates/affiliates.service';
+import { EmailFunnelService } from '../email-funnel/email-funnel.service';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -195,6 +197,8 @@ export class TenantsService {
     private readonly supabaseService: SupabaseService,
     private readonly tenantUsersService: TenantUsersService,
     private readonly ntfyService: NtfyService,
+    private readonly affiliatesService: AffiliatesService,
+    private readonly emailFunnelService: EmailFunnelService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -777,6 +781,11 @@ export class TenantsService {
 
     const ownerId = authData.user.id;
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
+    const attribution = await this.affiliatesService.resolveAttributionForSignup({
+      affiliateCode: dto.affiliate_code,
+      signupEmail: email,
+      signupUserId: ownerId,
+    });
 
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
@@ -790,6 +799,8 @@ export class TenantsService {
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
         trial_starts_at: trialStartsAt,
         trial_ends_at: trialEndsAt,
+        referred_by_affiliate_id: attribution?.affiliateId ?? null,
+        affiliate_attributed_at: attribution?.attributedAt ?? null,
       })
       .select('*')
       .single();
@@ -815,6 +826,10 @@ export class TenantsService {
       slug: tenantData.slug as string,
       ownerEmail: email,
     }).catch(() => undefined);
+
+    void this.sendTrialWelcomeEmail(tenantData.id as string, email).catch(
+      () => undefined,
+    );
 
     return mapTenantRow(tenantData as Tenant);
   }
@@ -854,6 +869,10 @@ export class TenantsService {
     }
 
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
+    const attribution = await this.affiliatesService.resolveAttributionForSignup({
+      affiliateCode: dto.affiliate_code,
+      signupUserId: userId,
+    });
 
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
@@ -867,6 +886,8 @@ export class TenantsService {
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
         trial_starts_at: trialStartsAt,
         trial_ends_at: trialEndsAt,
+        referred_by_affiliate_id: attribution?.affiliateId ?? null,
+        affiliate_attributed_at: attribution?.attributedAt ?? null,
       })
       .select('*')
       .single();
@@ -897,6 +918,12 @@ export class TenantsService {
       ownerUserId: userId,
     }).catch(() => undefined);
 
+    void this.sendTrialWelcomeEmail(
+      tenantData.id as string,
+      undefined,
+      userId,
+    ).catch(() => undefined);
+
     return mapTenantRow(tenantData as Tenant);
   }
 
@@ -923,6 +950,30 @@ export class TenantsService {
       name: params.name,
       slug: params.slug,
       ownerEmail,
+    });
+  }
+
+  private async sendTrialWelcomeEmail(
+    tenantId: string,
+    ownerEmail?: string,
+    ownerUserId?: string,
+  ): Promise<void> {
+    let email = ownerEmail?.trim().toLowerCase();
+
+    if (!email && ownerUserId) {
+      const { data: authUser } = await this.supabaseService
+        .getClient()
+        .auth.admin.getUserById(ownerUserId);
+      email = authUser?.user?.email?.trim().toLowerCase();
+    }
+
+    if (!email) {
+      return;
+    }
+
+    await this.emailFunnelService.sendWelcomeForNewTenant({
+      tenantId,
+      ownerEmail: email,
     });
   }
 

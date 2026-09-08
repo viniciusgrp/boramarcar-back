@@ -13,6 +13,7 @@ import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import type { SubscriptionStatus } from '../tenants/entities/subscription-status.type';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
+import { AffiliatesService } from '../affiliates/affiliates.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -44,6 +45,10 @@ import {
   resolveConnectApplicationFeeAmount,
   resolveTenantDepositApplicationFeePercent,
 } from './utils/deposit-application-fee.util';
+import {
+  collectPlanPriceIds,
+  sumPlanLineAmountsCents,
+} from './utils/sum-plan-line-amounts.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -75,6 +80,7 @@ export class BillingService {
     private readonly supabaseService: SupabaseService,
     @Inject(forwardRef(() => AppointmentsService))
     private readonly appointmentsService: AppointmentsService,
+    private readonly affiliatesService: AffiliatesService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
 
@@ -219,9 +225,73 @@ export class BillingService {
       case 'account.updated':
         await this.handleConnectAccountUpdated(event.data.object);
         break;
+      case 'invoice.paid':
+        await this.handleInvoicePaid(event.data.object);
+        break;
+      case 'charge.refunded':
+        await this.handleChargeRefunded(event.data.object);
+        break;
       default:
         this.logger.debug(`Unhandled Stripe event type: ${event.type}`);
     }
+  }
+
+  private async handleInvoicePaid(
+    object: StripeEvent['data']['object'],
+  ): Promise<void> {
+    const invoice = object as {
+      id?: string;
+      customer?: string | { id: string } | null;
+      amount_paid?: number;
+      created?: number;
+      status_transitions?: { paid_at?: number | null } | null;
+      lines?: {
+        data?: Array<{
+          amount?: number | null;
+          price?: { id?: string | null } | null;
+        }>;
+      };
+    };
+
+    const stripeInvoiceId = invoice.id?.trim();
+    const stripeCustomerId = extractStripeId(invoice.customer);
+
+    if (!stripeInvoiceId || !stripeCustomerId) {
+      return;
+    }
+
+    const priceMap = buildStripePriceTierMap(this.configService);
+    const planGrossCents = sumPlanLineAmountsCents(
+      invoice.lines?.data ?? [],
+      collectPlanPriceIds(priceMap),
+    );
+    const paidAtUnix =
+      invoice.status_transitions?.paid_at ?? invoice.created ?? null;
+    const paidAtIso = paidAtUnix
+      ? new Date(paidAtUnix * 1000).toISOString()
+      : new Date().toISOString();
+
+    await this.affiliatesService.accruePaidPlanInvoice({
+      stripeInvoiceId,
+      stripeCustomerId,
+      amountPaid: invoice.amount_paid ?? 0,
+      planGrossCents,
+      paidAtIso,
+    });
+  }
+
+  private async handleChargeRefunded(
+    object: StripeEvent['data']['object'],
+  ): Promise<void> {
+    const charge = object as {
+      invoice?: string | { id: string } | null;
+    };
+    const invoiceId = extractStripeId(charge.invoice);
+    if (!invoiceId) {
+      return;
+    }
+
+    await this.affiliatesService.reverseInvoice(invoiceId, 'charge_refunded');
   }
 
   private resolvePlanTierFromStripePrice(
