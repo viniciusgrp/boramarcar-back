@@ -47,6 +47,7 @@ describe('TenantsController', () => {
       { findBySlug: jest.fn().mockResolvedValue(tenant) } as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const publicTenant = await controller.findBySlug('studio');
@@ -58,6 +59,7 @@ describe('TenantsController', () => {
   it('throws when the slug is unknown', async () => {
     const controller = new TenantsController(
       { findBySlug: jest.fn().mockResolvedValue(null) } as never,
+      {} as never,
       {} as never,
       {} as never,
     );

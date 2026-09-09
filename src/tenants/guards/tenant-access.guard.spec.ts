@@ -51,6 +51,29 @@ describe('TenantAccessGuard', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('rejects users pending establishment email confirmation', async () => {
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue(false),
+    } as unknown as Reflector;
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn(),
+    } as unknown as TenantsService;
+    const request = {
+      user: {
+        id: 'user-1',
+        email_confirmed_at: null,
+        user_metadata: { requires_email_verification: true },
+      },
+    } as unknown as AuthenticatedRequest;
+
+    await expect(
+      new TenantAccessGuard(tenantsService, reflector).canActivate(
+        buildContext(request),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tenantsService.findAccessContextByUserId).not.toHaveBeenCalled();
+  });
+
   it('rejects users without a tenant access context', async () => {
     const reflector = {
       getAllAndOverride: jest.fn().mockReturnValue(false),

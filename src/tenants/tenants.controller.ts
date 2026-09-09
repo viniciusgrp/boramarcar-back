@@ -9,12 +9,20 @@ import {
   Put,
   Patch,
   StreamableFile,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import type { User } from '@supabase/supabase-js';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RecaptchaService } from '../security/recaptcha.service';
+import { getClientIp } from '../security/client-ip.util';
+import {
+  RECAPTCHA_ACTION_TENANT_REGISTER,
+  RECAPTCHA_ACTION_TENANT_RESEND,
+} from '../security/signup-security.messages';
 import { AllowInactiveTenantAccess } from './decorators/allow-inactive-tenant-access.decorator';
 import { SkipTenantAccessCheck } from './decorators/skip-tenant-access-check.decorator';
 import { Roles } from './decorators/roles.decorator';
@@ -23,6 +31,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { OnboardTenantDto } from './dto/onboard-tenant.dto';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
+import { ResendEstablishmentVerificationDto } from './dto/resend-establishment-verification.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
@@ -42,15 +51,44 @@ export class TenantsController {
     private readonly tenantsService: TenantsService,
     private readonly initialSetupService: InitialSetupService,
     private readonly tenantOpenGraphService: TenantOpenGraphService,
+    private readonly recaptchaService: RecaptchaService,
   ) {}
 
   @Post('register')
   @Throttle({ medium: { limit: 5, ttl: 60_000 } })
   async register(
     @Body() dto: RegisterTenantDto,
+    @Req() request: Request,
   ): Promise<RegisterTenantResponseDto> {
-    const tenant = await this.tenantsService.register(dto);
-    return { tenant };
+    await this.recaptchaService.assertValidToken({
+      token: dto.recaptcha_token,
+      remoteIp: getClientIp(request),
+      expectedAction: RECAPTCHA_ACTION_TENANT_REGISTER,
+    });
+
+    const result = await this.tenantsService.register(dto);
+    return {
+      tenant: result.tenant,
+      requires_email_confirmation: result.requiresEmailConfirmation,
+      email: result.email,
+      otp_type: result.otpType,
+    };
+  }
+
+  @Post('register/resend-verification')
+  @Throttle({ medium: { limit: 1, ttl: 60_000 } })
+  async resendVerification(
+    @Body() dto: ResendEstablishmentVerificationDto,
+    @Req() request: Request,
+  ): Promise<{ ok: true }> {
+    await this.recaptchaService.assertValidToken({
+      token: dto.recaptcha_token,
+      remoteIp: getClientIp(request),
+      expectedAction: RECAPTCHA_ACTION_TENANT_RESEND,
+    });
+
+    await this.tenantsService.resendEstablishmentEmailVerification(dto.email);
+    return { ok: true };
   }
 
   @Get('slug-available/:slug')
@@ -64,6 +102,7 @@ export class TenantsController {
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
   async findMine(@CurrentUser() user: User): Promise<TenantMeResponse> {
+    this.tenantsService.assertEstablishmentEmailVerified(user);
     const response = await this.tenantsService.findMeResponse(user.id);
 
     if (!response) {

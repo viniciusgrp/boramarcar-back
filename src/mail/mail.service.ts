@@ -174,6 +174,48 @@ export class MailService {
     });
   }
 
+  async sendEstablishmentEmailVerification(params: {
+    recipientEmail: string;
+    ownerName: string;
+    code: string;
+    verifyUrl: string;
+  }): Promise<void> {
+    const ownerName = this.escapeHtml(params.ownerName.trim() || 'olá');
+    const code = this.escapeHtml(params.code);
+    const verifyUrl = this.escapeHtml(params.verifyUrl);
+    const email = this.escapeHtml(params.recipientEmail);
+
+    await this.sendMail({
+      to: params.recipientEmail,
+      subject: 'Confirme seu e-mail no BoraMarcar',
+      failIfUnconfigured: true,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">
+          <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af;">
+            BoraMarcar
+          </p>
+          <h1 style="font-size: 20px; margin: 0 0 12px;">Confirme seu e-mail</h1>
+          <p style="margin: 0 0 16px; color: #4b5563;">
+            ${ownerName}, use o código abaixo para ativar o estabelecimento cadastrado com
+            <strong>${email}</strong>. O código expira em 1 hora.
+          </p>
+          <p style="margin: 0 0 24px; font-size: 32px; font-weight: 700; letter-spacing: 0.24em; color: #111827;">
+            ${code}
+          </p>
+          <p style="margin: 0 0 16px; color: #4b5563;">
+            Ou clique no botão para confirmar automaticamente e entrar no painel.
+          </p>
+          <a
+            href="${verifyUrl}"
+            style="display: inline-block; background: #111827; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 12px; font-weight: 600;"
+          >
+            Confirmar e entrar
+          </a>
+        </div>
+      `,
+    });
+  }
+
   async sendTeamInvite(params: {
     recipientEmail: string;
     tenantName: string;
@@ -413,6 +455,14 @@ export class MailService {
     failIfUnconfigured?: boolean;
   }): Promise<void> {
     await this.sendMail(params);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   private buildAppointmentEmailHtml(params: {
