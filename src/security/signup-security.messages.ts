@@ -13,5 +13,9 @@ export const ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE =
 export const ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE =
   'Não foi possível enviar o e-mail de confirmação. Tente reenviar em instantes.';
 
+export const ESTABLISHMENT_EMAIL_IN_USE_MESSAGE =
+  'Este e-mail já está cadastrado.';
+
 export const RECAPTCHA_ACTION_TENANT_REGISTER = 'tenant_register';
 export const RECAPTCHA_ACTION_TENANT_RESEND = 'tenant_register_resend';
+export const RECAPTCHA_ACTION_TENANT_CHANGE_EMAIL = 'tenant_register_change_email';

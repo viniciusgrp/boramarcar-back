@@ -22,6 +22,7 @@ import { getClientIp } from '../security/client-ip.util';
 import {
   RECAPTCHA_ACTION_TENANT_REGISTER,
   RECAPTCHA_ACTION_TENANT_RESEND,
+  RECAPTCHA_ACTION_TENANT_CHANGE_EMAIL,
 } from '../security/signup-security.messages';
 import { AllowInactiveTenantAccess } from './decorators/allow-inactive-tenant-access.decorator';
 import { SkipTenantAccessCheck } from './decorators/skip-tenant-access-check.decorator';
@@ -32,6 +33,7 @@ import { OnboardTenantDto } from './dto/onboard-tenant.dto';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
 import { ResendEstablishmentVerificationDto } from './dto/resend-establishment-verification.dto';
+import { ChangeEstablishmentEmailDto } from './dto/change-establishment-email.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
@@ -89,6 +91,26 @@ export class TenantsController {
 
     await this.tenantsService.resendEstablishmentEmailVerification(dto.email);
     return { ok: true };
+  }
+
+  @Post('register/change-email')
+  @Throttle({ medium: { limit: 3, ttl: 60_000 } })
+  async changeRegisterEmail(
+    @Body() dto: ChangeEstablishmentEmailDto,
+    @Req() request: Request,
+  ): Promise<{ email: string; otp_type: string }> {
+    await this.recaptchaService.assertValidToken({
+      token: dto.recaptcha_token,
+      remoteIp: getClientIp(request),
+      expectedAction: RECAPTCHA_ACTION_TENANT_CHANGE_EMAIL,
+    });
+
+    const result = await this.tenantsService.changeEstablishmentSignupEmail(
+      dto.current_email,
+      dto.new_email,
+    );
+
+    return { email: result.email, otp_type: result.otpType };
   }
 
   @Get('slug-available/:slug')

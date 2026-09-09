@@ -52,6 +52,7 @@ import { isDisposableEmail } from '../security/disposable-email.util';
 import {
   DISPOSABLE_EMAIL_MESSAGE,
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
+  ESTABLISHMENT_EMAIL_IN_USE_MESSAGE,
   ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE,
   ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
 } from '../security/signup-security.messages';
@@ -1020,14 +1021,118 @@ export class TenantsService {
     });
   }
 
+  async changeEstablishmentSignupEmail(
+    currentEmailRaw: string,
+    newEmailRaw: string,
+  ): Promise<{ email: string; otpType: string }> {
+    const currentEmail = currentEmailRaw.trim().toLowerCase();
+    const newEmail = newEmailRaw.trim().toLowerCase();
+
+    if (!currentEmail || !newEmail) {
+      throw new BadRequestException('Informe o e-mail atual e o novo e-mail.');
+    }
+
+    if (isDisposableEmail(newEmail)) {
+      throw new BadRequestException(DISPOSABLE_EMAIL_MESSAGE);
+    }
+
+    if (currentEmail === newEmail) {
+      const otpType = await this.sendEstablishmentEmailVerification({
+        email: newEmail,
+        ownerName: '',
+        requirePendingFlag: true,
+      });
+      return { email: newEmail, otpType };
+    }
+
+    const pendingUser = await this.getPendingEstablishmentAuthUser(currentEmail);
+    const ownerName =
+      typeof pendingUser.user_metadata?.full_name === 'string'
+        ? pendingUser.user_metadata.full_name
+        : '';
+
+    const { error: updateError } = await this.supabaseService
+      .getClient()
+      .auth.admin.updateUserById(pendingUser.id, {
+        email: newEmail,
+        email_confirm: false,
+        user_metadata: {
+          ...pendingUser.user_metadata,
+          [REQUIRES_EMAIL_VERIFICATION_METADATA_KEY]: true,
+        },
+      });
+
+    if (updateError) {
+      const message = updateError.message?.toLowerCase() ?? '';
+
+      if (
+        message.includes('already') ||
+        message.includes('registered') ||
+        message.includes('exists')
+      ) {
+        throw new ConflictException(ESTABLISHMENT_EMAIL_IN_USE_MESSAGE);
+      }
+
+      throw new BadRequestException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    const otpType = await this.sendEstablishmentEmailVerification({
+      email: newEmail,
+      ownerName,
+      requirePendingFlag: true,
+    });
+
+    return { email: newEmail, otpType };
+  }
+
+  private resolveFrontendUrl(): string {
+    return (
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      'http://localhost:5173'
+    );
+  }
+
+  private async getPendingEstablishmentAuthUser(email: string) {
+    const frontendUrl = this.resolveFrontendUrl();
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+        options: {
+          redirectTo: `${frontendUrl.replace(/\/+$/, '')}/auth/callback?intent=tenant-register`,
+        },
+      });
+
+    const user = data?.user;
+
+    if (error || !user) {
+      throw new BadRequestException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    if (user.email_confirmed_at) {
+      throw new ConflictException(ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE);
+    }
+
+    if (!requiresEstablishmentEmailVerification(user)) {
+      throw new BadRequestException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    return user;
+  }
+
   private async sendEstablishmentEmailVerification(params: {
     email: string;
     ownerName: string;
     requirePendingFlag?: boolean;
   }): Promise<string> {
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL')?.trim() ||
-      'http://localhost:5173';
+    const frontendUrl = this.resolveFrontendUrl();
 
     const { data, error } = await this.supabaseService
       .getClient()
