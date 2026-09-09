@@ -14,6 +14,8 @@ import {
   hasTenantAdminAccess,
   TRIAL_EXPIRED_MESSAGE,
 } from '../utils/tenant-access.util';
+import { requiresEstablishmentEmailVerification } from '../../security/establishment-email-verification.util';
+import { ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE } from '../../security/signup-security.messages';
 
 @Injectable()
 export class TenantAccessGuard implements CanActivate {
@@ -41,6 +43,10 @@ export class TenantAccessGuard implements CanActivate {
 
     if (!request.user?.id) {
       throw new UnauthorizedException('Missing authenticated user');
+    }
+
+    if (requiresEstablishmentEmailVerification(request.user)) {
+      throw new ForbiddenException(ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE);
     }
 
     const tenantAccess = await this.tenantsService.findAccessContextByUserId(

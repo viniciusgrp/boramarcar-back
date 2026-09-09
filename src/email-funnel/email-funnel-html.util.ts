@@ -65,6 +65,57 @@ function stepsHtml(
     .join('');
 }
 
+function videoWatchLabel(videoUrl: string): string {
+  try {
+    const host = new URL(videoUrl).hostname.replace(/^www\./, '');
+    if (host === 'instagram.com' || host.endsWith('.instagram.com')) {
+      return 'Assistir no Instagram';
+    }
+    if (host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be') {
+      return 'Assistir no YouTube';
+    }
+  } catch {
+    // ignore invalid URLs
+  }
+  return 'Assistir o vídeo';
+}
+
+function buildVideoPreviewHtml(
+  videoUrl: string,
+  imageUrl: string | null,
+): string {
+  const safeVideoUrl = escapeHtml(videoUrl);
+  const watchLabel = escapeHtml(videoWatchLabel(videoUrl));
+  const thumbnail = imageUrl
+    ? `
+      <a href="${safeVideoUrl}" target="_blank" style="display:block;text-decoration:none;line-height:0;">
+        <img src="${escapeHtml(imageUrl)}" alt="${watchLabel}" width="416" height="234" border="0" style="display:block;width:100%;max-width:416px;height:auto;border:0;outline:none;" />
+      </a>`
+    : '';
+
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 8px;">
+      <tr>
+        <td style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;line-height:0;background-color:#111827;">
+          ${thumbnail}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:16px 0 8px;">
+          <table role="presentation" cellspacing="0" cellpadding="0">
+            <tr>
+              <td style="border-radius:12px;background-color:#111827;">
+                <a href="${safeVideoUrl}" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">
+                  ${watchLabel}
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
+
 export function buildEmailFunnelHtml(params: {
   step: EmailFunnelStepRow;
   frontendUrl: string;
@@ -85,10 +136,7 @@ export function buildEmailFunnelHtml(params: {
     : [];
 
   const mediaHtml = videoUrl
-    ? `
-      <a href="${escapeHtml(videoUrl)}" style="text-decoration:none;display:block;margin:0 0 8px;">
-        <img src="${escapeHtml(imageUrl ?? '')}" alt="Assista ao vídeo" width="416" style="display:block;width:100%;max-width:416px;height:auto;border:0;border-radius:12px;" />
-      </a>`
+    ? buildVideoPreviewHtml(videoUrl, imageUrl)
     : imageUrl
       ? `
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;">

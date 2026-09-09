@@ -46,6 +46,20 @@ import {
 import { NtfyService } from '../notifications/ntfy.service';
 import { AffiliatesService } from '../affiliates/affiliates.service';
 import { EmailFunnelService } from '../email-funnel/email-funnel.service';
+import { MailService } from '../mail/mail.service';
+import { ConfigService } from '@nestjs/config';
+import { isDisposableEmail } from '../security/disposable-email.util';
+import {
+  DISPOSABLE_EMAIL_MESSAGE,
+  ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
+  ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE,
+  ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+} from '../security/signup-security.messages';
+import {
+  REQUIRES_EMAIL_VERIFICATION_METADATA_KEY,
+  buildEstablishmentVerificationCallbackUrl,
+  requiresEstablishmentEmailVerification,
+} from '../security/establishment-email-verification.util';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -61,6 +75,13 @@ export interface TenantSubscriptionUpdatePayload {
   planTier?: PlanTier;
   trialEndsAt?: string | null;
   preSubscriptionTrialEndsAt?: string | null;
+}
+
+export interface RegisterTenantResult {
+  tenant: Tenant;
+  requiresEmailConfirmation: boolean;
+  email?: string;
+  otpType?: string;
 }
 
 function applySubscriptionTrialFields(
@@ -199,6 +220,8 @@ export class TenantsService {
     private readonly ntfyService: NtfyService,
     private readonly affiliatesService: AffiliatesService,
     private readonly emailFunnelService: EmailFunnelService,
+    private readonly mailService: MailService,
+    private readonly configService: ConfigService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -729,7 +752,7 @@ export class TenantsService {
     return { slug, available: !existing };
   }
 
-  async register(dto: RegisterTenantDto): Promise<Tenant> {
+  async register(dto: RegisterTenantDto): Promise<RegisterTenantResult> {
     const ownerName = dto.owner_name?.trim() ?? '';
     const email = dto.email?.trim().toLowerCase() ?? '';
     const password = dto.password ?? '';
@@ -738,6 +761,10 @@ export class TenantsService {
 
     if (!ownerName || !email || !password || !tenantName) {
       throw new BadRequestException('Preencha todos os campos obrigatórios.');
+    }
+
+    if (isDisposableEmail(email)) {
+      throw new BadRequestException(DISPOSABLE_EMAIL_MESSAGE);
     }
 
     if (password.length < 6) {
@@ -764,7 +791,10 @@ export class TenantsService {
         email,
         password,
         email_confirm: false,
-        user_metadata: { full_name: ownerName },
+        user_metadata: {
+          full_name: ownerName,
+          [REQUIRES_EMAIL_VERIFICATION_METADATA_KEY]: true,
+        },
       });
 
     if (authError || !authData.user) {
@@ -831,7 +861,17 @@ export class TenantsService {
       () => undefined,
     );
 
-    return mapTenantRow(tenantData as Tenant);
+    const otpType = await this.sendEstablishmentEmailVerification({
+      email,
+      ownerName,
+    });
+
+    return {
+      tenant: mapTenantRow(tenantData as Tenant),
+      requiresEmailConfirmation: true,
+      email,
+      otpType,
+    };
   }
 
   async onboardForAuthenticatedUser(
@@ -951,6 +991,106 @@ export class TenantsService {
       slug: params.slug,
       ownerEmail,
     });
+  }
+
+  assertEstablishmentEmailVerified(user: {
+    email_confirmed_at?: string | null;
+    user_metadata?: Record<string, unknown>;
+  }): void {
+    if (requiresEstablishmentEmailVerification(user)) {
+      throw new ForbiddenException(ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE);
+    }
+  }
+
+  async resendEstablishmentEmailVerification(emailRaw: string): Promise<void> {
+    const email = emailRaw.trim().toLowerCase();
+
+    if (!email) {
+      throw new BadRequestException('Informe seu e-mail.');
+    }
+
+    if (isDisposableEmail(email)) {
+      throw new BadRequestException(DISPOSABLE_EMAIL_MESSAGE);
+    }
+
+    await this.sendEstablishmentEmailVerification({
+      email,
+      ownerName: '',
+      requirePendingFlag: true,
+    });
+  }
+
+  private async sendEstablishmentEmailVerification(params: {
+    email: string;
+    ownerName: string;
+    requirePendingFlag?: boolean;
+  }): Promise<string> {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      'http://localhost:5173';
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.generateLink({
+        type: 'magiclink',
+        email: params.email,
+        options: {
+          redirectTo: `${frontendUrl.replace(/\/+$/, '')}/auth/callback?intent=tenant-register`,
+        },
+      });
+
+    const properties = data?.properties;
+    const user = data?.user;
+    const emailOtp = properties?.email_otp?.trim();
+    const hashedToken = properties?.hashed_token?.trim();
+    const otpType = properties?.verification_type?.trim() || 'magiclink';
+
+    if (error || !user || !emailOtp || !hashedToken) {
+      throw new InternalServerErrorException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    if (user.email_confirmed_at) {
+      throw new ConflictException(ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE);
+    }
+
+    if (
+      params.requirePendingFlag &&
+      !requiresEstablishmentEmailVerification(user)
+    ) {
+      throw new BadRequestException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    const verifyUrl = buildEstablishmentVerificationCallbackUrl(
+      frontendUrl,
+      hashedToken,
+      otpType,
+    );
+
+    try {
+      await this.mailService.sendEstablishmentEmailVerification({
+        recipientEmail: params.email,
+        ownerName: params.ownerName || 'olá',
+        code: emailOtp,
+        verifyUrl,
+      });
+    } catch (mailError) {
+      if (
+        mailError instanceof ConflictException ||
+        mailError instanceof BadRequestException
+      ) {
+        throw mailError;
+      }
+
+      throw new InternalServerErrorException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
+    return otpType;
   }
 
   private async sendTrialWelcomeEmail(
