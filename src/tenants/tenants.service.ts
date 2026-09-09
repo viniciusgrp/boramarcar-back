@@ -50,17 +50,32 @@ import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { isDisposableEmail } from '../security/disposable-email.util';
 import {
-  DISPOSABLE_EMAIL_MESSAGE,
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
   ESTABLISHMENT_EMAIL_IN_USE_MESSAGE,
   ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE,
+  ESTABLISHMENT_OTP_INVALID_MESSAGE,
+  ESTABLISHMENT_OTP_LOCKED_MESSAGE,
   ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+  DISPOSABLE_EMAIL_MESSAGE,
 } from '../security/signup-security.messages';
 import {
   REQUIRES_EMAIL_VERIFICATION_METADATA_KEY,
   buildEstablishmentVerificationCallbackUrl,
+  isSixDigitOtp,
+  normalizeEstablishmentOtpCode,
   requiresEstablishmentEmailVerification,
 } from '../security/establishment-email-verification.util';
+import {
+  ESTABLISHMENT_OTP_ATTEMPTS_KEY,
+  ESTABLISHMENT_OTP_EXPIRES_AT_KEY,
+  ESTABLISHMENT_OTP_HASH_KEY,
+  ESTABLISHMENT_OTP_MAX_ATTEMPTS,
+  ESTABLISHMENT_OTP_TTL_MS,
+  generateEstablishmentOtp,
+  hashEstablishmentOtp,
+  isEstablishmentOtpExpired,
+  readEstablishmentOtpAttempts,
+} from '../security/establishment-otp.util';
 import { TenantUsersService } from './tenant-users.service';
 import { toSafeTenantForRole } from './utils/to-safe-tenant.util';
 import type { TenantAccessContext } from './entities/tenant-access-context.entity';
@@ -1087,6 +1102,91 @@ export class TenantsService {
     return { email: newEmail, otpType };
   }
 
+  async verifyEstablishmentEmailCode(
+    emailRaw: string,
+    codeRaw: string,
+  ): Promise<{ hashedToken: string; otpType: string }> {
+    const email = emailRaw.trim().toLowerCase();
+    const code = normalizeEstablishmentOtpCode(codeRaw);
+
+    if (!email || !isSixDigitOtp(code)) {
+      throw new BadRequestException(ESTABLISHMENT_OTP_INVALID_MESSAGE);
+    }
+
+    const user = await this.getPendingEstablishmentAuthUser(email);
+    const metadata = this.readUserMetadata(user.user_metadata);
+    const attempts = readEstablishmentOtpAttempts(
+      metadata[ESTABLISHMENT_OTP_ATTEMPTS_KEY],
+    );
+
+    if (attempts >= ESTABLISHMENT_OTP_MAX_ATTEMPTS) {
+      throw new BadRequestException(ESTABLISHMENT_OTP_LOCKED_MESSAGE);
+    }
+
+    const expectedHash = metadata[ESTABLISHMENT_OTP_HASH_KEY];
+    const expired = isEstablishmentOtpExpired(
+      metadata[ESTABLISHMENT_OTP_EXPIRES_AT_KEY],
+    );
+    const matches =
+      typeof expectedHash === 'string' &&
+      expectedHash === hashEstablishmentOtp(user.id, code);
+
+    if (expired || !matches) {
+      await this.supabaseService.getClient().auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...metadata,
+          [ESTABLISHMENT_OTP_ATTEMPTS_KEY]: attempts + 1,
+        },
+      });
+      throw new BadRequestException(ESTABLISHMENT_OTP_INVALID_MESSAGE);
+    }
+
+    await this.supabaseService.getClient().auth.admin.updateUserById(user.id, {
+      email_confirm: true,
+      user_metadata: this.withoutOtpMetadata(metadata),
+    });
+
+    const frontendUrl = this.resolveFrontendUrl();
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+        options: {
+          redirectTo: `${frontendUrl.replace(/\/+$/, '')}/auth/callback?intent=tenant-register`,
+        },
+      });
+
+    const hashedToken = data?.properties?.hashed_token?.trim();
+    const otpType = data?.properties?.verification_type?.trim() || 'magiclink';
+
+    if (error || !hashedToken) {
+      throw new InternalServerErrorException(
+        'E-mail confirmado. Entre no painel com sua senha.',
+      );
+    }
+
+    return { hashedToken, otpType };
+  }
+
+  private readUserMetadata(metadata: unknown): Record<string, unknown> {
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+      return { ...(metadata as Record<string, unknown>) };
+    }
+
+    return {};
+  }
+
+  private withoutOtpMetadata(
+    metadata: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const next = { ...metadata };
+    delete next[ESTABLISHMENT_OTP_HASH_KEY];
+    delete next[ESTABLISHMENT_OTP_EXPIRES_AT_KEY];
+    delete next[ESTABLISHMENT_OTP_ATTEMPTS_KEY];
+    return next;
+  }
+
   private resolveFrontendUrl(): string {
     return (
       this.configService.get<string>('FRONTEND_URL')?.trim() ||
@@ -1146,11 +1246,10 @@ export class TenantsService {
 
     const properties = data?.properties;
     const user = data?.user;
-    const emailOtp = properties?.email_otp?.trim();
     const hashedToken = properties?.hashed_token?.trim();
     const otpType = properties?.verification_type?.trim() || 'magiclink';
 
-    if (error || !user || !emailOtp || !hashedToken) {
+    if (error || !user || !hashedToken) {
       throw new InternalServerErrorException(
         ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
       );
@@ -1169,6 +1268,29 @@ export class TenantsService {
       );
     }
 
+    const code = generateEstablishmentOtp();
+    const metadata = this.readUserMetadata(user.user_metadata);
+
+    const { error: otpStoreError } = await this.supabaseService
+      .getClient()
+      .auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...metadata,
+          [REQUIRES_EMAIL_VERIFICATION_METADATA_KEY]: true,
+          [ESTABLISHMENT_OTP_HASH_KEY]: hashEstablishmentOtp(user.id, code),
+          [ESTABLISHMENT_OTP_EXPIRES_AT_KEY]: new Date(
+            Date.now() + ESTABLISHMENT_OTP_TTL_MS,
+          ).toISOString(),
+          [ESTABLISHMENT_OTP_ATTEMPTS_KEY]: 0,
+        },
+      });
+
+    if (otpStoreError) {
+      throw new InternalServerErrorException(
+        ESTABLISHMENT_VERIFICATION_SEND_FAILED_MESSAGE,
+      );
+    }
+
     const verifyUrl = buildEstablishmentVerificationCallbackUrl(
       frontendUrl,
       hashedToken,
@@ -1179,7 +1301,7 @@ export class TenantsService {
       await this.mailService.sendEstablishmentEmailVerification({
         recipientEmail: params.email,
         ownerName: params.ownerName || 'olá',
-        code: emailOtp,
+        code,
         verifyUrl,
       });
     } catch (mailError) {

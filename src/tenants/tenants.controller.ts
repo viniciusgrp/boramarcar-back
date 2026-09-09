@@ -34,6 +34,7 @@ import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { RegisterTenantResponseDto } from './dto/register-tenant-response.dto';
 import { ResendEstablishmentVerificationDto } from './dto/resend-establishment-verification.dto';
 import { ChangeEstablishmentEmailDto } from './dto/change-establishment-email.dto';
+import { VerifyEstablishmentCodeDto } from './dto/verify-establishment-code.dto';
 import { SlugAvailabilityResponseDto } from './dto/slug-availability.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateTenantAdminThemeDto } from './dto/update-tenant-admin-theme.dto';
@@ -111,6 +112,19 @@ export class TenantsController {
     );
 
     return { email: result.email, otp_type: result.otpType };
+  }
+
+  @Post('register/verify-code')
+  @Throttle({ medium: { limit: 10, ttl: 60_000 } })
+  async verifyRegisterCode(
+    @Body() dto: VerifyEstablishmentCodeDto,
+  ): Promise<{ token_hash: string; otp_type: string }> {
+    const result = await this.tenantsService.verifyEstablishmentEmailCode(
+      dto.email,
+      dto.code,
+    );
+
+    return { token_hash: result.hashedToken, otp_type: result.otpType };
   }
 
   @Get('slug-available/:slug')

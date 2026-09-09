@@ -88,6 +88,32 @@ describe('TenantsService', () => {
     expect(updateUserById).not.toHaveBeenCalled();
   });
 
+  it('rejects a verification code that is not 6 digits', async () => {
+    const generateLink = jest.fn();
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: { admin: { generateLink } },
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.verifyEstablishmentEmailCode('dono@gmail.com', '12345678'),
+    ).rejects.toMatchObject({
+      message:
+        'Código inválido ou expirado. Solicite um novo código e tente de novo.',
+    });
+
+    expect(generateLink).not.toHaveBeenCalled();
+  });
+
   it('blocks panel access while establishment email is pending', () => {
     const service = buildService();
 
