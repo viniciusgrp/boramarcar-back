@@ -60,6 +60,34 @@ describe('TenantsService', () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
+  it('rejects changing a pending signup to a disposable email', async () => {
+    const generateLink = jest.fn();
+    const updateUserById = jest.fn();
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: { admin: { generateLink, updateUserById } },
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.changeEstablishmentSignupEmail(
+        'dono@gmail.com',
+        'errado@mailinator.com',
+      ),
+    ).rejects.toMatchObject({ message: DISPOSABLE_EMAIL_MESSAGE });
+
+    expect(generateLink).not.toHaveBeenCalled();
+    expect(updateUserById).not.toHaveBeenCalled();
+  });
+
   it('blocks panel access while establishment email is pending', () => {
     const service = buildService();
 
