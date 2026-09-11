@@ -1,4 +1,5 @@
 import './set-timezone';
+import { initializeSentry } from './common/sentry/sentry.init';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
@@ -7,6 +8,8 @@ import { SanitizedExceptionFilter } from './common/filters/sanitized-exception.f
 import { MulterExceptionFilter } from './upload/multer-exception.filter';
 
 async function bootstrap() {
+  initializeSentry();
+
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
   });
