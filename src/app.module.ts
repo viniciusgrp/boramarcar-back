@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { join } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CommonModule } from './common/common.module';
+import { SanitizedExceptionFilter } from './common/filters/sanitized-exception.filter';
 import { SupabaseModule } from './supabase/supabase.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { BillingModule } from './billing/billing.module';
@@ -52,6 +54,7 @@ import { EmailFunnelModule } from './email-funnel/email-funnel.module';
       },
     ]),
     SupabaseModule,
+    CommonModule,
     TenantsModule,
     ServicesModule,
     ProfessionalsModule,
@@ -79,6 +82,10 @@ import { EmailFunnelModule } from './email-funnel/email-funnel.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: SanitizedExceptionFilter,
     },
   ],
 })

@@ -1,15 +1,11 @@
 import './set-timezone';
-import { initializeSentry } from './common/sentry/sentry.init';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { SanitizedExceptionFilter } from './common/filters/sanitized-exception.filter';
 import { MulterExceptionFilter } from './upload/multer-exception.filter';
 
 async function bootstrap() {
-  initializeSentry();
-
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
   });
@@ -46,10 +42,7 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  app.useGlobalFilters(
-    new SanitizedExceptionFilter(),
-    new MulterExceptionFilter(),
-  );
+  app.useGlobalFilters(new MulterExceptionFilter());
 
   app.useGlobalPipes(
     new ValidationPipe({
