@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -48,6 +49,7 @@ import { AffiliatesService } from '../affiliates/affiliates.service';
 import { EmailFunnelService } from '../email-funnel/email-funnel.service';
 import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
+import { isProductionAppEnv } from '../common/app-env.util';
 import { isDisposableEmail } from '../security/disposable-email.util';
 import {
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
@@ -230,6 +232,8 @@ function normalizeOverlayOpacity(value: number | null | undefined): number {
 
 @Injectable()
 export class TenantsService {
+  private readonly logger = new Logger(TenantsService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly tenantUsersService: TenantUsersService,
@@ -801,15 +805,21 @@ export class TenantsService {
       );
     }
 
+    const skipEmailVerification = !isProductionAppEnv(
+      this.configService.get<string>('APP_ENV'),
+    );
+
     const { data: authData, error: authError } = await this.supabaseService
       .getClient()
       .auth.admin.createUser({
         email,
         password,
-        email_confirm: false,
+        email_confirm: skipEmailVerification,
         user_metadata: {
           full_name: ownerName,
-          [REQUIRES_EMAIL_VERIFICATION_METADATA_KEY]: true,
+          ...(skipEmailVerification
+            ? {}
+            : { [REQUIRES_EMAIL_VERIFICATION_METADATA_KEY]: true }),
         },
       });
 
@@ -876,6 +886,18 @@ export class TenantsService {
     void this.sendTrialWelcomeEmail(tenantData.id as string, email).catch(
       () => undefined,
     );
+
+    if (skipEmailVerification) {
+      this.logger.log(
+        'Skipping establishment email verification outside production.',
+      );
+
+      return {
+        tenant: mapTenantRow(tenantData as Tenant),
+        requiresEmailConfirmation: false,
+        email,
+      };
+    }
 
     const otpType = await this.sendEstablishmentEmailVerification({
       email,
@@ -1013,9 +1035,14 @@ export class TenantsService {
     email_confirmed_at?: string | null;
     user_metadata?: Record<string, unknown>;
   }): void {
-    if (requiresEstablishmentEmailVerification(user)) {
-      throw new ForbiddenException(ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE);
+    if (
+      !isProductionAppEnv(this.configService.get<string>('APP_ENV')) ||
+      !requiresEstablishmentEmailVerification(user)
+    ) {
+      return;
     }
+
+    throw new ForbiddenException(ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE);
   }
 
   async resendEstablishmentEmailVerification(emailRaw: string): Promise<void> {

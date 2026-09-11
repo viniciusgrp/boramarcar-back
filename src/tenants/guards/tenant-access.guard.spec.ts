@@ -1,5 +1,6 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import type { AuthenticatedRequest } from '../../auth/types/authenticated-request';
 import { ALLOW_INACTIVE_TENANT_ACCESS_KEY } from '../decorators/allow-inactive-tenant-access.decorator';
@@ -8,6 +9,12 @@ import type { TenantAccessContext } from '../entities/tenant-access-context.enti
 import type { TenantsService } from '../tenants.service';
 import { TRIAL_EXPIRED_MESSAGE } from '../utils/tenant-access.util';
 import { TenantAccessGuard } from './tenant-access.guard';
+
+function buildConfig(appEnv = 'production') {
+  return {
+    get: (key: string) => (key === 'APP_ENV' ? appEnv : undefined),
+  } as unknown as ConfigService;
+}
 
 function buildContext(
   request: Partial<AuthenticatedRequest>,
@@ -29,7 +36,11 @@ describe('TenantAccessGuard', () => {
     const tenantsService = {
       findAccessContextByUserId: jest.fn(),
     } as unknown as TenantsService;
-    const guard = new TenantAccessGuard(tenantsService, reflector);
+    const guard = new TenantAccessGuard(
+      tenantsService,
+      reflector,
+      buildConfig(),
+    );
 
     await expect(
       guard.canActivate(buildContext({} as AuthenticatedRequest)),
@@ -44,6 +55,7 @@ describe('TenantAccessGuard', () => {
     const guard = new TenantAccessGuard(
       { findAccessContextByUserId: jest.fn() } as unknown as TenantsService,
       reflector,
+      buildConfig(),
     );
 
     await expect(
@@ -67,9 +79,11 @@ describe('TenantAccessGuard', () => {
     } as unknown as AuthenticatedRequest;
 
     await expect(
-      new TenantAccessGuard(tenantsService, reflector).canActivate(
-        buildContext(request),
-      ),
+      new TenantAccessGuard(
+        tenantsService,
+        reflector,
+        buildConfig(),
+      ).canActivate(buildContext(request)),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(tenantsService.findAccessContextByUserId).not.toHaveBeenCalled();
   });
@@ -81,7 +95,11 @@ describe('TenantAccessGuard', () => {
     const tenantsService = {
       findAccessContextByUserId: jest.fn().mockResolvedValue(null),
     } as unknown as TenantsService;
-    const guard = new TenantAccessGuard(tenantsService, reflector);
+    const guard = new TenantAccessGuard(
+      tenantsService,
+      reflector,
+      buildConfig(),
+    );
     const request = {
       user: { id: 'user-1' },
     } as AuthenticatedRequest;
@@ -111,9 +129,11 @@ describe('TenantAccessGuard', () => {
     } as AuthenticatedRequest;
 
     await expect(
-      new TenantAccessGuard(tenantsService, reflector).canActivate(
-        buildContext(request),
-      ),
+      new TenantAccessGuard(
+        tenantsService,
+        reflector,
+        buildConfig(),
+      ).canActivate(buildContext(request)),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     const allowReflector = {
@@ -123,9 +143,11 @@ describe('TenantAccessGuard', () => {
     } as unknown as Reflector;
 
     await expect(
-      new TenantAccessGuard(tenantsService, allowReflector).canActivate(
-        buildContext(request),
-      ),
+      new TenantAccessGuard(
+        tenantsService,
+        allowReflector,
+        buildConfig(),
+      ).canActivate(buildContext(request)),
     ).resolves.toBe(true);
     expect(request.tenantAccess).toEqual(access);
   });
@@ -149,10 +171,44 @@ describe('TenantAccessGuard', () => {
     } as AuthenticatedRequest;
 
     await expect(
-      new TenantAccessGuard(tenantsService, reflector).canActivate(
-        buildContext(request),
-      ),
+      new TenantAccessGuard(
+        tenantsService,
+        reflector,
+        buildConfig(),
+      ).canActivate(buildContext(request)),
     ).resolves.toBe(true);
     expect(request.tenantAccess).toEqual(access);
+  });
+
+  it('skips establishment email verification outside production', async () => {
+    const access = {
+      tenant: {
+        subscription_status: 'ACTIVE',
+        trial_ends_at: null,
+      },
+      tenantUser: { role: 'OWNER' },
+    } as TenantAccessContext;
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue(false),
+    } as unknown as Reflector;
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn().mockResolvedValue(access),
+    } as unknown as TenantsService;
+    const request = {
+      user: {
+        id: 'user-1',
+        email_confirmed_at: null,
+        user_metadata: { requires_email_verification: true },
+      },
+    } as unknown as AuthenticatedRequest;
+
+    await expect(
+      new TenantAccessGuard(
+        tenantsService,
+        reflector,
+        buildConfig('hml'),
+      ).canActivate(buildContext(request)),
+    ).resolves.toBe(true);
+    expect(tenantsService.findAccessContextByUserId).toHaveBeenCalled();
   });
 });

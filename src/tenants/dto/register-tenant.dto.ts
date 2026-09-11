@@ -24,7 +24,7 @@ export class RegisterTenantDto {
   @IsString()
   affiliate_code?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  recaptcha_token!: string;
+  recaptcha_token?: string;
 }

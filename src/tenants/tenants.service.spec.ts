@@ -2,7 +2,13 @@ import { TenantsService } from './tenants.service';
 import { DISPOSABLE_EMAIL_MESSAGE } from '../security/signup-security.messages';
 import { ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE } from '../security/signup-security.messages';
 
-function buildService() {
+function buildConfig(appEnv?: string) {
+  return {
+    get: (key: string) => (key === 'APP_ENV' ? appEnv : undefined),
+  } as never;
+}
+
+function buildService(appEnv?: string) {
   return new TenantsService(
     { getClient: () => ({ auth: { admin: { createUser: jest.fn() } } }) } as never,
     {} as never,
@@ -10,7 +16,7 @@ function buildService() {
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
+    buildConfig(appEnv),
   );
 }
 
@@ -43,7 +49,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      buildConfig(),
     );
 
     await expect(
@@ -74,7 +80,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      buildConfig(),
     );
 
     await expect(
@@ -101,7 +107,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      buildConfig(),
     );
 
     await expect(
@@ -115,7 +121,7 @@ describe('TenantsService', () => {
   });
 
   it('blocks panel access while establishment email is pending', () => {
-    const service = buildService();
+    const service = buildService('production');
 
     expect(() =>
       service.assertEstablishmentEmailVerified({
@@ -128,6 +134,17 @@ describe('TenantsService', () => {
       service.assertEstablishmentEmailVerified({
         email_confirmed_at: null,
         user_metadata: {},
+      }),
+    ).not.toThrow();
+  });
+
+  it('skips establishment email verification outside production', () => {
+    const service = buildService('hml');
+
+    expect(() =>
+      service.assertEstablishmentEmailVerified({
+        email_confirmed_at: null,
+        user_metadata: { requires_email_verification: true },
       }),
     ).not.toThrow();
   });

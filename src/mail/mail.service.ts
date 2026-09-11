@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { MailAppointment } from './entities/mail-appointment.entity';
+import { isProductionAppEnv } from '../common/app-env.util';
 import { formatTenantAddress } from './utils/format-tenant-address.util';
 
 @Injectable()
@@ -411,6 +412,13 @@ export class MailService {
       if (params.failIfUnconfigured) {
         throw new BadRequestException('Informe um e-mail de destino.');
       }
+      return;
+    }
+
+    if (!isProductionAppEnv(this.configService.get<string>('APP_ENV'))) {
+      this.logger.warn(
+        `Skipped email "${params.subject}" because APP_ENV is not production.`,
+      );
       return;
     }
 

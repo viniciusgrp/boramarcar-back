@@ -1,10 +1,10 @@
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { IsEmail, IsOptional, IsString } from 'class-validator';
 
 export class ResendEstablishmentVerificationDto {
   @IsEmail()
   email!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  recaptcha_token!: string;
+  recaptcha_token?: string;
 }
