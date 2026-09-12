@@ -876,6 +876,11 @@ export class TenantsService {
     }
 
     await this.tenantUsersService.createOwnerMembership(tenantData.id, ownerId);
+    await this.seedDefaultOperationalSetup(
+      tenantData.id as string,
+      ownerId,
+      ownerName,
+    );
 
     void this.notifyNewTenantSignup({
       name: tenantData.name as string,
@@ -983,6 +988,11 @@ export class TenantsService {
     }
 
     await this.tenantUsersService.createOwnerMembership(tenantData.id, userId);
+    await this.seedDefaultOperationalSetup(
+      tenantData.id as string,
+      userId,
+      ownerName,
+    );
 
     await this.supabaseService
       .getClient()
@@ -1003,6 +1013,89 @@ export class TenantsService {
     ).catch(() => undefined);
 
     return mapTenantRow(tenantData as Tenant);
+  }
+
+  private async seedDefaultOperationalSetup(
+    tenantId: string,
+    ownerUserId: string,
+    ownerName: string,
+  ): Promise<void> {
+    try {
+      await this.seedDefaultBusinessHours(tenantId);
+      await this.seedOwnerProfessional(tenantId, ownerUserId, ownerName);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to seed default setup for tenant ${tenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async seedDefaultBusinessHours(tenantId: string): Promise<void> {
+    const defaultWeek = [
+      { dayOfWeek: 0, openTime: '09:00', closeTime: '18:00', isClosed: true },
+      { dayOfWeek: 1, openTime: '09:00', closeTime: '18:00', isClosed: false },
+      { dayOfWeek: 2, openTime: '09:00', closeTime: '18:00', isClosed: false },
+      { dayOfWeek: 3, openTime: '09:00', closeTime: '18:00', isClosed: false },
+      { dayOfWeek: 4, openTime: '09:00', closeTime: '18:00', isClosed: false },
+      { dayOfWeek: 5, openTime: '09:00', closeTime: '18:00', isClosed: false },
+      { dayOfWeek: 6, openTime: '09:00', closeTime: '14:00', isClosed: false },
+    ];
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('business_hours')
+      .insert(
+        defaultWeek.map((item) => ({
+          tenant_id: tenantId,
+          day_of_week: item.dayOfWeek,
+          open_time: item.openTime,
+          close_time: item.closeTime,
+          is_closed: item.isClosed,
+        })),
+      );
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  private async seedOwnerProfessional(
+    tenantId: string,
+    ownerUserId: string,
+    ownerName: string,
+  ): Promise<void> {
+    const name = ownerName.trim() || 'Profissional';
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('professionals')
+      .insert({
+        tenant_id: tenantId,
+        name,
+        contact_phone: null,
+        avatar_url: null,
+        commission_percent: 0,
+        product_commission_percent: null,
+        booking_acceptance_type: 'DEFAULT',
+        is_active: true,
+        deleted_at: null,
+      })
+      .select('id')
+      .single();
+
+    if (error || !data?.id) {
+      throw new InternalServerErrorException(
+        error?.message ?? 'Não foi possível criar o profissional do dono.',
+      );
+    }
+
+    await this.tenantUsersService.linkOwnerProfessionalMembership(
+      tenantId,
+      ownerUserId,
+      data.id as string,
+    );
   }
 
   private async notifyNewTenantSignup(params: {
