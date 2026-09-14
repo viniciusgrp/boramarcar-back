@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -83,6 +84,8 @@ function toPublicAffiliate(affiliate: Affiliate) {
 
 @Injectable()
 export class AffiliatesService {
+  private readonly logger = new Logger(AffiliatesService.name);
+
   constructor(private readonly supabaseService: SupabaseService) {}
 
   toPublicAffiliate(affiliate: Affiliate) {
@@ -207,6 +210,10 @@ export class AffiliatesService {
     }
 
     const ownerId = authData.user.id;
+    await this.supabaseService.getClient().auth.admin.updateUserById(ownerId, {
+      email_confirm: true,
+      password: dto.password,
+    });
     const now = new Date().toISOString();
 
     const { data, error } = await this.supabaseService
@@ -244,12 +251,36 @@ export class AffiliatesService {
           'Este e-mail ou código já está cadastrado como parceiro.',
         );
       }
-      throw new InternalServerErrorException(
-        error?.message ?? 'Não foi possível concluir o cadastro de parceiro.',
+      this.logger.error(
+        `Falha ao inserir parceiro: ${error?.code ?? ''} ${error?.message ?? ''}`,
+      );
+      throw new BadRequestException(
+        error?.message
+          ? `Não foi possível concluir o cadastro: ${error.message}`
+          : 'Não foi possível concluir o cadastro de parceiro.',
       );
     }
 
-    return toPublicAffiliate(mapAffiliate(data as Affiliate));
+    const session = await this.createAffiliateSession(email, dto.password);
+
+    return {
+      affiliate: toPublicAffiliate(mapAffiliate(data as Affiliate)),
+      session,
+    };
+  }
+
+  private async createAffiliateSession(
+    email: string,
+    password: string,
+  ): Promise<{ access_token: string; refresh_token: string } | null> {
+    try {
+      return await this.supabaseService.mintUserPasswordSession(email, password);
+    } catch (error) {
+      this.logger.warn(
+        `Login após cadastro de parceiro falhou: ${error instanceof Error ? error.message : 'erro'}`,
+      );
+      return null;
+    }
   }
 
   async updateMe(affiliateId: string, dto: UpdateAffiliateMeDto) {
