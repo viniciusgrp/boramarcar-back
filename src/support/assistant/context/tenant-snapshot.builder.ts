@@ -21,6 +21,8 @@ export interface SupportTenantSnapshot {
     hasStripeConnect: boolean;
     requiresStripeConnect: boolean;
     hasActiveSubscription: boolean;
+    hasExtraProfessional: boolean;
+    hasReviewedBusinessHours: boolean;
     isComplete: boolean;
   };
 }
@@ -47,6 +49,8 @@ export function buildSupportTenantSnapshot(
       hasStripeConnect: setup.hasStripeConnect,
       requiresStripeConnect: setup.requiresStripeConnect,
       hasActiveSubscription: setup.hasActiveSubscription,
+      hasExtraProfessional: setup.hasExtraProfessional,
+      hasReviewedBusinessHours: setup.hasReviewedBusinessHours,
       isComplete: setup.isComplete,
     },
   };

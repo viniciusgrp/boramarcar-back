@@ -21,6 +21,8 @@ const setup: InitialSetupStatus = {
   hasStripeConnect: false,
   requiresStripeConnect: false,
   hasActiveSubscription: true,
+  hasExtraProfessional: false,
+  hasReviewedBusinessHours: false,
 };
 
 const context = {

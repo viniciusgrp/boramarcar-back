@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { InitialSetupService } from './initial-setup.service';
+import { INITIAL_SETUP_CHECKLIST_VERSION } from './initial-setup.constants';
 import type { Tenant } from './entities/tenant.entity';
 import {
   createChainableQuery,
@@ -71,9 +72,97 @@ describe('InitialSetupService', () => {
     const status = await service.getStatusForUser('user-1');
 
     expect(status.isComplete).toBe(true);
+    expect(status.hasExtraProfessional).toBe(false);
+    expect(status.hasReviewedBusinessHours).toBe(false);
     expect(queriedTables).not.toContain('appointments');
     expect(from).toHaveBeenCalledWith('professionals');
     expect(from).toHaveBeenCalledWith('services');
     expect(from).toHaveBeenCalledWith('business_hours');
+  });
+
+  it('marks extra team only after a second professional exists', async () => {
+    const from = jest.fn((table: string) => {
+      if (table === 'professionals') {
+        return countQuery(2);
+      }
+      if (table === 'tenants') {
+        return createChainableQuery({ data: null, error: null });
+      }
+      return countQuery(1);
+    });
+
+    const supabaseService = createSupabaseServiceMock({ from });
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn().mockResolvedValue({
+        tenant: readyTenant(),
+      }),
+    };
+    const service = new InitialSetupService(
+      supabaseService as never,
+      tenantsService as never,
+    );
+
+    const status = await service.getStatusForUser('user-1');
+
+    expect(status.hasProfessional).toBe(true);
+    expect(status.hasExtraProfessional).toBe(true);
+  });
+
+  it('marks hours as reviewed only after the admin saves them', async () => {
+    const from = jest.fn((table: string) => {
+      if (table === 'tenants') {
+        return createChainableQuery({ data: null, error: null });
+      }
+      return countQuery(1);
+    });
+
+    const supabaseService = createSupabaseServiceMock({ from });
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn().mockResolvedValue({
+        tenant: readyTenant({
+          initial_setup_hours_reviewed_at: '2026-01-02T00:00:00.000Z',
+        }),
+      }),
+    };
+    const service = new InitialSetupService(
+      supabaseService as never,
+      tenantsService as never,
+    );
+
+    const status = await service.getStatusForUser('user-1');
+
+    expect(status.hasReviewedBusinessHours).toBe(true);
+  });
+
+  it('keeps growth items pending after essential setup is already persisted', async () => {
+    const from = jest.fn((table: string) => {
+      if (table === 'professionals') {
+        return countQuery(1);
+      }
+      return countQuery(1);
+    });
+
+    const supabaseService = createSupabaseServiceMock({ from });
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn().mockResolvedValue({
+        tenant: readyTenant({
+          initial_setup_completed_at: '2026-01-03T00:00:00.000Z',
+          initial_setup_version: INITIAL_SETUP_CHECKLIST_VERSION,
+          initial_setup_hours_reviewed_at: null,
+        }),
+      }),
+    };
+    const service = new InitialSetupService(
+      supabaseService as never,
+      tenantsService as never,
+    );
+
+    const status = await service.getStatusForUser('user-1');
+
+    expect(status.isComplete).toBe(true);
+    expect(status.isPersistedComplete).toBe(true);
+    expect(status.hasExtraProfessional).toBe(false);
+    expect(status.hasReviewedBusinessHours).toBe(false);
+    expect(from).toHaveBeenCalledWith('professionals');
   });
 });

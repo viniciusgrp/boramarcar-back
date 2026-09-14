@@ -14,7 +14,7 @@ O painel exibe um checklist de primeiros passos no Início (Dashboard), visível
 
 O checklist é considerado completo quando todos os passos obrigatórios (mais o de Stripe Connect, se aplicável) estão concluídos e a assinatura está ativa.
 
-O tour guiado cobre só os 3 primeiros passos (serviço, profissional e horários). Criar um agendamento de teste **não** faz parte do tour nem do checklist.
+O tour guiado cobre cadastrar o primeiro serviço e divulgar o link da página. Criar um agendamento de teste **não** faz parte do tour nem do checklist. Em **Pra crescer**, Revisar horários só completa depois de salvar em Configurações (o horário padrão do cadastro não marca o passo). Equipe extra só completa ao cadastrar um segundo profissional.
 
 ## Dicas práticas para responder dúvidas de onboarding
 

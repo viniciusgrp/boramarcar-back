@@ -14,4 +14,6 @@ export interface InitialSetupStatus {
   hasStripeConnect: boolean;
   requiresStripeConnect: boolean;
   hasActiveSubscription: boolean;
+  hasExtraProfessional: boolean;
+  hasReviewedBusinessHours: boolean;
 }

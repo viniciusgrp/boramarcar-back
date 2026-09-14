@@ -113,6 +113,8 @@ export class InitialSetupService {
     );
 
     if (this.isPersistedCompleteForCurrentVersion(tenant)) {
+      const professionalCount = await this.tenantProfessionalCount(tenant.id);
+
       return {
         checklistVersion: INITIAL_SETUP_CHECKLIST_VERSION,
         isComplete: true,
@@ -129,14 +131,20 @@ export class InitialSetupService {
         hasStripeConnect: true,
         requiresStripeConnect,
         hasActiveSubscription: true,
+        hasExtraProfessional: professionalCount > 1,
+        hasReviewedBusinessHours: Boolean(
+          tenant.initial_setup_hours_reviewed_at,
+        ),
       };
     }
 
-    const [hasProfessional, hasService, hasBusinessHours] = await Promise.all([
-      this.tenantHasProfessionals(tenant.id),
+    const [professionalCount, hasService, hasBusinessHours] = await Promise.all([
+      this.tenantProfessionalCount(tenant.id),
       this.tenantHasServices(tenant.id),
       this.tenantHasOpenBusinessHours(tenant.id),
     ]);
+    const hasProfessional = professionalCount > 0;
+    const hasExtraProfessional = professionalCount > 1;
     const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
     const hasContactPhone = Boolean(tenant.contact_phone?.trim());
     const hasAddress = Boolean(
@@ -152,6 +160,9 @@ export class InitialSetupService {
       tenant.initial_setup_customer_account_decided_at,
     );
     const hasReviewsEnabled = Boolean(tenant.reviews_enabled);
+    const hasReviewedBusinessHours = Boolean(
+      tenant.initial_setup_hours_reviewed_at,
+    );
     const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
     const hasActiveSubscription = isSubscriptionActive(
       tenant.subscription_status,
@@ -188,6 +199,8 @@ export class InitialSetupService {
       hasStripeConnect,
       requiresStripeConnect,
       hasActiveSubscription,
+      hasExtraProfessional,
+      hasReviewedBusinessHours,
     };
   }
 
@@ -213,18 +226,19 @@ export class InitialSetupService {
     }
   }
 
-  private async tenantHasProfessionals(tenantId: string): Promise<boolean> {
+  private async tenantProfessionalCount(tenantId: string): Promise<number> {
     const { count, error } = await this.supabaseService
       .getClient()
       .from('professionals')
       .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId);
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (count ?? 0) > 0;
+    return count ?? 0;
   }
 
   private async tenantHasServices(tenantId: string): Promise<boolean> {

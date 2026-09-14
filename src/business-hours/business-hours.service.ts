@@ -80,6 +80,18 @@ export class BusinessHoursService {
       throw new InternalServerErrorException(insertError.message);
     }
 
+    const { error: reviewedError } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        initial_setup_hours_reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId);
+
+    if (reviewedError) {
+      throw new InternalServerErrorException(reviewedError.message);
+    }
+
     return this.findAllByTenant(tenantId);
   }
 
