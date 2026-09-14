@@ -129,17 +129,14 @@ export class InitialSetupService {
         hasStripeConnect: true,
         requiresStripeConnect,
         hasActiveSubscription: true,
-        hasTestBooking: true,
       };
     }
 
-    const [hasProfessional, hasService, hasBusinessHours, hasTestBooking] =
-      await Promise.all([
-        this.tenantHasProfessionals(tenant.id),
-        this.tenantHasServices(tenant.id),
-        this.tenantHasOpenBusinessHours(tenant.id),
-        this.tenantHasAppointments(tenant.id),
-      ]);
+    const [hasProfessional, hasService, hasBusinessHours] = await Promise.all([
+      this.tenantHasProfessionals(tenant.id),
+      this.tenantHasServices(tenant.id),
+      this.tenantHasOpenBusinessHours(tenant.id),
+    ]);
     const hasBranding = Boolean(tenant.logo_url || tenant.banner_url);
     const hasContactPhone = Boolean(tenant.contact_phone?.trim());
     const hasAddress = Boolean(
@@ -168,7 +165,6 @@ export class InitialSetupService {
       hasVisitedSettings &&
       hasCustomerAccountPolicy &&
       hasReviewsEnabled &&
-      hasTestBooking &&
       (!requiresStripeConnect || hasStripeConnect) &&
       hasActiveSubscription;
 
@@ -192,7 +188,6 @@ export class InitialSetupService {
       hasStripeConnect,
       requiresStripeConnect,
       hasActiveSubscription,
-      hasTestBooking,
     };
   }
 
@@ -253,20 +248,6 @@ export class InitialSetupService {
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId)
       .eq('is_closed', false);
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (count ?? 0) > 0;
-  }
-
-  private async tenantHasAppointments(tenantId: string): Promise<boolean> {
-    const { count, error } = await this.supabaseService
-      .getClient()
-      .from('appointments')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);

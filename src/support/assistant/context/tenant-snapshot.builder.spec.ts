@@ -21,7 +21,6 @@ const setup: InitialSetupStatus = {
   hasStripeConnect: false,
   requiresStripeConnect: false,
   hasActiveSubscription: true,
-  hasTestBooking: false,
 };
 
 const context = {
