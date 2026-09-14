@@ -1,7 +1,52 @@
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+export const AFFILIATE_CODE_MIN_LENGTH = 4;
+export const AFFILIATE_CODE_MAX_LENGTH = 16;
+
+const RESERVED_AFFILIATE_CODES = new Set([
+  'ADMIN',
+  'API',
+  'APP',
+  'WWW',
+  'LOGIN',
+  'REGISTER',
+  'CADASTRO',
+  'AFILIADO',
+  'AFILIADOS',
+  'PARCEIRO',
+  'PARCEIROS',
+  'BORAMARCAR',
+  'PLATAFORMA',
+  'SUPPORT',
+  'SUPORTE',
+  'NULL',
+  'UNDEFINED',
+  'TEST',
+  'AFF',
+  'HOME',
+]);
+
 export function normalizeAffiliateCode(value: string | null | undefined): string {
   return (value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export function getAffiliateCodeValidationError(
+  value: string | null | undefined,
+): string | null {
+  const code = normalizeAffiliateCode(value);
+  if (!code) {
+    return 'Informe um código de indicação.';
+  }
+  if (
+    code.length < AFFILIATE_CODE_MIN_LENGTH ||
+    code.length > AFFILIATE_CODE_MAX_LENGTH
+  ) {
+    return `O código deve ter entre ${AFFILIATE_CODE_MIN_LENGTH} e ${AFFILIATE_CODE_MAX_LENGTH} caracteres.`;
+  }
+  if (RESERVED_AFFILIATE_CODES.has(code)) {
+    return 'Este código não está disponível.';
+  }
+  return null;
 }
 
 export function generateAffiliateCode(randomBytes: () => number = Math.random): string {

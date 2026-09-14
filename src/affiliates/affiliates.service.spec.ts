@@ -33,7 +33,20 @@ function buildAffiliate(overrides?: Partial<Affiliate>): Affiliate {
 }
 
 describe('AffiliatesService attribution and ledger', () => {
-  it('does not attribute inactive codes or self-referrals', async () => {
+  it('does not attribute empty codes', async () => {
+    const service = new AffiliatesService({
+      getClient: () => ({ from: jest.fn() }),
+    } as unknown as SupabaseService);
+
+    await expect(
+      service.resolveAttributionForSignup({
+        affiliateCode: '  ',
+        signupEmail: 'shop@test.com',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('rejects inactive codes and self-referrals', async () => {
     const affiliate = buildAffiliate({ status: 'pending_review' });
     const maybeSingle = jest.fn().mockResolvedValue({ data: affiliate, error: null });
     const supabaseService = {
@@ -52,7 +65,7 @@ describe('AffiliatesService attribution and ledger', () => {
         affiliateCode: 'BMTEST1',
         signupEmail: 'shop@test.com',
       }),
-    ).resolves.toBeNull();
+    ).rejects.toThrow('Código de indicação inválido ou inativo.');
 
     maybeSingle.mockResolvedValue({ data: buildAffiliate(), error: null });
     await expect(
@@ -60,7 +73,78 @@ describe('AffiliatesService attribution and ledger', () => {
         affiliateCode: 'BMTEST1',
         signupEmail: 'parceiro@test.com',
       }),
-    ).resolves.toBeNull();
+    ).rejects.toThrow('Este código de indicação não pode ser usado neste cadastro.');
+  });
+
+  it('attributes an active partner code', async () => {
+    const maybeSingle = jest.fn().mockResolvedValue({
+      data: buildAffiliate(),
+      error: null,
+    });
+    const service = new AffiliatesService({
+      getClient: () => ({
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseService);
+
+    await expect(
+      service.resolveAttributionForSignup({
+        affiliateCode: 'bm-test1',
+        signupEmail: 'shop@test.com',
+      }),
+    ).resolves.toEqual({
+      affiliateId: 'aff-1',
+      attributedAt: expect.any(String),
+    });
+  });
+
+  it('lets a partner change to a unique custom code', async () => {
+    const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+    const single = jest.fn().mockResolvedValue({
+      data: buildAffiliate({ code: 'JOAOBAR' }),
+      error: null,
+    });
+    const service = new AffiliatesService({
+      getClient: () => ({
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle }),
+          }),
+          update: () => ({
+            eq: () => ({
+              select: () => ({ single }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseService);
+
+    const result = await service.updateMe('aff-1', { code: 'joao-bar' });
+    expect(result.code).toBe('JOAOBAR');
+  });
+
+  it('rejects a custom code already used by another partner', async () => {
+    const maybeSingle = jest.fn().mockResolvedValue({
+      data: buildAffiliate({ id: 'aff-2', code: 'JOAOBAR' }),
+      error: null,
+    });
+    const service = new AffiliatesService({
+      getClient: () => ({
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseService);
+
+    await expect(service.updateMe('aff-1', { code: 'JOAOBAR' })).rejects.toThrow(
+      'Este código de indicação já está em uso.',
+    );
   });
 
   it('skips trial invoices and accrues 20 percent on paid plan invoices', async () => {

@@ -1,4 +1,4 @@
-import { generateAffiliateCode, isSelfReferral, normalizeAffiliateCode } from './affiliate-code.util';
+import { generateAffiliateCode, getAffiliateCodeValidationError, isSelfReferral, normalizeAffiliateCode } from './affiliate-code.util';
 import {
   canIncludeInPayout,
   roundCommissionCents,
@@ -14,6 +14,13 @@ describe('affiliate-code.util', () => {
     const code = generateAffiliateCode(() => 0);
     expect(code).toMatch(/^BM[A-Z0-9]{6}$/);
     expect(code.startsWith('BM')).toBe(true);
+  });
+
+  it('rejects short, reserved and empty custom codes', () => {
+    expect(getAffiliateCodeValidationError('')).toBe('Informe um código de indicação.');
+    expect(getAffiliateCodeValidationError('AB')).toContain('entre 4 e 16');
+    expect(getAffiliateCodeValidationError('admin')).toBe('Este código não está disponível.');
+    expect(getAffiliateCodeValidationError('joao-bar')).toBeNull();
   });
 
   it('detects self-referral by email, CPF or auth user', () => {
