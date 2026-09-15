@@ -5,7 +5,9 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
+import { isProductionAppEnv } from '../../common/app-env.util';
 import { AuthenticatedRequest } from '../../auth/types/authenticated-request';
 import { ALLOW_INACTIVE_TENANT_ACCESS_KEY } from '../decorators/allow-inactive-tenant-access.decorator';
 import { SKIP_TENANT_ACCESS_CHECK_KEY } from '../decorators/skip-tenant-access-check.decorator';
@@ -22,6 +24,7 @@ export class TenantAccessGuard implements CanActivate {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly reflector: Reflector,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -45,7 +48,10 @@ export class TenantAccessGuard implements CanActivate {
       throw new UnauthorizedException('Missing authenticated user');
     }
 
-    if (requiresEstablishmentEmailVerification(request.user)) {
+    if (
+      isProductionAppEnv(this.configService.get<string>('APP_ENV')) &&
+      requiresEstablishmentEmailVerification(request.user)
+    ) {
       throw new ForbiddenException(ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE);
     }
 

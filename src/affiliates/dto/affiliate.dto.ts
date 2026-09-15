@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 import type { AffiliatePixKeyType } from '../entities/affiliate.entity';
@@ -19,7 +20,7 @@ export class RegisterAffiliateDto {
   email!: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 
   @IsString()
@@ -64,6 +65,11 @@ export class RegisterAffiliateDto {
   @IsBoolean()
   @Equals(true)
   ack_no_employment!: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  code?: string;
 }
 
 export class UpdateAffiliateMeDto {
@@ -88,6 +94,12 @@ export class UpdateAffiliateMeDto {
   @IsOptional()
   @IsIn(['cpf', 'cnpj', 'email', 'phone', 'random'])
   pix_key_type?: AffiliatePixKeyType;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(16)
+  code?: string;
 }
 
 export class TrackAffiliateClickDto {

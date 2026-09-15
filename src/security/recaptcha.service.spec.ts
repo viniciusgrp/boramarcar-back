@@ -18,15 +18,31 @@ describe('RecaptchaService', () => {
     jest.restoreAllMocks();
   });
 
-  it('rejects when the secret or token is missing', async () => {
-    const service = buildService({});
+  it('skips verification in development and HML', async () => {
+    const development = buildService({ APP_ENV: 'development' });
+    const hml = buildService({
+      APP_ENV: 'hml',
+      RECAPTCHA_SECRET_KEY: 'secret',
+    });
+
+    await expect(development.assertValidToken({ token: undefined })).resolves.toBeUndefined();
+    await expect(hml.assertValidToken({ token: '   ' })).resolves.toBeUndefined();
+    await expect(buildService({}).assertValidToken({ token: undefined })).resolves.toBeUndefined();
+  });
+
+  it('rejects when production is missing the secret or token', async () => {
+    const withoutSecret = buildService({ APP_ENV: 'production' });
+    const withoutToken = buildService({
+      APP_ENV: 'production',
+      RECAPTCHA_SECRET_KEY: 'secret',
+    });
 
     await expect(
-      service.assertValidToken({ token: 'abc' }),
+      withoutSecret.assertValidToken({ token: 'abc' }),
     ).rejects.toMatchObject({ message: RECAPTCHA_FAILED_MESSAGE });
 
     await expect(
-      service.assertValidToken({ token: '   ' }),
+      withoutToken.assertValidToken({ token: '   ' }),
     ).rejects.toMatchObject({ message: RECAPTCHA_FAILED_MESSAGE });
   });
 
@@ -36,6 +52,7 @@ describe('RecaptchaService', () => {
     }) as unknown as typeof fetch;
 
     const service = buildService({
+      APP_ENV: 'production',
       RECAPTCHA_SECRET_KEY: 'secret',
       RECAPTCHA_MIN_SCORE: '0.5',
     });
@@ -53,7 +70,10 @@ describe('RecaptchaService', () => {
       json: async () => ({ success: false, 'error-codes': ['invalid-input-response'] }),
     }) as unknown as typeof fetch;
 
-    const service = buildService({ RECAPTCHA_SECRET_KEY: 'secret' });
+    const service = buildService({
+      APP_ENV: 'production',
+      RECAPTCHA_SECRET_KEY: 'secret',
+    });
 
     await expect(
       service.assertValidToken({ token: 'bad' }),
@@ -66,7 +86,10 @@ describe('RecaptchaService', () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const service = buildService({ RECAPTCHA_SECRET_KEY: 'secret' });
+    const service = buildService({
+      APP_ENV: 'production',
+      RECAPTCHA_SECRET_KEY: 'secret',
+    });
 
     await expect(
       service.assertValidToken({
@@ -82,7 +105,10 @@ describe('RecaptchaService', () => {
   it('rejects when siteverify is unreachable', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('network')) as unknown as typeof fetch;
 
-    const service = buildService({ RECAPTCHA_SECRET_KEY: 'secret' });
+    const service = buildService({
+      APP_ENV: 'production',
+      RECAPTCHA_SECRET_KEY: 'secret',
+    });
 
     await expect(
       service.assertValidToken({ token: 'ok-token' }),

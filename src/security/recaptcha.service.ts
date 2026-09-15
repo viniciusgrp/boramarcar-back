@@ -4,6 +4,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isProductionAppEnv } from '../common/app-env.util';
 import { RECAPTCHA_FAILED_MESSAGE } from './signup-security.messages';
 
 interface RecaptchaSiteVerifyResponse {
@@ -27,7 +28,11 @@ export class RecaptchaService {
     remoteIp?: string;
     expectedAction?: string;
   }): Promise<void> {
-    const secret = this.configService.get<string>('RECAPTCHA_SECRET_KEY')?.trim();
+    if (!this.isEnforced()) {
+      return;
+    }
+
+    const secret = this.readSecret();
     const token = params.token?.trim();
 
     if (!secret || !token) {
@@ -78,6 +83,20 @@ export class RecaptchaService {
     ) {
       throw new BadRequestException(RECAPTCHA_FAILED_MESSAGE);
     }
+  }
+
+  private isEnforced(): boolean {
+    return isProductionAppEnv(this.configService.get<string>('APP_ENV'));
+  }
+
+  private readSecret(): string | undefined {
+    const secret = this.configService.get<string>('RECAPTCHA_SECRET_KEY')?.trim();
+
+    if (!secret || secret.startsWith('replace_with_')) {
+      return undefined;
+    }
+
+    return secret;
   }
 
   private readMinScore(): number {

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class OnboardTenantDto {
   @IsString()
@@ -15,5 +15,6 @@ export class OnboardTenantDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(16)
   affiliate_code?: string;
 }

@@ -5,6 +5,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 @Injectable()
 export class SupabaseService implements OnModuleInit {
   private client!: SupabaseClient;
+  private url!: string;
+  private serviceRoleKey!: string;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -19,11 +21,34 @@ export class SupabaseService implements OnModuleInit {
     }
 
     this.assertServiceRoleKey(key);
+    this.url = url;
+    this.serviceRoleKey = key;
 
     this.client = createClient(url, key, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+      global: {
+        fetch: (input, init) => {
+          const requestUrl =
+            typeof input === 'string'
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : input.url;
+          const headers = new Headers(init?.headers);
+
+          if (
+            requestUrl.includes('/rest/v1/') ||
+            requestUrl.includes('/auth/v1/admin')
+          ) {
+            headers.set('Authorization', `Bearer ${key}`);
+            headers.set('apikey', key);
+          }
+
+          return fetch(input, { ...init, headers });
+        },
       },
     });
   }
@@ -50,5 +75,40 @@ export class SupabaseService implements OnModuleInit {
 
   getClient(): SupabaseClient {
     return this.client;
+  }
+
+  /**
+   * Issues a user session without mutating the shared service_role client.
+   * Signing in on getClient() would make later PostgREST calls run as the
+   * user and hit RLS on tables revoked from authenticated/anon.
+   */
+  async mintUserPasswordSession(
+    email: string,
+    password: string,
+  ): Promise<{ access_token: string; refresh_token: string } | null> {
+    const ephemeral = createClient(this.url, this.serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    try {
+      const { data, error } = await ephemeral.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error || !data.session?.access_token || !data.session.refresh_token) {
+        return null;
+      }
+
+      return {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      };
+    } finally {
+      await ephemeral.auth.signOut({ scope: 'local' });
+    }
   }
 }

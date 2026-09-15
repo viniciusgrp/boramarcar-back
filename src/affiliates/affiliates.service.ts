@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -22,6 +23,7 @@ import type {
 } from './entities/affiliate.entity';
 import {
   generateAffiliateCode,
+  getAffiliateCodeValidationError,
   isSelfReferral,
   normalizeAffiliateCode,
 } from './utils/affiliate-code.util';
@@ -82,6 +84,8 @@ function toPublicAffiliate(affiliate: Affiliate) {
 
 @Injectable()
 export class AffiliatesService {
+  private readonly logger = new Logger(AffiliatesService.name);
+
   constructor(private readonly supabaseService: SupabaseService) {}
 
   toPublicAffiliate(affiliate: Affiliate) {
@@ -135,7 +139,9 @@ export class AffiliatesService {
 
     const affiliate = await this.findByCode(code);
     if (!affiliate || affiliate.status !== 'active') {
-      return null;
+      throw new BadRequestException(
+        'Código de indicação inválido ou inativo.',
+      );
     }
 
     if (
@@ -147,7 +153,9 @@ export class AffiliatesService {
         signupUserId: params.signupUserId,
       })
     ) {
-      return null;
+      throw new BadRequestException(
+        'Este código de indicação não pode ser usado neste cadastro.',
+      );
     }
 
     return {
@@ -180,6 +188,8 @@ export class AffiliatesService {
       throw new BadRequestException('Informe um CNPJ válido ou deixe em branco.');
     }
 
+    const code = await this.resolveSignupCode(dto.code);
+
     const { data: authData, error: authError } = await this.supabaseService
       .getClient()
       .auth.admin.createUser({
@@ -200,7 +210,10 @@ export class AffiliatesService {
     }
 
     const ownerId = authData.user.id;
-    const code = await this.allocateUniqueCode();
+    await this.supabaseService.getClient().auth.admin.updateUserById(ownerId, {
+      email_confirm: true,
+      password: dto.password,
+    });
     const now = new Date().toISOString();
 
     const { data, error } = await this.supabaseService
@@ -234,14 +247,40 @@ export class AffiliatesService {
     if (error || !data) {
       await this.supabaseService.getClient().auth.admin.deleteUser(ownerId);
       if (error?.code === '23505') {
-        throw new ConflictException('Este e-mail já está cadastrado como parceiro.');
+        throw new ConflictException(
+          'Este e-mail ou código já está cadastrado como parceiro.',
+        );
       }
-      throw new InternalServerErrorException(
-        error?.message ?? 'Não foi possível concluir o cadastro de parceiro.',
+      this.logger.error(
+        `Falha ao inserir parceiro: ${error?.code ?? ''} ${error?.message ?? ''}`,
+      );
+      throw new BadRequestException(
+        error?.message
+          ? `Não foi possível concluir o cadastro: ${error.message}`
+          : 'Não foi possível concluir o cadastro de parceiro.',
       );
     }
 
-    return toPublicAffiliate(mapAffiliate(data as Affiliate));
+    const session = await this.createAffiliateSession(email, dto.password);
+
+    return {
+      affiliate: toPublicAffiliate(mapAffiliate(data as Affiliate)),
+      session,
+    };
+  }
+
+  private async createAffiliateSession(
+    email: string,
+    password: string,
+  ): Promise<{ access_token: string; refresh_token: string } | null> {
+    try {
+      return await this.supabaseService.mintUserPasswordSession(email, password);
+    } catch (error) {
+      this.logger.warn(
+        `Login após cadastro de parceiro falhou: ${error instanceof Error ? error.message : 'erro'}`,
+      );
+      return null;
+    }
   }
 
   async updateMe(affiliateId: string, dto: UpdateAffiliateMeDto) {
@@ -268,6 +307,9 @@ export class AffiliatesService {
     if (dto.pix_key_type) {
       patch.pix_key_type = dto.pix_key_type;
     }
+    if (dto.code !== undefined) {
+      patch.code = await this.ensureAvailableCustomCode(dto.code, affiliateId);
+    }
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -278,6 +320,9 @@ export class AffiliatesService {
       .single();
 
     if (error || !data) {
+      if (error?.code === '23505') {
+        throw new ConflictException('Este código de indicação já está em uso.');
+      }
       throw new InternalServerErrorException(
         error?.message ?? 'Não foi possível atualizar os dados.',
       );
@@ -785,6 +830,32 @@ export class AffiliatesService {
     }
 
     return data ? mapAffiliate(data as Affiliate) : null;
+  }
+
+  private async resolveSignupCode(requested?: string | null): Promise<string> {
+    if (!normalizeAffiliateCode(requested)) {
+      return this.allocateUniqueCode();
+    }
+
+    return this.ensureAvailableCustomCode(requested);
+  }
+
+  private async ensureAvailableCustomCode(
+    requested: string | null | undefined,
+    currentAffiliateId?: string,
+  ): Promise<string> {
+    const code = normalizeAffiliateCode(requested);
+    const validationError = getAffiliateCodeValidationError(code);
+    if (validationError) {
+      throw new BadRequestException(validationError);
+    }
+
+    const existing = await this.findByCode(code);
+    if (existing && existing.id !== currentAffiliateId) {
+      throw new ConflictException('Este código de indicação já está em uso.');
+    }
+
+    return code;
   }
 
   private async allocateUniqueCode(): Promise<string> {

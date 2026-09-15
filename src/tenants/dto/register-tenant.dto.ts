@@ -1,4 +1,11 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class RegisterTenantDto {
   @IsString()
@@ -22,9 +29,10 @@ export class RegisterTenantDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(16)
   affiliate_code?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  recaptcha_token!: string;
+  recaptcha_token?: string;
 }

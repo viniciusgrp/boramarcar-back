@@ -14,6 +14,7 @@ import {
   stripePeriodEndToIso,
 } from '../billing/utils/stripe-period-end.util';
 import type {
+  PlatformApiErrorEvent,
   PlatformGrowthPoint,
   PlatformSummaryResponse,
   PlatformTenantDetail,
@@ -115,12 +116,13 @@ export class PlatformService {
       ? await this.resolveUserEmail(tenant.owner_id)
       : null;
 
-    const [usage, loyaltyActive, loginActivity, subscriptionExtras] =
+    const [usage, loyaltyActive, loginActivity, subscriptionExtras, recentApiErrors] =
       await Promise.all([
         this.computeUsage(tenant.id),
         this.isLoyaltyActive(tenant.id),
         this.resolveLoginActivity(tenant.id, tenant.owner_id),
         this.resolveStripeSubscriptionExtras(tenant.stripe_subscription_id),
+        this.fetchRecentApiErrors(tenant.id),
       ]);
 
     return {
@@ -165,6 +167,7 @@ export class PlatformService {
         initialSetupCompleted: Boolean(tenant.initial_setup_completed_at),
       },
       loginActivity,
+      recentApiErrors,
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,
       accessLabel: resolvePlatformAccessLabel(tenant),
@@ -450,6 +453,35 @@ export class PlatformService {
     );
 
     return { ownerLastSignInAt, teamLastSignInAt, teamUsersWithLogin };
+  }
+
+  private async fetchRecentApiErrors(
+    tenantId: string,
+  ): Promise<PlatformApiErrorEvent[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('api_error_events')
+      .select(
+        'id, method, path, status_code, exception_name, message, created_at',
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      this.logger.warn(`Failed to load api_error_events: ${error.message}`);
+      return [];
+    }
+
+    return (data ?? []).map((row) => ({
+      id: row.id as string,
+      method: row.method as string,
+      path: row.path as string,
+      statusCode: row.status_code as number,
+      exceptionName: (row.exception_name as string | null) ?? null,
+      message: (row.message as string | null) ?? null,
+      createdAt: row.created_at as string,
+    }));
   }
 
   private async resolveUserLastSignIn(userId: string): Promise<string | null> {

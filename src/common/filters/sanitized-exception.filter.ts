@@ -6,20 +6,31 @@ import {
   HttpStatus,
   Injectable,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import * as Sentry from '@sentry/nestjs';
 import type { AuthenticatedRequest } from '../../auth/types/authenticated-request';
+import { ApiErrorEventsService } from '../api-errors/api-error-events.service';
+import {
+  extractExceptionMessage,
+  extractExceptionName,
+  extractExceptionStack,
+} from '../api-errors/api-error-event.util';
 import { sanitizeApiPath } from '../utils/sanitize-path.util';
 
 /**
  * Hides internal error details (Postgres/Supabase messages, stacks) from clients.
- * Logs the real message server-side and reports 5xx errors to Sentry with tenant context.
+ * Logs the real message server-side and persists 5xx errors in api_error_events.
  */
 @Injectable()
 @Catch()
 export class SanitizedExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(SanitizedExceptionFilter.name);
+
+  constructor(
+    @Optional()
+    private readonly apiErrorEventsService?: ApiErrorEventsService,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -32,9 +43,6 @@ export class SanitizedExceptionFilter implements ExceptionFilter {
       request?.tenantAccess?.tenant?.id ||
       (typeof request?.params?.tenantId === 'string'
         ? request.params.tenantId
-        : undefined) ||
-      (typeof request?.headers?.['x-tenant-id'] === 'string'
-        ? request.headers['x-tenant-id']
         : undefined);
     const userId = request?.user?.id;
 
@@ -49,7 +57,13 @@ export class SanitizedExceptionFilter implements ExceptionFilter {
             : JSON.stringify(exceptionResponse);
         this.logger.error(detail, exception.stack);
 
-        this.reportToSentry(exception, { path, method, tenantId, userId });
+        this.persistError(exception, {
+          path,
+          method,
+          tenantId,
+          userId,
+          statusCode: status,
+        });
 
         response.status(status).json({
           statusCode: status,
@@ -67,14 +81,19 @@ export class SanitizedExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    const message =
-      exception instanceof Error ? exception.message : 'Unknown error';
+    const message = extractExceptionMessage(exception);
     this.logger.error(
       message,
       exception instanceof Error ? exception.stack : undefined,
     );
 
-    this.reportToSentry(exception, { path, method, tenantId, userId });
+    this.persistError(exception, {
+      path,
+      method,
+      tenantId,
+      userId,
+      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+    });
 
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -83,29 +102,31 @@ export class SanitizedExceptionFilter implements ExceptionFilter {
     });
   }
 
-  private reportToSentry(
+  private persistError(
     exception: unknown,
     context: {
       path: string;
       method: string;
       tenantId?: string;
       userId?: string;
+      statusCode: number;
     },
   ): void {
-    try {
-      Sentry.withScope((scope) => {
-        scope.setTag('path', context.path);
-        scope.setTag('method', context.method);
-        if (context.tenantId) {
-          scope.setTag('tenant_id', context.tenantId);
-        }
-        if (context.userId) {
-          scope.setUser({ id: context.userId });
-        }
-        Sentry.captureException(exception);
-      });
-    } catch {
-      // Silencioso para nunca interromper a resposta HTTP
+    if (!this.apiErrorEventsService) {
+      return;
     }
+
+    void this.apiErrorEventsService
+      .record({
+        tenantId: context.tenantId,
+        userId: context.userId,
+        method: context.method,
+        path: context.path,
+        statusCode: context.statusCode,
+        exceptionName: extractExceptionName(exception),
+        message: extractExceptionMessage(exception),
+        stack: extractExceptionStack(exception),
+      })
+      .catch(() => undefined);
   }
 }

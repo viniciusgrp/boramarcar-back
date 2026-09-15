@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { IsEmail, IsOptional, IsString } from 'class-validator';
 
 export class ChangeEstablishmentEmailDto {
   @IsEmail()
@@ -7,7 +7,7 @@ export class ChangeEstablishmentEmailDto {
   @IsEmail()
   new_email!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  recaptcha_token!: string;
+  recaptcha_token?: string;
 }

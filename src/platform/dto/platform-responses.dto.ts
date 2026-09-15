@@ -49,6 +49,16 @@ export interface PlatformTenantLoginActivity {
   teamUsersWithLogin: number;
 }
 
+export interface PlatformApiErrorEvent {
+  id: string;
+  method: string;
+  path: string;
+  statusCode: number;
+  exceptionName: string | null;
+  message: string | null;
+  createdAt: string;
+}
+
 export interface PlatformTenantSubscriptionDetail {
   status: SubscriptionStatus;
   planTier: PlanTier;
@@ -84,6 +94,7 @@ export interface PlatformTenantDetail {
   usage: PlatformTenantUsage;
   engagement: PlatformTenantEngagement;
   loginActivity: PlatformTenantLoginActivity;
+  recentApiErrors: PlatformApiErrorEvent[];
   createdAt: string;
   updatedAt: string;
   accessLabel: 'active' | 'trial' | 'past_due' | 'canceled' | 'inactive';
