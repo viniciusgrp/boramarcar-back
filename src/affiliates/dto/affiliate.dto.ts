@@ -20,7 +20,7 @@ export class RegisterAffiliateDto {
   email!: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 
   @IsString()

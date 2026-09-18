@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { MulterExceptionFilter } from './upload/multer-exception.filter';
+import { isCorsOriginAllowed } from './common/utils/cors-origin.util';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -17,9 +18,7 @@ async function bootstrap() {
   const allowedOrigins = rawOrigins
     ? rawOrigins.split(',').map((o) => o.trim()).filter(Boolean)
     : [];
-  const corsAllowAll =
-    !isProduction &&
-    (allowedOrigins.length === 0 || allowedOrigins.includes('*'));
+  const corsAllowAll = !isProduction;
 
   if (isProduction) {
     if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
@@ -31,11 +30,19 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || corsAllowAll || allowedOrigins.includes(origin)) {
+      if (
+        isCorsOriginAllowed({
+          origin,
+          isProduction,
+          allowedOrigins,
+          corsAllowAll,
+        })
+      ) {
         callback(null, true);
-      } else {
-        callback(new Error(`CORS bloqueado para origem: ${origin}`));
+        return;
       }
+
+      callback(new Error(`CORS bloqueado para origem: ${origin}`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
