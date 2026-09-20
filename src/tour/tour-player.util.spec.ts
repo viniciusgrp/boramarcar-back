@@ -4,6 +4,7 @@ import {
   nextTourIndex,
   previousTourIndex,
   resolveTourHighlightZoom,
+  shouldUseCompactTourMock,
   wrapTourIndex,
 } from './tour-player.util';
 
@@ -47,5 +48,11 @@ describe('tour-player.util', () => {
     expect(resolveTourHighlightZoom(1.2, 0.5)).toBe(1);
     expect(resolveTourHighlightZoom(1.2, 1)).toBe(1.2);
     expect(resolveTourHighlightZoom(undefined, 1)).toBe(1.12);
+  });
+
+  it('uses compact mock chrome only while the mockup is scaled to a phone', () => {
+    expect(shouldUseCompactTourMock(0.5)).toBe(true);
+    expect(shouldUseCompactTourMock(1)).toBe(false);
+    expect(shouldUseCompactTourMock(0)).toBe(false);
   });
 });

@@ -27,6 +27,10 @@ export function resolveTourHighlightZoom(
   return requestedZoom ?? 1.12;
 }
 
+export function shouldUseCompactTourMock(fitScale: number): boolean {
+  return fitScale > 0 && fitScale < 1;
+}
+
 export function flattenTourStepIds(topics: TourTopicLike[]): string[] {
   return topics.flatMap((topic) => topic.steps.map((step) => `${topic.id}:${step.id}`));
 }
