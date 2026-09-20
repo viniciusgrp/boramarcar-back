@@ -349,6 +349,85 @@ describe('AppointmentsService', () => {
       expect(result.checkoutUrl).toBeUndefined();
     });
 
+    it('marks the first-appointment onboarding milestone after a successful booking', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(buildTenant());
+      jest
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
+        .mockResolvedValue(booking);
+      jest
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
+        .mockResolvedValue(false);
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
+        .mockResolvedValue({
+          name: 'João',
+          contact_phone: '11988888888',
+          bookingAcceptanceType: 'DEFAULT',
+        });
+      jest
+        .spyOn(ctx.service as never as { insertAppointmentServices: () => Promise<void> }, 'insertAppointmentServices')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ctx.service as never as { dispatchAppointmentEmails: () => void }, 'dispatchAppointmentEmails')
+        .mockReturnValue(undefined);
+
+      ctx.loyaltyService.findOrCreateCustomerForAppointment.mockResolvedValue({
+        customer: { id: 'cust-1', name: 'Ana', phone: '11999999999', email: null },
+        isNew: true,
+      });
+
+      const inserted = {
+        id: 'appt-1',
+        tenant_id: 'tenant-1',
+        professional_id: 'pro-1',
+        service_id: 'svc-1',
+        customer_id: 'cust-1',
+        customer_name: 'Ana',
+        customer_phone: '11999999999',
+        start_time: '2099-01-15T09:00:00.000Z',
+        end_time: '2099-01-15T10:00:00.000Z',
+        status: 'CONFIRMED',
+        deposit_paid: false,
+        payment_status: 'PAID',
+        commission_amount: 0,
+        booking_source: 'PUBLIC',
+        guest_access_token: 'secret-token',
+      } as Appointment;
+
+      const chainable = createChainableQuery({ data: inserted, error: null });
+      ctx.from.mockReturnValue(chainable);
+
+      await ctx.service.create({
+        tenantId: 'tenant-1',
+        professionalId: 'pro-1',
+        startTime: '2099-01-15T09:00:00.000Z',
+        customerName: 'Ana',
+        customerPhone: '11999999999',
+        serviceIds: ['svc-1'],
+      });
+
+      expect(ctx.from).toHaveBeenCalledWith('tenants');
+      expect(chainable.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initial_setup_first_appointment_at: expect.any(String),
+        }),
+      );
+      expect(chainable.is).toHaveBeenCalledWith(
+        'initial_setup_first_appointment_at',
+        null,
+      );
+    });
+
     it('maps overlap constraint errors on insert to ConflictException', async () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());

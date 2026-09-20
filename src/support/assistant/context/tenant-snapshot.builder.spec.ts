@@ -23,6 +23,7 @@ const setup: InitialSetupStatus = {
   hasActiveSubscription: true,
   hasExtraProfessional: false,
   hasReviewedBusinessHours: false,
+  hasFirstAppointment: false,
 };
 
 const context = {

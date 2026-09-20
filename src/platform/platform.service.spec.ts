@@ -64,6 +64,7 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     initial_setup_customer_account_decided_at: null,
     initial_setup_booking_link_shared_at: null,
     initial_setup_hours_reviewed_at: null,
+    initial_setup_first_appointment_at: null,
     created_at: '2026-08-01T00:00:00.000Z',
     updated_at: '2026-08-01T00:00:00.000Z',
     ...overrides,

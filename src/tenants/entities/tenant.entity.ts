@@ -65,6 +65,7 @@ export interface Tenant {
   initial_setup_customer_account_decided_at: string | null;
   initial_setup_booking_link_shared_at: string | null;
   initial_setup_hours_reviewed_at: string | null;
+  initial_setup_first_appointment_at: string | null;
   referred_by_affiliate_id?: string | null;
   affiliate_attributed_at?: string | null;
   created_at: string;

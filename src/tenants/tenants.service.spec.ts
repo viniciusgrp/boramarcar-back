@@ -66,6 +66,62 @@ describe('TenantsService', () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
+  it('rejects passwords shorter than 8 characters', async () => {
+    const createUser = jest.fn();
+    const service = new TenantsService(
+      { getClient: () => ({ auth: { admin: { createUser } } }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      buildConfig(),
+    );
+
+    await expect(
+      service.register({
+        owner_name: 'Dono',
+        email: 'dono@gmail.com',
+        password: 'ab12345',
+        tenant_name: 'Studio',
+        slug: 'studio-novo',
+        recaptcha_token: 'token',
+      }),
+    ).rejects.toMatchObject({
+      message: 'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+    });
+
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects passwords without both letters and numbers', async () => {
+    const createUser = jest.fn();
+    const service = new TenantsService(
+      { getClient: () => ({ auth: { admin: { createUser } } }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      buildConfig(),
+    );
+
+    await expect(
+      service.register({
+        owner_name: 'Dono',
+        email: 'dono@gmail.com',
+        password: 'somenteletras',
+        tenant_name: 'Studio',
+        slug: 'studio-novo',
+        recaptcha_token: 'token',
+      }),
+    ).rejects.toMatchObject({
+      message: 'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+    });
+
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
   it('rejects changing a pending signup to a disposable email', async () => {
     const generateLink = jest.fn();
     const updateUserById = jest.fn();
