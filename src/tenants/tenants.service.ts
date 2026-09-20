@@ -787,8 +787,16 @@ export class TenantsService {
       throw new BadRequestException(DISPOSABLE_EMAIL_MESSAGE);
     }
 
-    if (password.length < 6) {
-      throw new BadRequestException('A senha deve ter pelo menos 6 caracteres.');
+    if (password.length < 8) {
+      throw new BadRequestException(
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      );
+    }
+
+    if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException(
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      );
     }
 
     if (!isValidSlug(normalizedSlug)) {

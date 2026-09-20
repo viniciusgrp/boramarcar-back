@@ -658,6 +658,8 @@ export class AppointmentsService {
 
     const appointment = this.mapAppointmentRow(data as Appointment);
 
+    await this.markFirstAppointmentReceived(dto.tenantId);
+
     await this.insertAppointmentServices(
       appointment.id,
       dto.tenantId,
@@ -961,6 +963,8 @@ export class AppointmentsService {
     }
 
     const row = data as SupabaseAppointmentWithRelations;
+
+    await this.markFirstAppointmentReceived(tenantId);
 
     await this.insertAppointmentServices(row.id, tenantId, booking);
 
@@ -3214,6 +3218,33 @@ export class AppointmentsService {
     }
   }
 
+  /**
+   * Marca o marco de onboarding "primeiro agendamento recebido" na primeira vez
+   * que o estabelecimento recebe um agendamento (público ou lançado pela equipe).
+   * Best-effort: nunca deve interromper a criação do agendamento.
+   */
+  private async markFirstAppointmentReceived(tenantId: string): Promise<void> {
+    try {
+      const { error } = await this.supabaseService
+        .getClient()
+        .from('tenants')
+        .update({ initial_setup_first_appointment_at: new Date().toISOString() })
+        .eq('id', tenantId)
+        .is('initial_setup_first_appointment_at', null);
+
+      if (error) {
+        this.logger.error(
+          `Failed to mark first appointment milestone for tenant ${tenantId}: ${error.message}`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `Unexpected error marking first appointment milestone for tenant ${tenantId}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
+  }
+
   private async insertAppointmentServices(
     appointmentId: string,
     tenantId: string,
@@ -3692,6 +3723,7 @@ export class AppointmentsService {
       initial_setup_customer_account_decided_at: null,
       initial_setup_booking_link_shared_at: null,
       initial_setup_hours_reviewed_at: null,
+      initial_setup_first_appointment_at: null,
       support_ai_enabled: false,
       support_ai_stripe_subscription_item_id: null,
       support_ai_status: null,

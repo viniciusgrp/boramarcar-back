@@ -74,10 +74,40 @@ describe('InitialSetupService', () => {
     expect(status.isComplete).toBe(true);
     expect(status.hasExtraProfessional).toBe(false);
     expect(status.hasReviewedBusinessHours).toBe(false);
+    expect(status.hasFirstAppointment).toBe(false);
     expect(queriedTables).not.toContain('appointments');
     expect(from).toHaveBeenCalledWith('professionals');
     expect(from).toHaveBeenCalledWith('services');
     expect(from).toHaveBeenCalledWith('business_hours');
+  });
+
+  it('marks the first appointment milestone from the tenant marker, without querying appointments', async () => {
+    const queriedTables: string[] = [];
+    const from = jest.fn((table: string) => {
+      queriedTables.push(table);
+      if (table === 'tenants') {
+        return createChainableQuery({ data: null, error: null });
+      }
+
+      return countQuery(1);
+    });
+
+    const supabaseService = createSupabaseServiceMock({ from });
+    const tenant = readyTenant({
+      initial_setup_first_appointment_at: '2026-01-05T00:00:00.000Z',
+    });
+    const tenantsService = {
+      findAccessContextByUserId: jest.fn().mockResolvedValue({ tenant }),
+    };
+    const service = new InitialSetupService(
+      supabaseService as never,
+      tenantsService as never,
+    );
+
+    const status = await service.getStatusForUser('user-1');
+
+    expect(status.hasFirstAppointment).toBe(true);
+    expect(queriedTables).not.toContain('appointments');
   });
 
   it('marks extra team only after a second professional exists', async () => {

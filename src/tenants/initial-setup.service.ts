@@ -135,6 +135,9 @@ export class InitialSetupService {
         hasReviewedBusinessHours: Boolean(
           tenant.initial_setup_hours_reviewed_at,
         ),
+        hasFirstAppointment: Boolean(
+          tenant.initial_setup_first_appointment_at,
+        ),
       };
     }
 
@@ -201,6 +204,7 @@ export class InitialSetupService {
       hasActiveSubscription,
       hasExtraProfessional,
       hasReviewedBusinessHours,
+      hasFirstAppointment: Boolean(tenant.initial_setup_first_appointment_at),
     };
   }
 

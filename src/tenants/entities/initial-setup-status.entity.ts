@@ -16,4 +16,5 @@ export interface InitialSetupStatus {
   hasActiveSubscription: boolean;
   hasExtraProfessional: boolean;
   hasReviewedBusinessHours: boolean;
+  hasFirstAppointment: boolean;
 }
