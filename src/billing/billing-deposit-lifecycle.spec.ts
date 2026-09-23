@@ -8,7 +8,11 @@ import type { StripeCheckoutSession, StripeEvent } from './types/stripe-api.type
 function buildBillingService(appointments: Partial<AppointmentsService>) {
   const configService = {
     get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY' ? 'sk_test_dummy' : undefined,
+      key === 'STRIPE_SECRET_KEY'
+        ? 'sk_test_dummy'
+        : key === 'APP_ENV'
+          ? 'production'
+          : undefined,
   } as unknown as ConfigService;
 
   const supabaseService = {

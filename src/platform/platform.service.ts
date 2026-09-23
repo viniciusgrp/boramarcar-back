@@ -448,6 +448,8 @@ export class PlatformService {
 
     await this.cancelStripeSubscription(tenant.stripe_subscription_id);
 
+    const authUserIds = await this.listAuthUserIdsForTenant(tenantId);
+
     await this.deleteByTenantId('appointments', tenantId);
     await this.deleteByTenantId('product_sale_items', tenantId);
     await this.deleteByTenantId('service_products', tenantId);
@@ -462,6 +464,120 @@ export class PlatformService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+
+    await this.deleteAuthUsersIfOrphaned(authUserIds);
+  }
+
+  async purgeOrphanedAuthUsers(): Promise<{ scanned: number; deleted: number }> {
+    let scanned = 0;
+    let deleted = 0;
+    let page = 1;
+    const perPage = 200;
+
+    while (page <= 50) {
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .auth.admin.listUsers({ page, perPage });
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      const users = data.users ?? [];
+      scanned += users.length;
+
+      for (const user of users) {
+        const removed = await this.deleteAuthUsersIfOrphaned([user.id]);
+        deleted += removed;
+      }
+
+      if (users.length < perPage) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return { scanned, deleted };
+  }
+
+  private async listAuthUserIdsForTenant(tenantId: string): Promise<string[]> {
+    const members = await this.supabaseService
+      .getClient()
+      .from('tenant_users')
+      .select('user_id')
+      .eq('tenant_id', tenantId);
+
+    if (members.error) {
+      throw new InternalServerErrorException(members.error.message);
+    }
+
+    const customers = await this.supabaseService
+      .getClient()
+      .from('customers')
+      .select('auth_user_id')
+      .eq('tenant_id', tenantId);
+
+    if (customers.error) {
+      throw new InternalServerErrorException(customers.error.message);
+    }
+
+    return uniqueIds([
+      ...(members.data ?? []).map((row) => row.user_id),
+      ...(customers.data ?? []).map((row) => row.auth_user_id),
+    ]);
+  }
+
+  private async isAuthUserStillLinked(userId: string): Promise<boolean> {
+    const checks: Array<{ table: string; column: string }> = [
+      { table: 'tenant_users', column: 'user_id' },
+      { table: 'platform_admins', column: 'user_id' },
+      { table: 'affiliates', column: 'auth_user_id' },
+      { table: 'customers', column: 'auth_user_id' },
+    ];
+
+    for (const check of checks) {
+      const { count, error } = await this.supabaseService
+        .getClient()
+        .from(check.table)
+        .select('id', { count: 'exact', head: true })
+        .eq(check.column, userId);
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      if ((count ?? 0) > 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async deleteAuthUsersIfOrphaned(userIds: string[]): Promise<number> {
+    let deleted = 0;
+
+    for (const userId of uniqueIds(userIds)) {
+      if (await this.isAuthUserStillLinked(userId)) {
+        continue;
+      }
+
+      const { error } = await this.supabaseService
+        .getClient()
+        .auth.admin.deleteUser(userId);
+
+      if (error) {
+        this.logger.warn(
+          `Failed to delete orphaned auth user ${userId}: ${error.message}`,
+        );
+        continue;
+      }
+
+      deleted += 1;
+    }
+
+    return deleted;
   }
 
   async getSummary(): Promise<PlatformSummaryResponse> {

@@ -173,6 +173,11 @@ export class PlatformController {
     await this.platformService.deleteTenant(id, dto.confirmName);
   }
 
+  @Post('orphaned-auth-users/purge')
+  async purgeOrphanedAuthUsers(): Promise<{ scanned: number; deleted: number }> {
+    return this.platformService.purgeOrphanedAuthUsers();
+  }
+
   @Get('affiliates')
   listAffiliates(
     @Query('status') status?: string,

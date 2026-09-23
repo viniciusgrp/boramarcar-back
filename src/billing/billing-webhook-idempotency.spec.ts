@@ -34,7 +34,11 @@ function buildService(insertResult: InsertResult) {
 
   const configService = {
     get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY' ? 'sk_test_dummy' : undefined,
+      key === 'STRIPE_SECRET_KEY'
+        ? 'sk_test_dummy'
+        : key === 'APP_ENV'
+          ? 'production'
+          : undefined,
   } as unknown as ConfigService;
 
   const service = new BillingService(

@@ -3,12 +3,13 @@ import { AuthModule } from '../auth/auth.module';
 import { AffiliatesModule } from '../affiliates/affiliates.module';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { PlatformAdminsService } from './platform-admins.service';
+import { PlatformAuthController } from './platform-auth.controller';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 
 @Module({
   imports: [AuthModule, AffiliatesModule],
-  controllers: [PlatformController],
+  controllers: [PlatformAuthController, PlatformController],
   providers: [PlatformAdminsService, PlatformService, PlatformAdminGuard],
   exports: [PlatformAdminsService, PlatformAdminGuard],
 })

@@ -24,13 +24,18 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
   } as Tenant;
 }
 
-function buildService(tenants: Partial<TenantsService> = {}) {
+function buildService(
+  tenants: Partial<TenantsService> = {},
+  env: Record<string, string> = {},
+) {
   const configService = {
     get: (key: string) =>
       ({
+        APP_ENV: 'production',
         STRIPE_SECRET_KEY: 'sk_test_dummy',
         STRIPE_SOLO_PRICE_ID: 'price_solo',
         STRIPE_SUPPORT_AI_PRICE_ID: 'price_ai',
+        ...env,
       })[key],
   } as unknown as ConfigService;
 
@@ -78,6 +83,43 @@ describe('BillingService SaaS billing', () => {
 
     expect(status.isReady).toBe(false);
     expect(status.onboardingRequired).toBe(true);
+  });
+
+  it('does not retrieve Connect from Stripe when APP_ENV is not production', async () => {
+    const retrieve = jest.fn();
+    const { service } = buildService({}, { APP_ENV: 'development' });
+    (
+      service as unknown as {
+        stripe: { accounts: { retrieve: typeof retrieve } };
+      }
+    ).stripe.accounts.retrieve = retrieve;
+
+    const status = await service.getConnectStatus('tenant-1');
+
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(status.accountId).toBe('acct_1');
+    expect(status.isReady).toBe(true);
+  });
+
+  it('syncs Connect from Stripe when APP_ENV is production', async () => {
+    const retrieve = jest.fn().mockResolvedValue({
+      charges_enabled: true,
+      details_submitted: true,
+    });
+    const updateStripeConnectStatus = jest
+      .fn()
+      .mockResolvedValue(buildTenant());
+    const { service } = buildService({ updateStripeConnectStatus });
+    (
+      service as unknown as {
+        stripe: { accounts: { retrieve: typeof retrieve } };
+      }
+    ).stripe.accounts.retrieve = retrieve;
+
+    await service.getConnectStatus('tenant-1');
+
+    expect(retrieve).toHaveBeenCalledWith('acct_1');
+    expect(updateStripeConnectStatus).toHaveBeenCalled();
   });
 
   it('accrues affiliate commission on invoice.paid', async () => {

@@ -33,3 +33,10 @@ export class DeletePlatformTenantDto {
   @MaxLength(120)
   confirmName!: string;
 }
+
+export class PlatformPassphraseLoginDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  passphrase!: string;
+}
