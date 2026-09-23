@@ -20,6 +20,7 @@ export interface ChainableQueryMock {
   or: jest.Mock;
   order: jest.Mock;
   limit: jest.Mock;
+  range: jest.Mock;
   maybeSingle: jest.Mock;
   single: jest.Mock;
   then: jest.Mock;
@@ -48,6 +49,7 @@ export function createChainableQuery(
   api.or = jest.fn(chain);
   api.order = jest.fn(chain);
   api.limit = jest.fn(chain);
+  api.range = jest.fn(chain);
   api.maybeSingle = jest.fn(async () => result);
   api.single = jest.fn(async () => result);
   api.then = jest.fn((resolve: (value: SupabaseQueryResult<unknown>) => unknown) =>

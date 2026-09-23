@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -18,10 +20,19 @@ import { CurrentPlatformAdmin } from './decorators/current-platform-admin.decora
 import type { PlatformAdmin } from './entities/platform-admin.entity';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { PlatformService } from './platform.service';
+import {
+  DeletePlatformTenantDto,
+  ExtendPlatformTrialDto,
+  GrantPlatformPlanDto,
+} from './dto/platform-ops.dto';
 import type {
+  PlatformAppointmentListItem,
+  PlatformPagedResponse,
+  PlatformServiceListItem,
   PlatformSummaryResponse,
   PlatformTenantDetail,
   PlatformTenantListResponse,
+  PlatformTenantTeamResponse,
 } from './dto/platform-responses.dto';
 
 @Controller('platform')
@@ -70,6 +81,96 @@ export class PlatformController {
     @Param('id') id: string,
   ): Promise<PlatformTenantDetail> {
     return this.platformService.getTenantDetail(id);
+  }
+
+  @Get('tenants/:id/appointments')
+  async listAppointments(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<PlatformPagedResponse<PlatformAppointmentListItem>> {
+    return this.platformService.listAppointments(id, {
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  @Get('tenants/:id/services')
+  async listServices(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<PlatformPagedResponse<PlatformServiceListItem>> {
+    return this.platformService.listServices(id, {
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  @Get('tenants/:id/team')
+  async getTeam(
+    @Param('id') id: string,
+  ): Promise<PlatformTenantTeamResponse> {
+    return this.platformService.getTeam(id);
+  }
+
+  @Post('tenants/:id/extend-trial')
+  async extendTrial(
+    @Param('id') id: string,
+    @Body() dto: ExtendPlatformTrialDto,
+  ): Promise<PlatformTenantDetail> {
+    return this.platformService.extendTrial(id, dto.days);
+  }
+
+  @Post('tenants/:id/grant-plan')
+  async grantPlan(
+    @Param('id') id: string,
+    @Body() dto: GrantPlatformPlanDto,
+  ): Promise<PlatformTenantDetail> {
+    return this.platformService.grantPlan(id, dto.planTier, dto.until);
+  }
+
+  @Post('tenants/:id/cancel-plan')
+  async cancelPlan(
+    @Param('id') id: string,
+  ): Promise<PlatformTenantDetail> {
+    return this.platformService.cancelPlan(id);
+  }
+
+  @Delete('tenants/:id/appointments/:appointmentId')
+  @HttpCode(204)
+  async deleteAppointment(
+    @Param('id') id: string,
+    @Param('appointmentId') appointmentId: string,
+  ): Promise<void> {
+    await this.platformService.deleteAppointment(id, appointmentId);
+  }
+
+  @Delete('tenants/:id/services/:serviceId')
+  @HttpCode(204)
+  async deleteService(
+    @Param('id') id: string,
+    @Param('serviceId') serviceId: string,
+  ): Promise<void> {
+    await this.platformService.deleteService(id, serviceId);
+  }
+
+  @Delete('tenants/:id/professionals/:professionalId')
+  @HttpCode(204)
+  async deleteProfessional(
+    @Param('id') id: string,
+    @Param('professionalId') professionalId: string,
+  ): Promise<void> {
+    await this.platformService.deleteProfessional(id, professionalId);
+  }
+
+  @Delete('tenants/:id')
+  @HttpCode(204)
+  async deleteTenant(
+    @Param('id') id: string,
+    @Body() dto: DeletePlatformTenantDto,
+  ): Promise<void> {
+    await this.platformService.deleteTenant(id, dto.confirmName);
   }
 
   @Get('affiliates')

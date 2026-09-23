@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -10,16 +12,26 @@ import { SupabaseService } from '../supabase/supabase.service';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import {
+  isComplimentaryAccessActive,
+  parseUtcInstant,
+} from '../tenants/utils/tenant-access.util';
+import {
   extractSubscriptionPeriodEnd,
   stripePeriodEndToIso,
 } from '../billing/utils/stripe-period-end.util';
 import type {
   PlatformApiErrorEvent,
+  PlatformAppointmentListItem,
+  PlatformBusinessHour,
   PlatformGrowthPoint,
+  PlatformPagedResponse,
+  PlatformServiceListItem,
   PlatformSummaryResponse,
   PlatformTenantDetail,
   PlatformTenantListItem,
   PlatformTenantListResponse,
+  PlatformTenantSettings,
+  PlatformTenantTeamResponse,
   PlatformTenantUsage,
 } from './dto/platform-responses.dto';
 import {
@@ -32,6 +44,29 @@ import {
 } from './utils/platform-access.util';
 
 type StripeClient = InstanceType<typeof Stripe>;
+
+function parsePage(
+  page?: number,
+  pageSize?: number,
+): { page: number; pageSize: number; from: number; to: number } {
+  const safePage = Math.max(1, page ?? 1);
+  const safePageSize = Math.min(100, Math.max(1, pageSize ?? 20));
+  const from = (safePage - 1) * safePageSize;
+  return {
+    page: safePage,
+    pageSize: safePageSize,
+    from,
+    to: from + safePageSize - 1,
+  };
+}
+
+function uniqueIds(values: unknown[]): string[] {
+  return [
+    ...new Set(
+      values.filter((value): value is string => typeof value === 'string' && value.length > 0),
+    ),
+  ];
+}
 
 interface ListTenantsQuery {
   page?: number;
@@ -116,13 +151,14 @@ export class PlatformService {
       ? await this.resolveUserEmail(tenant.owner_id)
       : null;
 
-    const [usage, loyaltyActive, loginActivity, subscriptionExtras, recentApiErrors] =
+    const [usage, loyaltyActive, loginActivity, subscriptionExtras, recentApiErrors, businessHours] =
       await Promise.all([
         this.computeUsage(tenant.id),
         this.isLoyaltyActive(tenant.id),
         this.resolveLoginActivity(tenant.id, tenant.owner_id),
         this.resolveStripeSubscriptionExtras(tenant.stripe_subscription_id),
         this.fetchRecentApiErrors(tenant.id),
+        this.fetchBusinessHours(tenant.id),
       ]);
 
     return {
@@ -155,6 +191,7 @@ export class PlatformService {
         currency: subscriptionExtras.currency,
         nextBillingAt:
           subscriptionExtras.nextBillingAt ?? tenant.subscription_expires_at,
+        compUntil: tenant.comp_until,
       },
       usage,
       engagement: {
@@ -168,10 +205,263 @@ export class PlatformService {
       },
       loginActivity,
       recentApiErrors,
+      settings: this.buildSettings(tenant, businessHours),
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,
       accessLabel: resolvePlatformAccessLabel(tenant),
     };
+  }
+
+  async listAppointments(
+    tenantId: string,
+    query: { page?: number; pageSize?: number },
+  ): Promise<PlatformPagedResponse<PlatformAppointmentListItem>> {
+    await this.fetchTenantById(tenantId);
+    const { page, pageSize, from, to } = parsePage(query.page, query.pageSize);
+
+    const { data, error, count } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(
+        'id, start_time, end_time, status, customer_name, professional_id, service_id',
+        { count: 'exact' },
+      )
+      .eq('tenant_id', tenantId)
+      .order('start_time', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = data ?? [];
+    const professionalIds = uniqueIds(rows.map((row) => row.professional_id));
+    const serviceIds = uniqueIds(rows.map((row) => row.service_id));
+    const [professionals, services] = await Promise.all([
+      this.loadNameMap('professionals', professionalIds),
+      this.loadNameMap('services', serviceIds),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id as string,
+        startTime: row.start_time as string,
+        endTime: row.end_time as string,
+        status: row.status as string,
+        customerName: (row.customer_name as string) ?? '',
+        professionalName: professionals.get(row.professional_id as string) ?? null,
+        serviceName: services.get(row.service_id as string) ?? null,
+      })),
+      total: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  async listServices(
+    tenantId: string,
+    query: { page?: number; pageSize?: number },
+  ): Promise<PlatformPagedResponse<PlatformServiceListItem>> {
+    await this.fetchTenantById(tenantId);
+    const { page, pageSize, from, to } = parsePage(query.page, query.pageSize);
+
+    const { data, error, count } = await this.supabaseService
+      .getClient()
+      .from('services')
+      .select('id, name, duration_minutes, price, is_active, created_at, updated_at', { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('name', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return {
+      items: (data ?? []).map((row) => ({
+        id: row.id as string,
+        name: row.name as string,
+        durationMinutes: Number(row.duration_minutes ?? 0),
+        price: Number(row.price ?? 0),
+        isActive: Boolean(row.is_active),
+        createdAt: (row.created_at as string | null) ?? null,
+        updatedAt: (row.updated_at as string | null) ?? null,
+      })),
+      total: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  async getTeam(tenantId: string): Promise<PlatformTenantTeamResponse> {
+    await this.fetchTenantById(tenantId);
+    const client = this.supabaseService.getClient();
+
+    const [professionalsResult, usersResult] = await Promise.all([
+      client
+        .from('professionals')
+        .select('id, name, contact_phone, is_active, created_at, updated_at')
+        .eq('tenant_id', tenantId)
+        .is('deleted_at', null)
+        .order('name', { ascending: true }),
+      client
+        .from('tenant_users')
+        .select('id, user_id, role, professional_id, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: true }),
+    ]);
+
+    if (professionalsResult.error) {
+      throw new InternalServerErrorException(professionalsResult.error.message);
+    }
+    if (usersResult.error) {
+      throw new InternalServerErrorException(usersResult.error.message);
+    }
+
+    const professionals = (professionalsResult.data ?? []).map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      contactPhone: (row.contact_phone as string | null) ?? null,
+      isActive: Boolean(row.is_active),
+      createdAt: (row.created_at as string | null) ?? null,
+      updatedAt: (row.updated_at as string | null) ?? null,
+    }));
+
+    const professionalNames = new Map(
+      professionals.map((item) => [item.id, item.name]),
+    );
+
+    const users = await Promise.all(
+      (usersResult.data ?? []).map(async (row) => {
+        const userId = row.user_id as string;
+        const [email, lastSignInAt] = await Promise.all([
+          this.resolveUserEmail(userId),
+          this.resolveUserLastSignIn(userId),
+        ]);
+        const professionalId = (row.professional_id as string | null) ?? null;
+
+        return {
+          id: row.id as string,
+          email,
+          role: row.role as string,
+          professionalName: professionalId
+            ? (professionalNames.get(professionalId) ?? null)
+            : null,
+          lastSignInAt,
+          createdAt: (row.created_at as string | null) ?? null,
+        };
+      }),
+    );
+
+    return { professionals, users };
+  }
+
+  async extendTrial(tenantId: string, days: number): Promise<PlatformTenantDetail> {
+    const tenant = await this.fetchTenantById(tenantId);
+    const now = Date.now();
+    const currentEnd = parseUtcInstant(tenant.trial_ends_at);
+    const base =
+      currentEnd && currentEnd.getTime() > now ? currentEnd : new Date();
+    const next = new Date(base.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    const fields: Record<string, string | null> = { trial_ends_at: next };
+
+    if (isComplimentaryAccessActive(tenant) || tenant.comp_until === tenant.trial_ends_at) {
+      fields.comp_until = next;
+    }
+
+    await this.updateTenantFields(tenantId, fields);
+    return this.getTenantDetail(tenantId);
+  }
+
+  async grantPlan(
+    tenantId: string,
+    planTier: PlanTier,
+    untilIso: string,
+  ): Promise<PlatformTenantDetail> {
+    const until = parseUtcInstant(untilIso);
+    if (!until || until.getTime() <= Date.now()) {
+      throw new BadRequestException('A data de término precisa ser futura.');
+    }
+
+    const tenant = await this.fetchTenantById(tenantId);
+    const untilValue = until.toISOString();
+
+    await this.updateTenantFields(tenantId, {
+      plan_tier: planTier,
+      subscription_status: 'INACTIVE',
+      trial_ends_at: untilValue,
+      comp_until: untilValue,
+    });
+
+    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+    return this.getTenantDetail(tenantId);
+  }
+
+  async cancelPlan(tenantId: string): Promise<PlatformTenantDetail> {
+    const tenant = await this.fetchTenantById(tenantId);
+
+    await this.updateTenantFields(tenantId, { comp_until: null });
+    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+
+    await this.updateTenantFields(tenantId, {
+      subscription_status: 'CANCELED',
+      plan_tier: 'SOLO',
+      trial_ends_at: null,
+      stripe_subscription_id: null,
+      comp_until: null,
+    });
+
+    return this.getTenantDetail(tenantId);
+  }
+
+  async deleteAppointment(tenantId: string, appointmentId: string): Promise<void> {
+    await this.fetchTenantById(tenantId);
+    await this.deleteOwnedRow('appointments', tenantId, appointmentId);
+  }
+
+  async deleteService(tenantId: string, serviceId: string): Promise<void> {
+    await this.fetchTenantById(tenantId);
+    await this.assertNoLinkedAppointments(tenantId, 'service_id', serviceId);
+    await this.deleteOwnedRow('services', tenantId, serviceId);
+  }
+
+  async deleteProfessional(
+    tenantId: string,
+    professionalId: string,
+  ): Promise<void> {
+    await this.fetchTenantById(tenantId);
+    await this.assertNoLinkedAppointments(
+      tenantId,
+      'professional_id',
+      professionalId,
+    );
+    await this.deleteOwnedRow('professionals', tenantId, professionalId);
+  }
+
+  async deleteTenant(tenantId: string, confirmName: string): Promise<void> {
+    const tenant = await this.fetchTenantById(tenantId);
+    if (confirmName.trim() !== tenant.name) {
+      throw new BadRequestException(
+        'Digite o nome do estabelecimento para confirmar a exclusão.',
+      );
+    }
+
+    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+
+    await this.deleteByTenantId('appointments', tenantId);
+    await this.deleteByTenantId('product_sale_items', tenantId);
+    await this.deleteByTenantId('service_products', tenantId);
+    await this.deleteByTenantId('affiliate_commission_items', tenantId);
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .delete()
+      .eq('id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
   }
 
   async getSummary(): Promise<PlatformSummaryResponse> {
@@ -661,5 +951,164 @@ export class PlatformService {
         cumulativeTenants: cumulative,
       };
     });
+  }
+
+  private buildSettings(
+    tenant: Tenant,
+    businessHours: PlatformBusinessHour[],
+  ): PlatformTenantSettings {
+    return {
+      requireCustomerEmailConfirmation: tenant.require_customer_email_confirmation,
+      requireCustomerAccount: tenant.require_customer_account,
+      allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+      allowCustomerReschedule: tenant.allow_customer_reschedule,
+      bookingAcceptanceType: tenant.booking_acceptance_type,
+      bookingSlotIntervalMinutes: tenant.booking_slot_interval_minutes,
+      depositFeatureEnabled: tenant.deposit_feature_enabled,
+      reviewsEnabled: tenant.reviews_enabled,
+      reviewsAutoPublish: tenant.reviews_auto_publish,
+      referralProgramEnabled: tenant.enable_referral_program,
+      businessHours,
+    };
+  }
+
+  private async fetchBusinessHours(
+    tenantId: string,
+  ): Promise<PlatformBusinessHour[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('business_hours')
+      .select('day_of_week, open_time, close_time, is_closed')
+      .eq('tenant_id', tenantId)
+      .order('day_of_week', { ascending: true });
+
+    if (error) {
+      this.logger.warn(`business hours lookup failed: ${error.message}`);
+      return [];
+    }
+
+    return (data ?? []).map((row) => ({
+      dayOfWeek: Number(row.day_of_week),
+      openTime: String(row.open_time ?? ''),
+      closeTime: String(row.close_time ?? ''),
+      isClosed: Boolean(row.is_closed),
+    }));
+  }
+
+  private async loadNameMap(
+    table: 'professionals' | 'services',
+    ids: string[],
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (ids.length === 0) {
+      return map;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from(table)
+      .select('id, name')
+      .in('id', ids);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    for (const row of data ?? []) {
+      map.set(row.id as string, row.name as string);
+    }
+
+    return map;
+  }
+
+  private async updateTenantFields(
+    tenantId: string,
+    fields: Record<string, string | null>,
+  ): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  private async cancelStripeSubscription(
+    subscriptionId: string | null,
+  ): Promise<void> {
+    if (!subscriptionId?.trim() || !this.stripe) {
+      return;
+    }
+
+    try {
+      await this.stripe.subscriptions.cancel(subscriptionId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to cancel Stripe subscription ${subscriptionId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async assertNoLinkedAppointments(
+    tenantId: string,
+    column: 'service_id' | 'professional_id',
+    id: string,
+  ): Promise<void> {
+    const { count, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq(column, id);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if ((count ?? 0) > 0) {
+      throw new ConflictException(
+        'Há agendamentos vinculados. Apague os agendamentos antes.',
+      );
+    }
+  }
+
+  private async deleteOwnedRow(
+    table: string,
+    tenantId: string,
+    id: string,
+  ): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from(table)
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Registro não encontrado.');
+    }
+  }
+
+  private async deleteByTenantId(table: string, tenantId: string): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from(table)
+      .delete()
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
   }
 }

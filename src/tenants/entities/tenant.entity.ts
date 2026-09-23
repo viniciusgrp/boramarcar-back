@@ -50,6 +50,7 @@ export interface Tenant {
   trial_starts_at: string | null;
   trial_ends_at: string | null;
   pre_subscription_trial_ends_at: string | null;
+  comp_until: string | null;
   plan_tier: PlanTier;
   calendar_card_preferences: CalendarCardPreferences;
   enable_payout_control: boolean;

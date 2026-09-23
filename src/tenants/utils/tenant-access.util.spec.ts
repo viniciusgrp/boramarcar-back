@@ -1,6 +1,7 @@
 import {
   getTrialDaysRemaining,
   hasTenantAdminAccess,
+  isComplimentaryAccessActive,
   isSubscriptionActive,
   isTrialActive,
   parseUtcInstant,
@@ -84,5 +85,21 @@ describe('tenant-access.util', () => {
       ),
     ).toBe(0);
     expect(getTrialDaysRemaining({ trial_ends_at: null }, now)).toBe(0);
+  });
+
+  it('treats complimentary access as active until the end instant inclusive', () => {
+    expect(
+      isComplimentaryAccessActive(
+        { comp_until: '2026-09-08T12:00:00.000Z' },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isComplimentaryAccessActive(
+        { comp_until: '2026-09-08T11:59:59.000Z' },
+        now,
+      ),
+    ).toBe(false);
+    expect(isComplimentaryAccessActive({ comp_until: null }, now)).toBe(false);
   });
 });

@@ -69,6 +69,7 @@ export interface PlatformTenantSubscriptionDetail {
   monthlyAmountCents: number | null;
   currency: string | null;
   nextBillingAt: string | null;
+  compUntil: string | null;
 }
 
 export interface PlatformTenantDetail {
@@ -95,9 +96,81 @@ export interface PlatformTenantDetail {
   engagement: PlatformTenantEngagement;
   loginActivity: PlatformTenantLoginActivity;
   recentApiErrors: PlatformApiErrorEvent[];
+  settings: PlatformTenantSettings;
   createdAt: string;
   updatedAt: string;
   accessLabel: 'active' | 'trial' | 'past_due' | 'canceled' | 'inactive';
+}
+
+export interface PlatformBusinessHour {
+  dayOfWeek: number;
+  openTime: string;
+  closeTime: string;
+  isClosed: boolean;
+}
+
+export interface PlatformTenantSettings {
+  requireCustomerEmailConfirmation: boolean;
+  requireCustomerAccount: boolean;
+  allowCustomerSelfCancellation: boolean;
+  allowCustomerReschedule: boolean;
+  bookingAcceptanceType: string;
+  bookingSlotIntervalMinutes: number;
+  depositFeatureEnabled: boolean;
+  reviewsEnabled: boolean;
+  reviewsAutoPublish: boolean;
+  referralProgramEnabled: boolean;
+  businessHours: PlatformBusinessHour[];
+}
+
+export interface PlatformPagedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PlatformAppointmentListItem {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  customerName: string;
+  professionalName: string | null;
+  serviceName: string | null;
+}
+
+export interface PlatformServiceListItem {
+  id: string;
+  name: string;
+  durationMinutes: number;
+  price: number;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PlatformProfessionalListItem {
+  id: string;
+  name: string;
+  contactPhone: string | null;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PlatformTeamUserListItem {
+  id: string;
+  email: string | null;
+  role: string;
+  professionalName: string | null;
+  lastSignInAt: string | null;
+  createdAt: string | null;
+}
+
+export interface PlatformTenantTeamResponse {
+  professionals: PlatformProfessionalListItem[];
+  users: PlatformTeamUserListItem[];
 }
 
 export interface PlatformGrowthPoint {

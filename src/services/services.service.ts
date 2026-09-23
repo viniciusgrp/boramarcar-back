@@ -342,6 +342,8 @@ export class ServicesService {
           : Number(row.custom_commission_rate),
       loyalty_points_earned: Number(row.loyalty_points_earned ?? 0),
       price: Number(row.price),
+      created_at: row.created_at ?? null,
+      updated_at: row.updated_at ?? null,
       ...(serviceProducts !== undefined
         ? { service_products: serviceProducts }
         : {}),

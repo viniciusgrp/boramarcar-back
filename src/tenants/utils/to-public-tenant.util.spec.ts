@@ -45,6 +45,7 @@ function buildTenant(): Tenant {
     trial_starts_at: '2026-01-01T00:00:00.000Z',
     trial_ends_at: '2026-01-14T00:00:00.000Z',
     pre_subscription_trial_ends_at: null,
+    comp_until: null,
     plan_tier: 'PRO',
     calendar_card_preferences: { ...DEFAULT_CALENDAR_CARD_PREFERENCES },
     enable_payout_control: true,

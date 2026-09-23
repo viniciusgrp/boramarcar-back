@@ -41,6 +41,7 @@ import {
 import { extractStripeId } from './utils/stripe-id.util';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
 import { tenantHasManageableSubscription } from './utils/tenant-billing-access.util';
+import { isComplimentaryAccessActive } from '../tenants/utils/tenant-access.util';
 import {
   resolveConnectApplicationFeeAmount,
   resolveTenantDepositApplicationFeePercent,
@@ -641,6 +642,28 @@ export class BillingService {
   private async handleSubscriptionDeleted(
     subscription: StripeSubscription,
   ): Promise<void> {
+    const stripeCustomerId = extractStripeId(subscription.customer);
+    const existing = await this.resolveTenantForSubscriptionSync(
+      subscription.id,
+      stripeCustomerId,
+    );
+
+    if (existing && isComplimentaryAccessActive(existing)) {
+      const nextStatus =
+        existing.subscription_status === 'ACTIVE'
+          ? 'INACTIVE'
+          : existing.subscription_status;
+
+      await this.tenantsService.updateSubscriptionByTenantId(existing.id, {
+        subscriptionStatus: nextStatus,
+        stripeSubscriptionId: null,
+      });
+      this.logger.log(
+        `Subscription canceled with complimentary access: tenant=${existing.id}`,
+      );
+      return;
+    }
+
     const subscriptionExpiresAt = stripePeriodEndToIso(
       extractSubscriptionPeriodEnd(subscription),
     );

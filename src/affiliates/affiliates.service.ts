@@ -222,7 +222,7 @@ export class AffiliatesService {
       .insert({
         auth_user_id: ownerId,
         code,
-        status: 'pending_review' satisfies AffiliateStatus,
+        status: 'active' satisfies AffiliateStatus,
         full_name: fullName,
         email,
         cpf,

@@ -15,6 +15,8 @@ export interface Service {
   custom_commission_rate: number | null;
   loyalty_points_earned: number;
   is_active: boolean;
+  created_at: string | null;
+  updated_at: string | null;
   /** Present on managed catalog responses when BOM is loaded. */
   service_products?: ServiceProductLink[];
 }

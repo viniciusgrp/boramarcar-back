@@ -1,5 +1,7 @@
 import { AffiliatesService } from './affiliates.service';
+import { AFFILIATE_TERMS_VERSION } from './affiliate.constants';
 import type { Affiliate } from './entities/affiliate.entity';
+import type { RegisterAffiliateDto } from './dto/affiliate.dto';
 import type { SupabaseService } from '../supabase/supabase.service';
 
 function buildAffiliate(overrides?: Partial<Affiliate>): Affiliate {
@@ -145,6 +147,70 @@ describe('AffiliatesService attribution and ledger', () => {
     await expect(service.updateMe('aff-1', { code: 'JOAOBAR' })).rejects.toThrow(
       'Este código de indicação já está em uso.',
     );
+  });
+
+  it('activates new partner records on signup', async () => {
+    const insert = jest.fn().mockReturnValue({
+      select: () => ({
+        single: jest.fn().mockResolvedValue({
+          data: buildAffiliate({ status: 'active' }),
+          error: null,
+        }),
+      }),
+    });
+    const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+    const createUser = jest.fn().mockResolvedValue({
+      data: { user: { id: 'user-aff' } },
+      error: null,
+    });
+    const updateUserById = jest.fn().mockResolvedValue({ data: {}, error: null });
+    const mintUserPasswordSession = jest.fn().mockResolvedValue({
+      access_token: 'a',
+      refresh_token: 'r',
+    });
+
+    const service = new AffiliatesService({
+      getClient: () => ({
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle }),
+          }),
+          insert,
+        }),
+        auth: {
+          admin: {
+            createUser,
+            updateUserById,
+          },
+        },
+      }),
+      mintUserPasswordSession,
+    } as unknown as SupabaseService);
+
+    const dto: RegisterAffiliateDto = {
+      full_name: 'Parceiro',
+      email: 'parceiro@test.com',
+      password: 'secret123',
+      cpf: '123.456.789-01',
+      pix_key: '12345678901',
+      pix_key_type: 'cpf',
+      terms_version: AFFILIATE_TERMS_VERSION,
+      ack_independent_partnership: true,
+      ack_autonomy: true,
+      ack_result_only_pay: true,
+      ack_own_taxes: true,
+      ack_no_employment: true,
+    };
+
+    const result = await service.register(dto, {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    });
+
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'active' }),
+    );
+    expect(result.affiliate.status).toBe('active');
   });
 
   it('skips trial invoices and accrues 20 percent on paid plan invoices', async () => {

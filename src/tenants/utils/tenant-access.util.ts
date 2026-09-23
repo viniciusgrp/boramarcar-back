@@ -28,6 +28,19 @@ export function isSubscriptionActive(
   return status === 'ACTIVE';
 }
 
+export function isComplimentaryAccessActive(
+  tenant: Pick<Tenant, 'comp_until'>,
+  now: Date = new Date(),
+): boolean {
+  const until = parseUtcInstant(tenant.comp_until);
+
+  if (!until) {
+    return false;
+  }
+
+  return now.getTime() <= until.getTime();
+}
+
 export function isTrialActive(
   tenant: Pick<Tenant, 'trial_ends_at'>,
   now: Date = new Date(),

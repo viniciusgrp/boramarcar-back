@@ -3708,6 +3708,7 @@ export class AppointmentsService {
       trial_starts_at: null,
       trial_ends_at: null,
       pre_subscription_trial_ends_at: null,
+      comp_until: null,
       plan_tier: 'SOLO',
       calendar_card_preferences: { ...DEFAULT_CALENDAR_CARD_PREFERENCES },
       enable_payout_control: false,

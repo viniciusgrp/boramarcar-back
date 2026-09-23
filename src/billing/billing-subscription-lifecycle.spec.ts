@@ -44,6 +44,9 @@ function buildService(tenants: Partial<TenantsService> = {}) {
     configService,
     {
       findById: jest.fn().mockResolvedValue(buildTenant()),
+      findByStripeSubscriptionId: jest.fn().mockResolvedValue(null),
+      findByStripeCustomerId: jest.fn().mockResolvedValue(null),
+      updateSubscriptionByTenantId: jest.fn(),
       ...tenants,
     } as TenantsService,
     { getClient: () => ({ from }) } as never,
@@ -150,6 +153,57 @@ describe('BillingService SaaS billing', () => {
         applyPlanTierOnActive: false,
       }),
     );
+  });
+
+  it('keeps complimentary plan when Stripe subscription is deleted', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
+      buildTenant({
+        plan_tier: 'ELITE',
+        subscription_status: 'INACTIVE',
+        comp_until: '2027-01-01T00:00:00.000Z',
+      }),
+    );
+    const findByStripeSubscriptionId = jest.fn().mockResolvedValue(
+      buildTenant({
+        plan_tier: 'ELITE',
+        subscription_status: 'INACTIVE',
+        stripe_subscription_id: 'sub_1',
+        comp_until: '2027-01-01T00:00:00.000Z',
+      }),
+    );
+
+    const { service } = buildService({
+      findByStripeSubscriptionId,
+      updateSubscriptionByTenantId,
+    });
+    const syncSpy = jest.spyOn(
+      service as never as {
+        syncSubscriptionFromStripe: () => Promise<Tenant>;
+      },
+      'syncSubscriptionFromStripe',
+    );
+
+    await service.handleStripeWebhook({
+      id: 'evt_sub_comp',
+      type: 'customer.subscription.deleted',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: 'cus_1',
+          status: 'canceled',
+          current_period_end: 1700000000,
+        },
+      },
+    } as unknown as StripeEvent);
+
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionStatus: 'INACTIVE',
+        stripeSubscriptionId: null,
+      }),
+    );
+    expect(syncSpy).not.toHaveBeenCalled();
   });
 
   it('refuses the billing portal without a Stripe customer', async () => {
