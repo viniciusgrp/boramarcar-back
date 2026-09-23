@@ -93,6 +93,7 @@ export interface TenantSubscriptionUpdatePayload {
   planTier?: PlanTier;
   trialEndsAt?: string | null;
   preSubscriptionTrialEndsAt?: string | null;
+  compUntil?: string | null;
 }
 
 export interface RegisterTenantResult {
@@ -106,7 +107,7 @@ function applySubscriptionTrialFields(
   updatePayload: Record<string, string | null>,
   payload: Pick<
     TenantSubscriptionUpdatePayload,
-    'trialEndsAt' | 'preSubscriptionTrialEndsAt'
+    'trialEndsAt' | 'preSubscriptionTrialEndsAt' | 'compUntil'
   >,
 ): void {
   if (payload.trialEndsAt !== undefined) {
@@ -116,6 +117,10 @@ function applySubscriptionTrialFields(
   if (payload.preSubscriptionTrialEndsAt !== undefined) {
     updatePayload.pre_subscription_trial_ends_at =
       payload.preSubscriptionTrialEndsAt;
+  }
+
+  if (payload.compUntil !== undefined) {
+    updatePayload.comp_until = payload.compUntil;
   }
 }
 
@@ -129,6 +134,7 @@ function mapTenantRow(row: Tenant): Tenant {
         ? row.description.trim()
         : null,
     pre_subscription_trial_ends_at: row.pre_subscription_trial_ends_at ?? null,
+    comp_until: row.comp_until ?? null,
     banner_overlay_color: normalizeOverlayColor(row.banner_overlay_color),
     banner_overlay_opacity: normalizeOverlayOpacity(row.banner_overlay_opacity),
     subscription_status:

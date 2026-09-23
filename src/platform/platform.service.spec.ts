@@ -49,6 +49,7 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     trial_starts_at: null,
     trial_ends_at: null,
     pre_subscription_trial_ends_at: null,
+    comp_until: null,
     plan_tier: 'PRO',
     calendar_card_preferences: {} as Tenant['calendar_card_preferences'],
     enable_payout_control: false,
@@ -188,5 +189,178 @@ describe('PlatformService', () => {
     expect(summary.byPlan.PRO).toBe(1);
     expect(summary.byPlan.SOLO).toBe(1);
     expect(summary.growthByMonth).toHaveLength(12);
+  });
+
+  it('grants a complimentary plan until a future date', async () => {
+    const tenant = buildTenant({
+      subscription_status: 'ACTIVE',
+      stripe_subscription_id: null,
+    });
+    const updates: Record<string, unknown>[] = [];
+
+    const supabaseService = {
+      getClient: () => ({
+        from: () => {
+          const query: Record<string, unknown> = {};
+          const chain = () => query;
+          query.select = chain;
+          query.eq = chain;
+          query.update = (payload: Record<string, unknown>) => {
+            updates.push(payload);
+            Object.assign(tenant, payload);
+            return query;
+          };
+          query.maybeSingle = async () => ({ data: tenant, error: null });
+          return query;
+        },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+    );
+    jest
+      .spyOn(service, 'getTenantDetail')
+      .mockResolvedValue({ id: tenant.id } as never);
+
+    await service.grantPlan('t-1', 'ELITE', '2027-01-15T23:59:59.000Z');
+
+    expect(updates[0]).toEqual(
+      expect.objectContaining({
+        plan_tier: 'ELITE',
+        subscription_status: 'INACTIVE',
+        trial_ends_at: '2027-01-15T23:59:59.000Z',
+        comp_until: '2027-01-15T23:59:59.000Z',
+      }),
+    );
+  });
+
+  it('extends trial and complimentary end together', async () => {
+    const tenant = buildTenant({
+      subscription_status: 'INACTIVE',
+      trial_ends_at: '2026-10-01T00:00:00.000Z',
+      comp_until: '2026-10-01T00:00:00.000Z',
+    });
+    const updates: Record<string, unknown>[] = [];
+
+    const supabaseService = {
+      getClient: () => ({
+        from: () => {
+          const query: Record<string, unknown> = {};
+          const chain = () => query;
+          query.select = chain;
+          query.eq = chain;
+          query.update = (payload: Record<string, unknown>) => {
+            updates.push(payload);
+            Object.assign(tenant, payload);
+            return query;
+          };
+          query.maybeSingle = async () => ({ data: tenant, error: null });
+          return query;
+        },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+    );
+    jest
+      .spyOn(service, 'getTenantDetail')
+      .mockResolvedValue({ id: tenant.id } as never);
+
+    await service.extendTrial('t-1', 10);
+
+    expect(updates[0]?.trial_ends_at).toBe('2026-10-11T00:00:00.000Z');
+    expect(updates[0]?.comp_until).toBe('2026-10-11T00:00:00.000Z');
+  });
+
+  it('cancels a local plan without Stripe', async () => {
+    const tenant = buildTenant({
+      subscription_status: 'INACTIVE',
+      trial_ends_at: '2026-10-01T00:00:00.000Z',
+      comp_until: '2026-10-01T00:00:00.000Z',
+      plan_tier: 'ELITE',
+    });
+    const updates: Record<string, unknown>[] = [];
+
+    const supabaseService = {
+      getClient: () => ({
+        from: () => {
+          const query: Record<string, unknown> = {};
+          const chain = () => query;
+          query.select = chain;
+          query.eq = chain;
+          query.update = (payload: Record<string, unknown>) => {
+            updates.push(payload);
+            Object.assign(tenant, payload);
+            return query;
+          };
+          query.maybeSingle = async () => ({ data: tenant, error: null });
+          return query;
+        },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+    );
+    jest
+      .spyOn(service, 'getTenantDetail')
+      .mockResolvedValue({ id: tenant.id } as never);
+
+    await service.cancelPlan('t-1');
+
+    expect(updates.at(-1)).toEqual(
+      expect.objectContaining({
+        subscription_status: 'CANCELED',
+        plan_tier: 'SOLO',
+        trial_ends_at: null,
+        stripe_subscription_id: null,
+        comp_until: null,
+      }),
+    );
+  });
+
+  it('deletes blocking rows before the tenant', async () => {
+    const tenant = buildTenant();
+    const deleted: string[] = [];
+
+    const supabaseService = {
+      getClient: () => ({
+        from: (table: string) => {
+          const query: Record<string, unknown> = {};
+          const chain = () => query;
+          query.select = chain;
+          query.eq = chain;
+          query.delete = () => {
+            deleted.push(table);
+            return query;
+          };
+          query.maybeSingle = async () => ({ data: tenant, error: null });
+          query.then = (
+            resolve: (value: { data: null; error: null }) => unknown,
+          ) => Promise.resolve({ data: null, error: null }).then(resolve);
+          return query;
+        },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+    );
+
+    await service.deleteTenant('t-1', 'Barbearia Teste');
+
+    expect(deleted).toEqual([
+      'appointments',
+      'product_sale_items',
+      'service_products',
+      'affiliate_commission_items',
+      'tenants',
+    ]);
   });
 });

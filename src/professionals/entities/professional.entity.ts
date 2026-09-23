@@ -15,5 +15,7 @@ export interface Professional {
   booking_acceptance_type: ProfessionalBookingAcceptanceType;
   is_active: boolean;
   deleted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
   professional_services?: ProfessionalServiceLink[];
 }
