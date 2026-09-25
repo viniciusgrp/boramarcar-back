@@ -19,6 +19,7 @@ import { buildEmailFunnelHtml } from './email-funnel-html.util';
 import { isEmailFunnelStepDue } from './email-funnel-schedule.util';
 import type { UpdateEmailFunnelStepDto } from './dto/email-funnel.dto';
 import type {
+  EmailFunnelSendListItem,
   EmailFunnelSkipReason,
   EmailFunnelStepRow,
   EmailFunnelTriggerType,
@@ -118,7 +119,7 @@ export class EmailFunnelService {
           hasBusinessHours: setup.hasBusinessHours,
           now,
         });
-        if (result === 'sent' || result === 'skipped') {
+        if (result === 'sent' || result === 'skipped' || result === 'failed') {
           processed += 1;
         }
       }
@@ -180,7 +181,7 @@ export class EmailFunnelService {
     stepKey: string,
     tenantId: string,
     ownerEmail: string | null,
-  ): Promise<'sent' | 'skipped' | 'ignored'> {
+  ): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
     const step = await this.getStep(stepKey);
     const tenant = await this.getFunnelTenant(tenantId);
 
@@ -206,7 +207,7 @@ export class EmailFunnelService {
     hasService: boolean;
     hasBusinessHours: boolean;
     now: Date;
-  }): Promise<'sent' | 'skipped' | 'ignored'> {
+  }): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
     const already = await this.hasSendRecord(
       params.tenant.id,
       params.step.step_key,
@@ -252,12 +253,14 @@ export class EmailFunnelService {
     }
 
     if (shouldRecordSkip(eligibility)) {
-      await this.recordSend(
-        params.tenant.id,
-        params.step.step_key,
-        'skipped',
-        eligibility,
-      );
+      await this.recordSend({
+        tenantId: params.tenant.id,
+        stepKey: params.step.step_key,
+        status: 'skipped',
+        skippedReason: eligibility,
+        errorMessage: null,
+        recipientEmail: params.ownerEmail,
+      });
       return 'skipped';
     }
 
@@ -265,25 +268,85 @@ export class EmailFunnelService {
       return 'ignored';
     }
 
-    const html = this.renderStep(params.step, {
-      token: params.tenant.trial_email_funnel_opt_out_token,
-      trialEndsAt: params.tenant.trial_ends_at,
+    const delivered = await this.deliverStepEmail({
+      step: params.step,
+      tenant: params.tenant,
+      recipientEmail: params.ownerEmail,
       useSetupCopy: params.hasService && params.hasBusinessHours,
     });
 
-    await this.mailService.sendHtmlEmail({
-      to: params.ownerEmail,
-      subject: params.step.subject,
-      html,
+    await this.recordSend({
+      tenantId: params.tenant.id,
+      stepKey: params.step.step_key,
+      status: delivered.ok ? 'sent' : 'failed',
+      skippedReason: null,
+      errorMessage: delivered.ok ? null : delivered.error,
+      recipientEmail: params.ownerEmail,
     });
 
-    await this.recordSend(
-      params.tenant.id,
-      params.step.step_key,
-      'sent',
-      null,
-    );
-    return 'sent';
+    return delivered.ok ? 'sent' : 'failed';
+  }
+
+  async listSends(): Promise<EmailFunnelSendListItem[]> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('email_funnel_sends')
+      .select(
+        'id, tenant_id, step_key, status, skipped_reason, error_message, recipient_email, sent_at, tenants(name), email_funnel_steps(subject, step_number)',
+      )
+      .order('sent_at', { ascending: false })
+      .limit(300);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? []).map((row) => this.mapSendListItem(row));
+  }
+
+  async resend(sendId: string): Promise<EmailFunnelSendListItem> {
+    const existing = await this.getSendRow(sendId);
+    const tenant = await this.getFunnelTenant(existing.tenant_id);
+    const step = await this.getStep(existing.step_key);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    const recipient =
+      existing.recipient_email?.trim() ||
+      (await this.resolveOwnerEmail(tenant.owner_id));
+
+    if (!recipient) {
+      await this.recordSend({
+        tenantId: tenant.id,
+        stepKey: step.step_key,
+        status: 'failed',
+        skippedReason: null,
+        errorMessage: 'Estabelecimento sem e-mail do responsável.',
+        recipientEmail: null,
+      });
+      return this.getSendListItem(tenant.id, step.step_key);
+    }
+
+    const setup = await this.resolveSetupFlags(tenant.id);
+    const delivered = await this.deliverStepEmail({
+      step,
+      tenant,
+      recipientEmail: recipient,
+      useSetupCopy: setup.hasService && setup.hasBusinessHours,
+    });
+
+    await this.recordSend({
+      tenantId: tenant.id,
+      stepKey: step.step_key,
+      status: delivered.ok ? 'sent' : 'failed',
+      skippedReason: null,
+      errorMessage: delivered.ok ? null : delivered.error,
+      recipientEmail: recipient,
+    });
+
+    return this.getSendListItem(tenant.id, step.step_key);
   }
 
   private renderStep(
@@ -431,6 +494,7 @@ export class EmailFunnelService {
       .select('id')
       .eq('tenant_id', tenantId)
       .eq('step_key', stepKey)
+      .in('status', ['sent', 'skipped'])
       .maybeSingle();
 
     if (error) {
@@ -440,25 +504,138 @@ export class EmailFunnelService {
     return Boolean(data);
   }
 
-  private async recordSend(
-    tenantId: string,
-    stepKey: string,
-    status: 'sent' | 'skipped',
-    skippedReason: EmailFunnelSkipReason | null,
-  ): Promise<void> {
+  private async deliverStepEmail(params: {
+    step: EmailFunnelStepRow;
+    tenant: FunnelTenantRow;
+    recipientEmail: string;
+    useSetupCopy: boolean;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const html = this.renderStep(params.step, {
+      token: params.tenant.trial_email_funnel_opt_out_token,
+      trialEndsAt: params.tenant.trial_ends_at,
+      useSetupCopy: params.useSetupCopy,
+    });
+
+    try {
+      await this.mailService.sendHtmlEmail({
+        to: params.recipientEmail,
+        subject: params.step.subject,
+        html,
+        failIfUnconfigured: true,
+      });
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao enviar o e-mail.';
+      this.logger.warn(
+        `Email funnel send failed for tenant ${params.tenant.id} step ${params.step.step_key}: ${message}`,
+      );
+      return { ok: false, error: message };
+    }
+  }
+
+  private async recordSend(params: {
+    tenantId: string;
+    stepKey: string;
+    status: 'sent' | 'skipped' | 'failed';
+    skippedReason: EmailFunnelSkipReason | null;
+    errorMessage: string | null;
+    recipientEmail: string | null;
+  }): Promise<void> {
     const { error } = await this.supabaseService
       .getClient()
       .from('email_funnel_sends')
-      .insert({
-        tenant_id: tenantId,
-        step_key: stepKey,
-        status,
-        skipped_reason: skippedReason,
-      });
+      .upsert(
+        {
+          tenant_id: params.tenantId,
+          step_key: params.stepKey,
+          status: params.status,
+          skipped_reason: params.skippedReason,
+          error_message: params.errorMessage,
+          recipient_email: params.recipientEmail,
+          sent_at: new Date().toISOString(),
+        },
+        { onConflict: 'tenant_id,step_key' },
+      );
 
-    if (error && error.code !== '23505') {
+    if (error) {
       throw new InternalServerErrorException(error.message);
     }
+  }
+
+  private async getSendRow(sendId: string): Promise<{
+    tenant_id: string;
+    step_key: string;
+    recipient_email: string | null;
+  }> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('email_funnel_sends')
+      .select('tenant_id, step_key, recipient_email')
+      .eq('id', sendId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Envio não encontrado.');
+    }
+
+    return data as {
+      tenant_id: string;
+      step_key: string;
+      recipient_email: string | null;
+    };
+  }
+
+  private async getSendListItem(
+    tenantId: string,
+    stepKey: string,
+  ): Promise<EmailFunnelSendListItem> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('email_funnel_sends')
+      .select(
+        'id, tenant_id, step_key, status, skipped_reason, error_message, recipient_email, sent_at, tenants(name), email_funnel_steps(subject, step_number)',
+      )
+      .eq('tenant_id', tenantId)
+      .eq('step_key', stepKey)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new NotFoundException('Envio não encontrado.');
+    }
+
+    return this.mapSendListItem(data);
+  }
+
+  private mapSendListItem(row: Record<string, unknown>): EmailFunnelSendListItem {
+    const tenant = firstRelation(row.tenants);
+    const step = firstRelation(row.email_funnel_steps);
+
+    return {
+      id: String(row.id),
+      tenantId: String(row.tenant_id),
+      tenantName: typeof tenant?.name === 'string' ? tenant.name : 'Estabelecimento',
+      recipientEmail:
+        typeof row.recipient_email === 'string' ? row.recipient_email : null,
+      stepKey: String(row.step_key),
+      stepNumber:
+        typeof step?.step_number === 'number' ? step.step_number : null,
+      subject: typeof step?.subject === 'string' ? step.subject : String(row.step_key),
+      status: row.status === 'failed' || row.status === 'skipped' ? row.status : 'sent',
+      skippedReason:
+        typeof row.skipped_reason === 'string' ? row.skipped_reason : null,
+      errorMessage:
+        typeof row.error_message === 'string' ? row.error_message : null,
+      sentAt: String(row.sent_at ?? ''),
+    };
   }
 
   private mapStep(row: Record<string, unknown>): EmailFunnelStepRow {
@@ -496,4 +673,21 @@ export class EmailFunnelService {
       updated_at: String(row.updated_at ?? ''),
     };
   }
+}
+
+function firstRelation(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return first && typeof first === 'object'
+      ? (first as Record<string, unknown>)
+      : null;
+  }
+
+  if (value && typeof value === 'object') {
+    return value as Record<string, unknown>;
+  }
+
+  return null;
 }
