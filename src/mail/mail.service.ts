@@ -6,15 +6,26 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { MailAppointment } from './entities/mail-appointment.entity';
 import { isProductionAppEnv } from '../common/app-env.util';
+import {
+  resolveMailTransport,
+  type MailTransportConfig,
+  type MailTransportResolution,
+} from './mail-transport.config';
 import { formatTenantAddress } from './utils/format-tenant-address.util';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
+  private readonly transportResolution: MailTransportResolution;
+  private readonly transport: MailTransportConfig | null;
   private readonly transporter: Transporter | null;
 
   constructor(private readonly configService: ConfigService) {
+    this.transportResolution = resolveMailTransport(this.configService);
+    this.transport =
+      this.transportResolution.status === 'ready' ? this.transportResolution.config : null;
     this.transporter = this.createTransporter();
+    this.logTransportStatus();
   }
 
   async sendAppointmentConfirmation(
@@ -377,26 +388,55 @@ export class MailService {
     });
   }
 
-  private createTransporter(): Transporter | null {
-    const host = this.configService.get<string>('SMTP_HOST')?.trim();
-    const user = this.configService.get<string>('SMTP_USER')?.trim();
-    const pass = this.configService.get<string>('SMTP_PASS')?.trim();
-    const portValue = this.configService.get<string>('SMTP_PORT')?.trim();
-    const port = portValue ? Number.parseInt(portValue, 10) : 587;
+  private logTransportStatus(): void {
+    if (this.transportResolution.status === 'ready') {
+      const { provider, host, port } = this.transportResolution.config;
+      this.logger.log(`Mail provider "${provider}" using ${host}:${port}.`);
+      return;
+    }
 
-    if (!host || !user || !pass || Number.isNaN(port)) {
+    if (this.transportResolution.status === 'invalid_provider') {
       this.logger.warn(
-        'SMTP is not fully configured. Appointment emails will be skipped.',
+        `MAIL_PROVIDER "${this.transportResolution.raw}" is invalid. Use "resend" or "ses". Emails will be skipped.`,
       );
+      return;
+    }
+
+    const provider = this.transportResolution.provider;
+    this.logger.warn(
+      provider === 'ses'
+        ? 'SES SMTP is not fully configured. Emails will be skipped until SES_SMTP_HOST, SES_SMTP_USER, SES_SMTP_PASS and SES_SMTP_FROM are set.'
+        : 'SMTP is not fully configured. Appointment emails will be skipped.',
+    );
+  }
+
+  private createTransporter(): Transporter | null {
+    if (!this.transport) {
       return null;
     }
 
     return nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
+      host: this.transport.host,
+      port: this.transport.port,
+      secure: this.transport.secure,
+      requireTLS: this.transport.requireTls,
+      auth: {
+        user: this.transport.user,
+        pass: this.transport.pass,
+      },
     });
+  }
+
+  private missingTransportMessage(): string {
+    if (this.transportResolution.status === 'invalid_provider') {
+      return 'MAIL_PROVIDER inválido. Use "resend" ou "ses".';
+    }
+
+    if (this.transportResolution.status === 'incomplete' && this.transportResolution.provider === 'ses') {
+      return 'SES não está configurado. Preencha SES_SMTP_HOST, SES_SMTP_USER, SES_SMTP_PASS e SES_SMTP_FROM no backend.';
+    }
+
+    return 'SMTP não está configurado. Preencha SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no backend.';
   }
 
   private async sendMail(params: {
@@ -422,10 +462,9 @@ export class MailService {
       return;
     }
 
-    if (!this.transporter) {
-      const message =
-        'SMTP não está configurado. Preencha SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no backend.';
-      this.logger.warn(`Skipped email "${params.subject}" because SMTP is not configured.`);
+    if (!this.transporter || !this.transport) {
+      const message = this.missingTransportMessage();
+      this.logger.warn(`Skipped email "${params.subject}" because mail transport is not configured.`);
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }
@@ -433,12 +472,15 @@ export class MailService {
     }
 
     const from =
-      this.configService.get<string>('SMTP_FROM')?.trim() ||
-      this.configService.get<string>('SMTP_USER')?.trim();
+      this.transport.from ||
+      (this.transport.provider === 'resend' ? this.transport.user : null);
 
     if (!from) {
-      const message = 'SMTP_FROM não está configurado no backend.';
-      this.logger.warn(`Skipped email "${params.subject}" because SMTP_FROM is not configured.`);
+      const message =
+        this.transport.provider === 'ses'
+          ? 'SES_SMTP_FROM não está configurado no backend.'
+          : 'SMTP_FROM não está configurado no backend.';
+      this.logger.warn(`Skipped email "${params.subject}" because the sender address is not configured.`);
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }

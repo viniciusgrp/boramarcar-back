@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isProductionAppEnv } from '../common/app-env.util';
 
 export interface NewTenantNotifyPayload {
   name: string;
@@ -90,6 +91,13 @@ export class NtfyService {
     tags: string;
     body: string;
   }): Promise<void> {
+    if (!isProductionAppEnv(this.configService.get<string>('APP_ENV'))) {
+      this.logger.warn(
+        `Skipped ntfy "${params.title}" because APP_ENV is not production.`,
+      );
+      return;
+    }
+
     try {
       const response = await fetch(`${params.server}/${params.topic}`, {
         method: 'POST',

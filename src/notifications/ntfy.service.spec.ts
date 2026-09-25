@@ -31,6 +31,35 @@ describe('NtfyService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('does not call fetch when APP_ENV is development', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = buildService({
+      APP_ENV: 'development',
+      NTFY_TOPIC: 'boramarcar-test',
+    });
+    await service.notifyNewTenant({
+      name: 'Barbearia Z',
+      slug: 'barbearia-z',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call fetch when APP_ENV is unset', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    await service.notifyNewTenant({
+      name: 'Barbearia Z',
+      slug: 'barbearia-z',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('posts to the default ntfy server with title and body', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -39,7 +68,10 @@ describe('NtfyService', () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    const service = buildService({
+      APP_ENV: 'production',
+      NTFY_TOPIC: 'boramarcar-test',
+    });
     await service.notifyNewTenant({
       name: 'Barbearia Z',
       slug: 'barbearia-z',
@@ -66,6 +98,7 @@ describe('NtfyService', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const service = buildService({
+      APP_ENV: 'production',
       NTFY_TOPIC: 'alerts',
       NTFY_SERVER: 'https://ntfy.example.com/',
     });
@@ -82,7 +115,10 @@ describe('NtfyService', () => {
       .fn()
       .mockRejectedValue(new Error('network down')) as unknown as typeof fetch;
 
-    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    const service = buildService({
+      APP_ENV: 'production',
+      NTFY_TOPIC: 'boramarcar-test',
+    });
 
     await expect(
       service.notifyNewTenant({ name: 'X', slug: 'x' }),
@@ -96,7 +132,10 @@ describe('NtfyService', () => {
       statusText: 'Internal Server Error',
     }) as unknown as typeof fetch;
 
-    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    const service = buildService({
+      APP_ENV: 'production',
+      NTFY_TOPIC: 'boramarcar-test',
+    });
 
     await expect(
       service.notifyNewTenant({ name: 'X', slug: 'x' }),
@@ -111,7 +150,10 @@ describe('NtfyService', () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const service = buildService({ NTFY_TOPIC: 'boramarcar-test' });
+    const service = buildService({
+      APP_ENV: 'production',
+      NTFY_TOPIC: 'boramarcar-test',
+    });
     await service.notifySupportNeedsHuman({
       tenantName: 'Barbearia Z',
       tenantId: 'tenant-1',

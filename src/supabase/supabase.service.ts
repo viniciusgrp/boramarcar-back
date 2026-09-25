@@ -85,6 +85,7 @@ export class SupabaseService implements OnModuleInit {
   async mintUserPasswordSession(
     email: string,
     password: string,
+    options?: { skipSignOut?: boolean },
   ): Promise<{ access_token: string; refresh_token: string } | null> {
     const ephemeral = createClient(this.url, this.serviceRoleKey, {
       auth: {
@@ -108,7 +109,9 @@ export class SupabaseService implements OnModuleInit {
         refresh_token: data.session.refresh_token,
       };
     } finally {
-      await ephemeral.auth.signOut({ scope: 'local' });
+      if (!options?.skipSignOut) {
+        await ephemeral.auth.signOut({ scope: 'local' });
+      }
     }
   }
 }

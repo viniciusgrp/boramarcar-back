@@ -327,13 +327,21 @@ describe('PlatformService', () => {
   it('deletes blocking rows before the tenant', async () => {
     const tenant = buildTenant();
     const deleted: string[] = [];
+    const deleteUser = jest.fn().mockResolvedValue({ error: null });
 
     const supabaseService = {
       getClient: () => ({
         from: (table: string) => {
-          const query: Record<string, unknown> = {};
+          const query: Record<string, unknown> & {
+            _count?: boolean;
+            _cols?: string;
+          } = {};
           const chain = () => query;
-          query.select = chain;
+          query.select = (cols?: string, opts?: { count?: string }) => {
+            query._cols = cols;
+            query._count = Boolean(opts?.count);
+            return query;
+          };
           query.eq = chain;
           query.delete = () => {
             deleted.push(table);
@@ -341,9 +349,39 @@ describe('PlatformService', () => {
           };
           query.maybeSingle = async () => ({ data: tenant, error: null });
           query.then = (
-            resolve: (value: { data: null; error: null }) => unknown,
-          ) => Promise.resolve({ data: null, error: null }).then(resolve);
+            resolve: (value: {
+              data: unknown;
+              error: null;
+              count?: number;
+            }) => unknown,
+          ) => {
+            if (query._count) {
+              return Promise.resolve({
+                data: null,
+                error: null,
+                count: 0,
+              }).then(resolve);
+            }
+            if (table === 'tenant_users' && query._cols === 'user_id') {
+              return Promise.resolve({
+                data: [{ user_id: 'user-1' }],
+                error: null,
+              }).then(resolve);
+            }
+            if (table === 'customers' && query._cols === 'auth_user_id') {
+              return Promise.resolve({
+                data: [{ auth_user_id: 'cust-1' }],
+                error: null,
+              }).then(resolve);
+            }
+            return Promise.resolve({ data: null, error: null }).then(resolve);
+          };
           return query;
+        },
+        auth: {
+          admin: {
+            deleteUser,
+          },
         },
       }),
     } as unknown as SupabaseService;
@@ -362,5 +400,65 @@ describe('PlatformService', () => {
       'affiliate_commission_items',
       'tenants',
     ]);
+    expect(deleteUser).toHaveBeenCalledWith('user-1');
+    expect(deleteUser).toHaveBeenCalledWith('cust-1');
+  });
+
+  it('does not delete auth users still linked to another tenant', async () => {
+    const tenant = buildTenant();
+    const deleteUser = jest.fn().mockResolvedValue({ error: null });
+
+    const supabaseService = {
+      getClient: () => ({
+        from: (table: string) => {
+          const query: Record<string, unknown> & {
+            _count?: boolean;
+            _cols?: string;
+          } = {};
+          const chain = () => query;
+          query.select = (cols?: string, opts?: { count?: string }) => {
+            query._cols = cols;
+            query._count = Boolean(opts?.count);
+            return query;
+          };
+          query.eq = chain;
+          query.delete = () => query;
+          query.maybeSingle = async () => ({ data: tenant, error: null });
+          query.then = (
+            resolve: (value: {
+              data: unknown;
+              error: null;
+              count?: number;
+            }) => unknown,
+          ) => {
+            if (query._count) {
+              return Promise.resolve({
+                data: null,
+                error: null,
+                count: table === 'tenant_users' ? 1 : 0,
+              }).then(resolve);
+            }
+            if (table === 'tenant_users' && query._cols === 'user_id') {
+              return Promise.resolve({
+                data: [{ user_id: 'user-1' }],
+                error: null,
+              }).then(resolve);
+            }
+            return Promise.resolve({ data: [], error: null }).then(resolve);
+          };
+          return query;
+        },
+        auth: { admin: { deleteUser } },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+    );
+
+    await service.deleteTenant('t-1', 'Barbearia Teste');
+
+    expect(deleteUser).not.toHaveBeenCalled();
   });
 });

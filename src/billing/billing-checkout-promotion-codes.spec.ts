@@ -20,6 +20,7 @@ function buildTenant(overrides?: Partial<Tenant>): Tenant {
 
 function buildService() {
   const configValues: Record<string, string> = {
+    APP_ENV: 'production',
     STRIPE_SECRET_KEY: 'sk_test_dummy',
     STRIPE_SOLO_PRICE_ID: 'price_solo_test',
     STRIPE_PRO_TIER_PRICE_ID: 'price_pro_test',

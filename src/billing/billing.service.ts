@@ -42,6 +42,7 @@ import { extractStripeId } from './utils/stripe-id.util';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
 import { tenantHasManageableSubscription } from './utils/tenant-billing-access.util';
 import { isComplimentaryAccessActive } from '../tenants/utils/tenant-access.util';
+import { isProductionAppEnv } from '../common/app-env.util';
 import {
   resolveConnectApplicationFeeAmount,
   resolveTenantDepositApplicationFeePercent,
@@ -90,6 +91,23 @@ export class BillingService {
     }
 
     this.stripe = new Stripe(secretKey);
+  }
+
+  private isStripeOutboundEnabled(): boolean {
+    return isProductionAppEnv(this.configService.get<string>('APP_ENV'));
+  }
+
+  private ensureStripeOutbound(action: string): void {
+    if (this.isStripeOutboundEnabled()) {
+      return;
+    }
+
+    this.logger.warn(
+      `Skipped Stripe "${action}" because APP_ENV is not production.`,
+    );
+    throw new BadRequestException(
+      'Stripe não está disponível neste ambiente.',
+    );
   }
 
   async handleWebhook(
@@ -420,6 +438,13 @@ export class BillingService {
       return;
     }
 
+    if (!this.isStripeOutboundEnabled()) {
+      this.logger.warn(
+        `Skipped Stripe refund for appointment ${appointmentId} because APP_ENV is not production.`,
+      );
+      return;
+    }
+
     try {
       await this.stripe.refunds.create({
         payment_intent: paymentIntentId,
@@ -457,6 +482,8 @@ export class BillingService {
   async createDepositCheckoutSession(
     params: CreateDepositCheckoutSessionParams,
   ): Promise<string> {
+    this.ensureStripeOutbound('checkout.sessions.create (deposit)');
+
     if (params.depositAmountBrl <= 0) {
       throw new BadRequestException('Deposit amount must be greater than zero');
     }
@@ -569,6 +596,13 @@ export class BillingService {
       return;
     }
 
+    if (!this.isStripeOutboundEnabled()) {
+      this.logger.warn(
+        'Skipped Stripe subscription retrieve on checkout.session.completed because APP_ENV is not production.',
+      );
+      return;
+    }
+
     const stripeSubscription = await this.stripe.subscriptions.retrieve(
       stripeSubscriptionId,
       { expand: ['items.data.price'] },
@@ -629,10 +663,11 @@ export class BillingService {
   private async handleSubscriptionUpdated(
     subscription: StripeSubscription,
   ): Promise<void> {
-    const freshSubscription = await this.stripe.subscriptions.retrieve(
-      subscription.id,
-      { expand: ['items.data.price'] },
-    );
+    const freshSubscription = this.isStripeOutboundEnabled()
+      ? await this.stripe.subscriptions.retrieve(subscription.id, {
+          expand: ['items.data.price'],
+        })
+      : subscription;
 
     await this.syncSubscriptionFromStripe(freshSubscription, {
       applyPlanTierOnActive: true,
@@ -788,6 +823,8 @@ export class BillingService {
   }
 
   async syncTenantSubscription(tenantId: string): Promise<Tenant> {
+    this.ensureStripeOutbound('subscriptions.retrieve');
+
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
@@ -860,6 +897,8 @@ export class BillingService {
   async createCustomerPortalSession(
     tenantId: string,
   ): Promise<CheckoutSessionResponse> {
+    this.ensureStripeOutbound('billingPortal.sessions.create');
+
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
@@ -908,6 +947,8 @@ export class BillingService {
   async createCheckoutSession(
     params: CreateCheckoutSessionParams,
   ): Promise<CheckoutSessionResponse> {
+    this.ensureStripeOutbound('checkout.sessions.create');
+
     const tenant = await this.tenantsService.findById(params.tenantId);
 
     if (!tenant) {
@@ -996,6 +1037,8 @@ export class BillingService {
    * Exige plano ACTIVE (não disponível no trial do produto).
    */
   async addSupportAiAddon(tenantId: string): Promise<Tenant> {
+    this.ensureStripeOutbound('subscriptionItems.create');
+
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
@@ -1293,6 +1336,13 @@ export class BillingService {
       return this.buildStripeConnectStatus(tenant);
     }
 
+    if (!this.isStripeOutboundEnabled()) {
+      this.logger.warn(
+        'Skipped Stripe Connect sync because APP_ENV is not production.',
+      );
+      return this.buildStripeConnectStatus(tenant);
+    }
+
     const syncedTenant = await this.syncConnectAccountFromStripe(tenantId);
 
     return this.buildStripeConnectStatus(syncedTenant ?? tenant);
@@ -1302,6 +1352,8 @@ export class BillingService {
     tenantId: string,
     ownerEmail: string,
   ): Promise<CheckoutSessionResponse> {
+    this.ensureStripeOutbound('accountLinks.create');
+
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
@@ -1370,6 +1422,8 @@ export class BillingService {
   async createConnectDashboardLink(
     tenantId: string,
   ): Promise<CheckoutSessionResponse> {
+    this.ensureStripeOutbound('accounts.createLoginLink');
+
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
@@ -1423,6 +1477,13 @@ export class BillingService {
     const connectAccountId = tenant.stripe_connect_account_id?.trim();
 
     if (!connectAccountId) {
+      return tenant;
+    }
+
+    if (!this.isStripeOutboundEnabled()) {
+      this.logger.warn(
+        'Skipped Stripe Connect retrieve because APP_ENV is not production.',
+      );
       return tenant;
     }
 
