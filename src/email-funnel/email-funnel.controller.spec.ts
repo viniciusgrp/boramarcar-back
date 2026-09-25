@@ -10,4 +10,20 @@ describe('EmailFunnelController', () => {
     await expect(controller.runDueEmails()).resolves.toEqual({ processed: 3 });
     expect(processDueEmails).toHaveBeenCalledTimes(1);
   });
+
+  it('lists recorded sends and resends one by id', async () => {
+    const listSends = jest.fn().mockResolvedValue([{ id: 'send-1' }]);
+    const resend = jest.fn().mockResolvedValue({ id: 'send-1', status: 'sent' });
+    const controller = new EmailFunnelController({
+      listSends,
+      resend,
+    } as never);
+
+    await expect(controller.listSends()).resolves.toEqual([{ id: 'send-1' }]);
+    await expect(controller.resend('send-1')).resolves.toEqual({
+      id: 'send-1',
+      status: 'sent',
+    });
+    expect(resend).toHaveBeenCalledWith('send-1');
+  });
 });

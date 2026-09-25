@@ -46,4 +46,14 @@ export class EmailFunnelController {
     const processed = await this.emailFunnelService.processDueEmails();
     return { processed };
   }
+
+  @Get('sends')
+  listSends() {
+    return this.emailFunnelService.listSends();
+  }
+
+  @Post('sends/:id/resend')
+  resend(@Param('id') id: string) {
+    return this.emailFunnelService.resend(id);
+  }
 }
