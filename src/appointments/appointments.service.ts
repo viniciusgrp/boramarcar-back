@@ -57,6 +57,11 @@ import { FinanceService } from '../finance/finance.service';
 import { StockMovementsService } from '../inventory/stock-movements.service';
 import { resolveAppointmentServiceIds } from '../inventory/utils/service-bom.util';
 import { CreateInternalAppointmentDto } from './dto/create-internal-appointment.dto';
+import {
+  assertAppointmentDurationMinutes,
+  canEditAppointmentDuration,
+  resolveAppointmentDurationMinutes,
+} from './utils/appointment-duration.util';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import type { BookingSource } from './entities/booking-source.type';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
@@ -865,6 +870,10 @@ export class AppointmentsService {
       );
     }
 
+    if (dto.durationMinutes !== undefined && dto.durationMinutes !== null) {
+      assertAppointmentDurationMinutes(dto.durationMinutes);
+    }
+
     const customer = await this.resolveCustomerForInternal(
       tenantId,
       dto.customerId,
@@ -878,7 +887,10 @@ export class AppointmentsService {
     const primaryServiceId = booking.items[0].id;
 
     const startTime = parseWallClockDateTime(dto.startTime);
-    const durationMinutes = booking.totalDurationMinutes;
+    const durationMinutes = resolveAppointmentDurationMinutes(
+      booking.totalDurationMinutes,
+      dto.durationMinutes,
+    );
     const endTime = addMinutes(startTime, durationMinutes);
     const dateKey = formatWallClockDate(startTime);
 
@@ -946,7 +958,7 @@ export class AppointmentsService {
         deposit_paid: false,
         payment_status: 'PAID',
         booking_source: 'INTERNAL',
-        total_duration_minutes: booking.totalDurationMinutes,
+        total_duration_minutes: durationMinutes,
         total_price: booking.totalPrice,
       })
       .select(ADMIN_APPOINTMENT_SELECT)
@@ -969,6 +981,137 @@ export class AppointmentsService {
     await this.insertAppointmentServices(row.id, tenantId, booking);
 
     return this.mapAdminAppointmentRow(row);
+  }
+
+  async updateDurationForTenant(
+    tenantId: string,
+    appointmentId: string,
+    durationMinutes: number,
+    scopedProfessionalId?: string,
+  ): Promise<AdminAppointment> {
+    assertAppointmentDurationMinutes(durationMinutes);
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(
+        'id, status, professional_id, start_time, end_time, total_duration_minutes',
+      )
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (!existing) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      existing.professional_id,
+    );
+
+    if (!canEditAppointmentDuration(existing.status)) {
+      throw new BadRequestException(
+        'Não é possível alterar a duração de um agendamento concluído, cancelado ou com falta.',
+      );
+    }
+
+    const startTime = parseWallClockDateTime(existing.start_time);
+    const currentDuration = this.resolveStoredDurationMinutes(
+      existing.total_duration_minutes,
+      startTime,
+      existing.end_time,
+    );
+
+    if (currentDuration === durationMinutes) {
+      const current = await this.findAdminById(tenantId, appointmentId);
+      if (!current) {
+        throw new NotFoundException(
+          `Appointment with id "${appointmentId}" was not found for this tenant`,
+        );
+      }
+
+      return current;
+    }
+
+    const endTime = addMinutes(startTime, durationMinutes);
+    const currentEnd = parseWallClockDateTime(existing.end_time);
+    const dateKey = formatWallClockDate(startTime);
+    const schedule =
+      await this.professionalHoursService.getEffectiveScheduleForDate(
+        tenantId,
+        existing.professional_id,
+        dateKey,
+      );
+    const currentlyInsideSchedule =
+      schedule !== null &&
+      !schedule.isClosed &&
+      startTime >= schedule.openAt &&
+      currentEnd <= schedule.closeAt;
+
+    if (currentlyInsideSchedule && schedule && endTime > schedule.closeAt) {
+      throw new BadRequestException(
+        'A nova duração deixa o atendimento fora da escala do profissional.',
+      );
+    }
+
+    const hasConflict = await this.hasBookingConflict(
+      tenantId,
+      existing.professional_id,
+      startTime,
+      endTime,
+      appointmentId,
+    );
+
+    if (hasConflict) {
+      throw new ConflictException(
+        'Já existe um agendamento neste horário para o profissional.',
+      );
+    }
+
+    const hasAbsenceConflict =
+      await this.professionalAbsencesService.hasAbsenceOverlap(
+        tenantId,
+        existing.professional_id,
+        startTime,
+        endTime,
+      );
+
+    if (hasAbsenceConflict) {
+      throw new BadRequestException(
+        'O profissional estará ausente neste horário.',
+      );
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .update({
+        end_time: wallClockToStorageIso(endTime),
+        total_duration_minutes: durationMinutes,
+      })
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .single();
+
+    if (error) {
+      if (isBookingOverlapConstraintError(error)) {
+        throw new ConflictException(
+          'Este horário não está mais disponível. Escolha outro horário.',
+        );
+      }
+
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return this.mapAdminAppointmentRow(data as SupabaseAppointmentWithRelations);
   }
 
   async findAllByDate(
@@ -3878,6 +4021,23 @@ export class AppointmentsService {
     return availableProfessionalIds[
       randomInt(availableProfessionalIds.length)
     ] as string;
+  }
+
+  private resolveStoredDurationMinutes(
+    totalDurationMinutes: number | null | undefined,
+    startTime: Date,
+    endTimeIso: string,
+  ): number {
+    if (
+      typeof totalDurationMinutes === 'number' &&
+      Number.isInteger(totalDurationMinutes) &&
+      totalDurationMinutes > 0
+    ) {
+      return totalDurationMinutes;
+    }
+
+    const endTime = parseWallClockDateTime(endTimeIso);
+    return Math.round((endTime.getTime() - startTime.getTime()) / 60000);
   }
 
   private assertAppointmentProfessionalScope(

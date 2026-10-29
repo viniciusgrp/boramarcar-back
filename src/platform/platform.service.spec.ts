@@ -239,8 +239,8 @@ describe('PlatformService', () => {
   it('extends trial and complimentary end together', async () => {
     const tenant = buildTenant({
       subscription_status: 'INACTIVE',
-      trial_ends_at: '2026-10-01T00:00:00.000Z',
-      comp_until: '2026-10-01T00:00:00.000Z',
+      trial_ends_at: '2027-06-01T00:00:00.000Z',
+      comp_until: '2027-06-01T00:00:00.000Z',
     });
     const updates: Record<string, unknown>[] = [];
 
@@ -272,8 +272,8 @@ describe('PlatformService', () => {
 
     await service.extendTrial('t-1', 10);
 
-    expect(updates[0]?.trial_ends_at).toBe('2026-10-11T00:00:00.000Z');
-    expect(updates[0]?.comp_until).toBe('2026-10-11T00:00:00.000Z');
+    expect(updates[0]?.trial_ends_at).toBe('2027-06-11T00:00:00.000Z');
+    expect(updates[0]?.comp_until).toBe('2027-06-11T00:00:00.000Z');
   });
 
   it('cancels a local plan without Stripe', async () => {

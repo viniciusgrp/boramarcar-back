@@ -563,6 +563,402 @@ describe('AppointmentsService', () => {
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
+
+    it('stores a custom duration and blocks the agenda until that end time', async () => {
+      const ctx = buildService();
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveBookingServices: () => Promise<ResolvedBookingServices>;
+          },
+          'resolveBookingServices',
+        )
+        .mockResolvedValue(booking);
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveCustomerForInternal: () => Promise<{
+              customerId: string | null;
+              name: string;
+              phone: string;
+            }>;
+          },
+          'resolveCustomerForInternal',
+        )
+        .mockResolvedValue({
+          customerId: null,
+          name: 'Ana',
+          phone: '11999999999',
+        });
+      const hasConflict = jest
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
+        .mockResolvedValue(false);
+      jest
+        .spyOn(
+          ctx.service as never as { insertAppointmentServices: () => Promise<void> },
+          'insertAppointmentServices',
+        )
+        .mockResolvedValue(undefined);
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
+
+      const chain = createChainableQuery({
+        data: {
+          id: 'appt-1',
+          customer_id: null,
+          professional_id: 'pro-1',
+          service_id: 'svc-1',
+          customer_name: 'Ana',
+          customer_phone: '11999999999',
+          start_time: '2099-01-15T09:00:00.000Z',
+          end_time: '2099-01-15T09:45:00.000Z',
+          status: 'CONFIRMED',
+          booking_source: 'INTERNAL',
+          total_duration_minutes: 45,
+          total_price: 50,
+          loyalty_reward_id: null,
+          professionals: { name: 'João' },
+          services: { name: 'Corte', duration_minutes: 60, price: 50 },
+          appointment_services: [
+            {
+              service_id: 'svc-1',
+              sort_order: 0,
+              duration_minutes: 60,
+              price: 50,
+              services: { name: 'Corte' },
+            },
+          ],
+        },
+        error: null,
+      });
+      ctx.from.mockReturnValue(chain);
+
+      const created = await ctx.service.createInternal('tenant-1', {
+        professionalId: 'pro-1',
+        startTime: '2099-01-15T09:00:00.000Z',
+        serviceIds: ['svc-1'],
+        customerName: 'Ana',
+        customerPhone: '11999999999',
+        durationMinutes: 45,
+      });
+
+      expect(chain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          total_duration_minutes: 45,
+          end_time: '2099-01-15T09:45:00.000Z',
+          total_price: 50,
+        }),
+      );
+      const conflictCalls = hasConflict.mock.calls as unknown as Array<
+        [string, string, Date, Date]
+      >;
+      expect(conflictCalls[0][3].getHours()).toBe(9);
+      expect(conflictCalls[0][3].getMinutes()).toBe(45);
+      expect(created.durationMinutes).toBe(45);
+    });
+
+    it('keeps the catalog duration when the internal booking omits an override', async () => {
+      const ctx = buildService();
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveBookingServices: () => Promise<ResolvedBookingServices>;
+          },
+          'resolveBookingServices',
+        )
+        .mockResolvedValue(booking);
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveCustomerForInternal: () => Promise<{
+              customerId: string | null;
+              name: string;
+              phone: string;
+            }>;
+          },
+          'resolveCustomerForInternal',
+        )
+        .mockResolvedValue({
+          customerId: null,
+          name: 'Ana',
+          phone: '11999999999',
+        });
+      jest
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
+        .mockResolvedValue(false);
+      jest
+        .spyOn(
+          ctx.service as never as { insertAppointmentServices: () => Promise<void> },
+          'insertAppointmentServices',
+        )
+        .mockResolvedValue(undefined);
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
+
+      const chain = createChainableQuery({
+        data: {
+          id: 'appt-1',
+          customer_id: null,
+          professional_id: 'pro-1',
+          customer_name: 'Ana',
+          customer_phone: '11999999999',
+          start_time: '2099-01-15T09:00:00.000Z',
+          end_time: '2099-01-15T10:00:00.000Z',
+          status: 'CONFIRMED',
+          booking_source: 'INTERNAL',
+          total_duration_minutes: 60,
+          total_price: 50,
+          professionals: { name: 'João' },
+          services: { name: 'Corte', duration_minutes: 60, price: 50 },
+          appointment_services: [],
+        },
+        error: null,
+      });
+      ctx.from.mockReturnValue(chain);
+
+      await ctx.service.createInternal('tenant-1', {
+        professionalId: 'pro-1',
+        startTime: '2099-01-15T09:00:00.000Z',
+        serviceIds: ['svc-1'],
+        customerName: 'Ana',
+        customerPhone: '11999999999',
+      });
+
+      expect(chain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          total_duration_minutes: 60,
+          end_time: '2099-01-15T10:00:00.000Z',
+        }),
+      );
+    });
+
+    it('rejects a non-positive custom duration', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.createInternal('tenant-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T09:00:00.000Z',
+          serviceIds: ['svc-1'],
+          customerName: 'Ana',
+          customerPhone: '11999999999',
+          durationMinutes: 0,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('updateDurationForTenant', () => {
+    const existingAppointment = {
+      id: 'appt-1',
+      status: 'CONFIRMED',
+      professional_id: 'pro-1',
+      start_time: '2099-01-15T09:00:00.000Z',
+      end_time: '2099-01-15T10:00:00.000Z',
+      total_duration_minutes: 60,
+    };
+
+    const updatedAdminRow = {
+      id: 'appt-1',
+      customer_id: null,
+      professional_id: 'pro-1',
+      customer_name: 'Ana',
+      customer_phone: '11999999999',
+      start_time: '2099-01-15T09:00:00.000Z',
+      end_time: '2099-01-15T10:30:00.000Z',
+      status: 'CONFIRMED',
+      booking_source: 'INTERNAL',
+      total_duration_minutes: 90,
+      total_price: 50,
+      professionals: { name: 'João' },
+      services: { name: 'Corte', duration_minutes: 60, price: 50 },
+      appointment_services: [
+        {
+          service_id: 'svc-1',
+          sort_order: 0,
+          duration_minutes: 60,
+          price: 50,
+          services: { name: 'Corte' },
+        },
+      ],
+    };
+
+    function mockEditableAppointment(ctx: ReturnType<typeof buildService>) {
+      const chain = createChainableQuery({ data: null, error: null });
+      chain.maybeSingle.mockResolvedValue({
+        data: existingAppointment,
+        error: null,
+      });
+      chain.single.mockResolvedValue({ data: updatedAdminRow, error: null });
+      ctx.from.mockReturnValue(chain);
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
+      return chain;
+    }
+
+    it('updates the end time when the staff changes the duration', async () => {
+      const ctx = buildService();
+      const chain = mockEditableAppointment(ctx);
+
+      const updated = await ctx.service.updateDurationForTenant(
+        'tenant-1',
+        'appt-1',
+        90,
+      );
+
+      expect(chain.update).toHaveBeenCalledWith({
+        end_time: '2099-01-15T10:30:00.000Z',
+        total_duration_minutes: 90,
+      });
+      expect(updated.durationMinutes).toBe(90);
+      expect(updated.endTime).toBe('2099-01-15T10:30:00.000Z');
+    });
+
+    it('does not write when the duration is already the stored value', async () => {
+      const ctx = buildService();
+      const chain = createChainableQuery({ data: updatedAdminRow, error: null });
+      chain.maybeSingle
+        .mockResolvedValueOnce({ data: existingAppointment, error: null })
+        .mockResolvedValueOnce({
+          data: {
+            ...updatedAdminRow,
+            end_time: '2099-01-15T10:00:00.000Z',
+            total_duration_minutes: 60,
+          },
+          error: null,
+        });
+      ctx.from.mockReturnValue(chain);
+
+      const current = await ctx.service.updateDurationForTenant(
+        'tenant-1',
+        'appt-1',
+        60,
+      );
+
+      expect(chain.update).not.toHaveBeenCalled();
+      expect(current.durationMinutes).toBe(60);
+    });
+
+    it('rejects duration changes that overlap another booking', async () => {
+      const ctx = buildService();
+      const chain = mockEditableAppointment(ctx);
+      jest
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
+        .mockResolvedValue(true);
+
+      await expect(
+        ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 90),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(chain.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a duration that ends after the professional closes', async () => {
+      const ctx = buildService();
+      const chain = mockEditableAppointment(ctx);
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '10:00'),
+      });
+
+      await expect(
+        ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 90),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(chain.update).not.toHaveBeenCalled();
+    });
+
+    it('still updates a booking that was already outside the professional schedule', async () => {
+      const ctx = buildService();
+      const chain = createChainableQuery({ data: null, error: null });
+      chain.maybeSingle.mockResolvedValue({
+        data: {
+          ...existingAppointment,
+          start_time: '2099-01-15T17:00:00.000Z',
+          end_time: '2099-01-15T19:00:00.000Z',
+          total_duration_minutes: 120,
+        },
+        error: null,
+      });
+      chain.single.mockResolvedValue({
+        data: {
+          ...updatedAdminRow,
+          start_time: '2099-01-15T17:00:00.000Z',
+          end_time: '2099-01-15T18:30:00.000Z',
+          total_duration_minutes: 90,
+        },
+        error: null,
+      });
+      ctx.from.mockReturnValue(chain);
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
+
+      await ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 90);
+
+      expect(chain.update).toHaveBeenCalledWith({
+        end_time: '2099-01-15T18:30:00.000Z',
+        total_duration_minutes: 90,
+      });
+    });
+
+    it('rejects duration changes on finished appointments', async () => {
+      const ctx = buildService();
+      const chain = createChainableQuery({
+        data: { ...existingAppointment, status: 'COMPLETED' },
+        error: null,
+      });
+      ctx.from.mockReturnValue(chain);
+
+      await expect(
+        ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 30),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(chain.update).not.toHaveBeenCalled();
+    });
+
+    it('blocks a professional from changing another agenda', async () => {
+      const ctx = buildService();
+      ctx.from.mockReturnValue(
+        createChainableQuery({
+          data: { ...existingAppointment, professional_id: 'pro-2' },
+          error: null,
+        }),
+      );
+
+      await expect(
+        ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 30, 'pro-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('returns not found when the appointment is outside the tenant', async () => {
+      const ctx = buildService();
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: null, error: null }),
+      );
+
+      await expect(
+        ctx.service.updateDurationForTenant('tenant-1', 'missing', 30),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 
   describe('crons and deposit delegates', () => {

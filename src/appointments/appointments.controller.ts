@@ -31,6 +31,7 @@ import {
   GuestAppointmentRescheduleDto,
 } from './dto/guest-appointment.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
+import { UpdateAppointmentDurationDto } from './dto/update-appointment-duration.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AdminAppointment } from './entities/admin-appointment.entity';
 import type { AppointmentLoyaltyRedeemOptions } from './entities/appointment-loyalty-redeem-options.entity';
@@ -440,6 +441,26 @@ export class AppointmentsController {
     return this.appointmentsService.getLoyaltyRedeemOptionsForAppointment(
       context.tenant.id,
       id,
+      scopedProfessionalId,
+    );
+  }
+
+  @Patch(':id/duration')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  updateDuration(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') id: string,
+    @Body() dto: UpdateAppointmentDurationDto,
+  ): Promise<AdminAppointment> {
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.updateDurationForTenant(
+      context.tenant.id,
+      id,
+      dto.durationMinutes,
       scopedProfessionalId,
     );
   }
