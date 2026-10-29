@@ -7,7 +7,7 @@ import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 
 /**
  * Alias público usado no Stripe Dashboard e em docs
- * (`https://api.boramarcar.com.br/v1/payments/webhook`).
+ * (`https://app.boramarcar.com.br/v1/payments/webhook`).
  * O handler canônico continua em POST /billing/webhook.
  */
 @Controller('v1/payments')

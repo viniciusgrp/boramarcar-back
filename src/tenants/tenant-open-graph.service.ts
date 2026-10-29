@@ -135,7 +135,7 @@ export class TenantOpenGraphService {
   private resolveApiOrigin(): string {
     return (
       this.configService.get<string>('PUBLIC_API_ORIGIN')?.trim() ||
-      'https://api.boramarcar.com.br'
+      'https://app.boramarcar.com.br'
     );
   }
 }
