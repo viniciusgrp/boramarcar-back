@@ -30,6 +30,22 @@ export type EmailFunnelSkipReason =
 
 export type EmailFunnelEligibility = 'send' | EmailFunnelSkipReason;
 
+export type EmailFunnelSendStatus = 'sent' | 'skipped' | 'failed';
+
+export interface EmailFunnelSendListItem {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  recipientEmail: string | null;
+  stepKey: string;
+  stepNumber: number | null;
+  subject: string;
+  status: EmailFunnelSendStatus;
+  skippedReason: string | null;
+  errorMessage: string | null;
+  sentAt: string;
+}
+
 export interface EmailFunnelStepRow {
   step_key: string;
   step_number: number;
