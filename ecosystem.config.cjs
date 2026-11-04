@@ -1,9 +1,10 @@
 module.exports = {
   apps: [
     {
-      name: 'boramarcar-api',
+      name: 'api-boramarcar',
       script: 'dist/main.js',
       instances: 1,
+      exec_mode: 'fork',
       autorestart: true,
       watch: false,
       max_memory_restart: '500M',
