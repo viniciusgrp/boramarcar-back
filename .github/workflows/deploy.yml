@@ -52,8 +52,11 @@ jobs:
             cd "${{ secrets.EC2_APP_PATH }}"
             git fetch origin master
             git reset --hard origin/master
+            if pm2 describe boramarcar-api >/dev/null 2>&1; then
+              pm2 delete boramarcar-api
+            fi
             DEPLOY_BRANCH=master \
-            PM2_APP_NAME=boramarcar-api \
+            PM2_APP_NAME=api-boramarcar \
             PM2_ECOSYSTEM=ecosystem.config.cjs \
             bash scripts/deploy.sh
 

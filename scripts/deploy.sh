@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-master}"
-PM2_APP_NAME="${PM2_APP_NAME:-boramarcar-api}"
+PM2_APP_NAME="${PM2_APP_NAME:-api-boramarcar}"
 PM2_ECOSYSTEM="${PM2_ECOSYSTEM:-ecosystem.config.cjs}"
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
