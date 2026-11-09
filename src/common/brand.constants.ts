@@ -10,6 +10,6 @@ export const BRAND_PRIVACY_EMAIL = `privacidade@${BRAND_SITE_DOMAIN}`;
 
 export const BRAND_CONTACT_EMAIL = `contato@${BRAND_SITE_DOMAIN}`;
 
-export const DEFAULT_ADMIN_ACCENT_LIGHT = '#4338ca';
+export const DEFAULT_ADMIN_ACCENT_LIGHT = '#0F5F58';
 
-export const DEFAULT_ADMIN_ACCENT_DARK = '#818cf8';
+export const DEFAULT_ADMIN_ACCENT_DARK = '#4FD1C0';
