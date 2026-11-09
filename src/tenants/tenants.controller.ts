@@ -69,7 +69,7 @@ export class TenantsController {
       expectedAction: RECAPTCHA_ACTION_TENANT_REGISTER,
     });
 
-    const result = await this.tenantsService.register(dto);
+    const result = await this.tenantsService.register(dto, request);
     return {
       tenant: result.tenant,
       requires_email_confirmation: result.requiresEmailConfirmation,

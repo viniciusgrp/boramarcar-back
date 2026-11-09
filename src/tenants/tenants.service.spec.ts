@@ -17,6 +17,7 @@ function buildService(appEnv?: string) {
     {} as never,
     {} as never,
     buildConfig(appEnv),
+    { sendCompleteRegistration: jest.fn() } as never,
   );
 }
 
@@ -50,6 +51,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
     );
 
     await expect(
@@ -76,6 +78,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
     );
 
     await expect(
@@ -104,6 +107,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
     );
 
     await expect(
@@ -137,6 +141,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
     );
 
     await expect(
@@ -164,6 +169,7 @@ describe('TenantsService', () => {
       {} as never,
       {} as never,
       buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
     );
 
     await expect(
