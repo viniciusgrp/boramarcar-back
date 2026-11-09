@@ -1,8 +1,8 @@
-# Faturamento (assinatura) e Stripe Connect (recebimento de sinal)
+﻿# Faturamento (assinatura) e Stripe Connect (recebimento de sinal)
 
-São duas integrações Stripe diferentes e independentes no BoraMarcar:
+São duas integrações Stripe diferentes e independentes no Horário Certo:
 
-1. **Faturamento (Billing)**: a assinatura mensal que o estabelecimento paga ao BoraMarcar pelo uso do sistema (planos Solo/Pro/Elite).
+1. **Faturamento (Billing)**: a assinatura mensal que o estabelecimento paga ao Horário Certo pelo uso do sistema (planos Solo/Pro/Elite).
 2. **Stripe Connect**: a conexão da conta Stripe do próprio estabelecimento, usada só para receber o sinal cobrado dos clientes finais.
 
 ## Faturamento (Meu plano)
@@ -27,11 +27,11 @@ São duas integrações Stripe diferentes e independentes no BoraMarcar:
 - Conectar a conta é feito em Configurações → Pagamentos ou na tela Recebimentos: o dono passa por um cadastro guiado do Stripe (Stripe Express).
 - Só depois que a conta Stripe estiver com pagamentos habilitados (`charges_enabled`) é que o sistema permite cobrar sinal de fato.
 - Na tela Recebimentos, o dono pode abrir o painel (dashboard) do Stripe Express para ver os valores recebidos, repasses e extratos direto no Stripe.
-- O BoraMarcar retém uma pequena taxa de plataforma sobre o valor do sinal antes de repassar o restante à conta do estabelecimento (ver base de conhecimento sobre sinal para detalhes).
+- O Horário Certo retém uma pequena taxa de plataforma sobre o valor do sinal antes de repassar o restante à conta do estabelecimento (ver base de conhecimento sobre sinal para detalhes).
 - Problemas de verificação de identidade, documentos ou conta Stripe do estabelecimento em si devem ser resolvidos diretamente no fluxo do Stripe; se o dono estiver com dificuldade, oriente reabrir o link de onboarding do Connect na tela Recebimentos ou Configurações → Pagamentos.
 
 ## Boas práticas para responder
 
 - Nunca informe valores de fatura, últimos 4 dígitos de cartão, ou dados sensíveis de pagamento: esses dados não estão disponíveis para este assistente.
 - Para disputas de cobrança, reembolsos de assinatura, ou problemas que a sincronização não resolveu, oriente o atendimento humano.
-- Diferencie sempre: "assinatura do BoraMarcar" (Faturamento) é uma coisa; "receber sinal dos clientes" (Stripe Connect) é outra, completamente separada.
+- Diferencie sempre: "assinatura do Horário Certo" (Faturamento) é uma coisa; "receber sinal dos clientes" (Stripe Connect) é outra, completamente separada.

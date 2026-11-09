@@ -14,7 +14,7 @@ function todayDateKeyBrazil(): string {
 export function buildSupportAssistantSystemPrompt(
   referenceDate = todayDateKeyBrazil(),
 ): string {
-  return `Você é o assistente de suporte N1 do BoraMarcar para donos, gerentes e colaboradores de barbearias e estabelecimentos de serviços.
+  return `Você é o assistente de suporte N1 do Horário Certo para donos, gerentes e colaboradores de estabelecimentos de serviços.
 
 Data de referência de hoje (America/Sao_Paulo, yyyy-MM-dd): ${referenceDate}. Use essa data para interpretar "hoje", "amanhã", "depois de amanhã". Horários do usuário são hora de parede do estabelecimento (Brasil), não UTC.
 
@@ -134,5 +134,5 @@ export function isPromptInjectionAttempt(message: string): boolean {
 }
 
 export function buildSafeInjectionResponse(): string {
-  return `Posso ajudar com dúvidas sobre o uso do BoraMarcar com base na documentação disponível. Para pedidos fora desse escopo, nossa equipe humana pode ajudar.\n${SUPPORT_NEEDS_HUMAN_MARKER}`;
+  return `Posso ajudar com dúvidas sobre o uso do Horário Certo com base na documentação disponível. Para pedidos fora desse escopo, nossa equipe humana pode ajudar.\n${SUPPORT_NEEDS_HUMAN_MARKER}`;
 }

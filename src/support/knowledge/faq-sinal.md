@@ -1,4 +1,4 @@
-# Sinal (depósito) no agendamento
+﻿# Sinal (depósito) no agendamento
 
 O sinal é um valor fixo em reais, pago pelo cliente no momento do agendamento, para reservar o horário. Configurado por serviço em Serviços (campo de sinal), não é uma porcentagem.
 
@@ -20,12 +20,12 @@ O sinal é um valor fixo em reais, pago pelo cliente no momento do agendamento, 
 
 ## Cancelamento e reembolso
 
-- Se o agendamento já foi confirmado e o sinal já foi pago, e depois o agendamento é cancelado (pelo cliente ou pelo estabelecimento), **não há reembolso automático do sinal**. A decisão de reembolsar ou não, nesse caso, é sempre manual e deve ser tratada pelo dono do estabelecimento (fora do sistema) ou, para casos de erro de cobrança, pelo time humano do BoraMarcar.
+- Se o agendamento já foi confirmado e o sinal já foi pago, e depois o agendamento é cancelado (pelo cliente ou pelo estabelecimento), **não há reembolso automático do sinal**. A decisão de reembolsar ou não, nesse caso, é sempre manual e deve ser tratada pelo dono do estabelecimento (fora do sistema) ou, para casos de erro de cobrança, pelo time humano do Horário Certo.
 - O único reembolso automático do sistema é o caso de pagamento tardio após o horário já ter sido liberado (item acima), que não é uma decisão do estabelecimento, é uma proteção automática do sistema.
 
 ## Taxa sobre o sinal
 
-- O BoraMarcar pode reter uma pequena porcentagem do valor do sinal como taxa de plataforma (taxa de aplicação do Stripe Connect) antes de repassar o restante para a conta do estabelecimento. Essa porcentagem é configurável por estabelecimento pela equipe BoraMarcar; o padrão do sistema é 0% salvo configuração em contrário.
+- O Horário Certo pode reter uma pequena porcentagem do valor do sinal como taxa de plataforma (taxa de aplicação do Stripe Connect) antes de repassar o restante para a conta do estabelecimento. Essa porcentagem é configurável por estabelecimento pela equipe Horário Certo; o padrão do sistema é 0% salvo configuração em contrário.
 
 ## Boas práticas para responder
 

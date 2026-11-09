@@ -6,13 +6,13 @@ describe('resolveMediaUrl', () => {
     expect(
       resolveMediaUrl(
         'https://www.instagram.com/boramarcarapp/p/DcG_MG4RtRd/',
-        'https://boramarcar.com.br',
+        'https://horariocerto.app',
       ),
     ).toBe('https://www.instagram.com/boramarcarapp/p/DcG_MG4RtRd/');
 
     expect(
-      resolveMediaUrl('/email-funnel/agenda-bora-marcar.png', 'https://boramarcar.com.br/'),
-    ).toBe('https://boramarcar.com.br/email-funnel/agenda-bora-marcar.png');
+      resolveMediaUrl('/email-funnel/agenda-bora-marcar.png', 'https://horariocerto.app/'),
+    ).toBe('https://horariocerto.app/email-funnel/agenda-bora-marcar.png');
   });
 
   it('renders an email-safe video block with thumbnail and Instagram button', () => {
@@ -40,18 +40,18 @@ describe('resolveMediaUrl', () => {
 
     const html = buildEmailFunnelHtml({
       step,
-      frontendUrl: 'https://boramarcar.com.br',
-      ctaUrl: 'https://boramarcar.com.br/admin/agenda',
-      optOutUrl: 'https://boramarcar.com.br/descadastrar-emails-trial?token=x',
+      frontendUrl: 'https://horariocerto.app',
+      ctaUrl: 'https://horariocerto.app/admin/agenda',
+      optOutUrl: 'https://horariocerto.app/descadastrar-emails-trial?token=x',
       useSetupCopy: false,
     });
 
     expect(html).toContain('https://www.instagram.com/boramarcarapp/p/DcG_MG4RtRd/');
     expect(html).toContain(
-      'https://boramarcar.com.br/email-funnel/agenda-video-preview.jpg',
+      'https://horariocerto.app/email-funnel/agenda-video-preview.jpg',
     );
     expect(html).toMatch(
-      /<a href="https:\/\/www\.instagram\.com\/boramarcarapp\/p\/DcG_MG4RtRd\/"[^>]*>[\s\S]*?<img src="https:\/\/boramarcar\.com\.br\/email-funnel\/agenda-video-preview\.jpg"/,
+      /<a href="https:\/\/www\.instagram\.com\/boramarcarapp\/p\/DcG_MG4RtRd\/"[^>]*>[\s\S]*?<img src="https:\/\/horariocerto\.app\/email-funnel\/agenda-video-preview\.jpg"/,
     );
     expect(html).toContain('Assistir no Instagram');
     expect(html).toContain('width="416" height="234"');

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { BRAND_API_ORIGIN, BRAND_APP_ORIGIN } from '../common/brand.constants';
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import { TenantsService } from './tenants.service';
@@ -128,14 +129,14 @@ export class TenantOpenGraphService {
     return (
       this.configService.get<string>('PUBLIC_APP_ORIGIN')?.trim() ||
       this.configService.get<string>('FRONTEND_URL')?.trim() ||
-      'https://boramarcar.com.br'
+      BRAND_APP_ORIGIN
     );
   }
 
   private resolveApiOrigin(): string {
     return (
       this.configService.get<string>('PUBLIC_API_ORIGIN')?.trim() ||
-      'https://app.boramarcar.com.br'
+      BRAND_API_ORIGIN
     );
   }
 }

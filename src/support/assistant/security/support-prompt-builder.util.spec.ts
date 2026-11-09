@@ -15,7 +15,7 @@ describe('support-prompt-builder', () => {
       userMessage: 'como cadastrar serviço?',
     });
 
-    expect(built.systemInstruction).toContain('BoraMarcar');
+    expect(built.systemInstruction).toContain('Horário Certo');
     expect(built.systemInstruction).toContain('markdown leve');
     expect(built.systemInstruction).toContain('analytics_snapshot');
     expect(built.systemInstruction).toContain('dataScope');

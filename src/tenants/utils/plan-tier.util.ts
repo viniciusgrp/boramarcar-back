@@ -5,10 +5,10 @@ export const SOLO_PROFESSIONAL_LIMIT = 1;
 export const PRO_PROFESSIONAL_LIMIT = 5;
 
 export const SOLO_PROFESSIONAL_LIMIT_MESSAGE =
-  'Plano Solo permite apenas 1 profissional. Faça o upgrade para expandir sua equipe.';
+  'O plano Solo permite apenas 1 profissional. Mude de plano para expandir a equipe.';
 
 export const PRO_PROFESSIONAL_LIMIT_MESSAGE =
-  'Limite de 5 profissionais atingido. Faça upgrade para o plano Elite.';
+  'Limite de 5 profissionais atingido. Mude para o plano Elite.';
 
 export function normalizePlanTier(
   value: string | null | undefined,

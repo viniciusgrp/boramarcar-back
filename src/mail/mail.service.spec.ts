@@ -14,7 +14,7 @@ describe('MailService', () => {
       SMTP_HOST: 'smtp.example.com',
       SMTP_USER: 'user',
       SMTP_PASS: 'pass',
-      SMTP_FROM: 'BoraMarcar <noreply@example.com>',
+      SMTP_FROM: 'Horário Certo <noreply@example.com>',
       SMTP_PORT: '587',
     });
     const sendMail = jest.fn();
@@ -24,7 +24,7 @@ describe('MailService', () => {
     await expect(
       service.sendHtmlEmail({
         to: 'dono@gmail.com',
-        subject: 'Confirme seu e-mail no BoraMarcar',
+        subject: 'Confirme seu e-mail no Horário Certo',
         html: '<p>ok</p>',
         failIfUnconfigured: true,
       }),
@@ -40,12 +40,12 @@ describe('MailService', () => {
       SMTP_PORT: '465',
       SMTP_USER: 'resend',
       SMTP_PASS: 're_test',
-      SMTP_FROM: 'BoraMarcar <noreply@example.com>',
+      SMTP_FROM: 'Horário Certo <noreply@example.com>',
       SES_SMTP_HOST: 'email-smtp.sa-east-1.amazonaws.com',
       SES_SMTP_PORT: '587',
       SES_SMTP_USER: 'ses-user',
       SES_SMTP_PASS: 'ses-pass',
-      SES_SMTP_FROM: 'BoraMarcar <noreply@example.com>',
+      SES_SMTP_FROM: 'Horário Certo <noreply@example.com>',
     });
 
     const options = (
@@ -66,7 +66,7 @@ describe('MailService', () => {
       SES_SMTP_PORT: '587',
       SES_SMTP_USER: 'ses-user',
       SES_SMTP_PASS: 'ses-pass',
-      SES_SMTP_FROM: 'BoraMarcar <noreply@example.com>',
+      SES_SMTP_FROM: 'Horário Certo <noreply@example.com>',
     });
 
     const options = (
