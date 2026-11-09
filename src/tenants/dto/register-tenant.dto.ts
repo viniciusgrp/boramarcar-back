@@ -35,4 +35,16 @@ export class RegisterTenantDto {
   @IsOptional()
   @IsString()
   recaptcha_token?: string;
+
+  @IsOptional()
+  @IsString()
+  metaEventId?: string;
+
+  @IsOptional()
+  @IsString()
+  fbp?: string;
+
+  @IsOptional()
+  @IsString()
+  fbc?: string;
 }

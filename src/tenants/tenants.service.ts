@@ -51,6 +51,9 @@ import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { isProductionAppEnv } from '../common/app-env.util';
 import { isDisposableEmail } from '../security/disposable-email.util';
+import { MetaCapiService } from '../tracking/meta-capi.service';
+import type { Request } from 'express';
+import { getClientIp } from '../security/client-ip.util';
 import {
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
   ESTABLISHMENT_EMAIL_IN_USE_MESSAGE,
@@ -248,6 +251,7 @@ export class TenantsService {
     private readonly emailFunnelService: EmailFunnelService,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
+    private readonly metaCapiService: MetaCapiService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -778,7 +782,10 @@ export class TenantsService {
     return { slug, available: !existing };
   }
 
-  async register(dto: RegisterTenantDto): Promise<RegisterTenantResult> {
+  async register(
+    dto: RegisterTenantDto,
+    request?: Request,
+  ): Promise<RegisterTenantResult> {
     const ownerName = dto.owner_name?.trim() ?? '';
     const email = dto.email?.trim().toLowerCase() ?? '';
     const password = dto.password ?? '';
@@ -905,6 +912,13 @@ export class TenantsService {
     void this.sendTrialWelcomeEmail(tenantData.id as string, email).catch(
       () => undefined,
     );
+
+    void this.sendMetaCompleteRegistrationEvent({
+      email,
+      userId: ownerId,
+      dto,
+      request,
+    }).catch(() => undefined);
 
     if (skipEmailVerification) {
       this.logger.log(
@@ -1609,5 +1623,48 @@ export class TenantsService {
     }
 
     return nextValue;
+  }
+
+  private async sendMetaCompleteRegistrationEvent(params: {
+    email: string;
+    userId: string;
+    dto: RegisterTenantDto;
+    request?: Request;
+  }): Promise<void> {
+    const clientIpAddress = params.request
+      ? getClientIp(params.request)
+      : undefined;
+    const clientUserAgent = params.request?.headers['user-agent'];
+    const referer = params.request?.headers.referer;
+    const origin = params.request?.headers.origin;
+
+    const eventSourceUrl =
+      referer || origin || 'https://horariocerto.app/register';
+
+    let fbp = params.dto.fbp;
+    let fbc = params.dto.fbc;
+
+    if (!fbp && params.request?.headers.cookie) {
+      const cookies = params.request.headers.cookie.split(';');
+      for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === '_fbp' && !fbp) {
+          fbp = value;
+        } else if (name === '_fbc' && !fbc) {
+          fbc = value;
+        }
+      }
+    }
+
+    await this.metaCapiService.sendCompleteRegistration({
+      email: params.email,
+      userId: params.userId,
+      clientIpAddress,
+      clientUserAgent,
+      eventSourceUrl,
+      eventId: params.dto.metaEventId,
+      fbp,
+      fbc,
+    });
   }
 }
