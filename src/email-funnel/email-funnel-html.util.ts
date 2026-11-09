@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../common/brand.constants';
 import type { EmailFunnelStepRow } from './email-funnel.types';
 
 export function escapeHtml(value: string): string {
@@ -142,7 +143,7 @@ export function buildEmailFunnelHtml(params: {
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;">
         <tr>
           <td style="border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;line-height:0;">
-            <img src="${escapeHtml(imageUrl)}" alt="Agenda do Bora Marcar" width="416" style="display:block;width:100%;max-width:416px;height:auto;border:0;" />
+            <img src="${escapeHtml(imageUrl)}" alt="Agenda do ${BRAND_NAME}" width="416" style="display:block;width:100%;max-width:416px;height:auto;border:0;" />
           </td>
         </tr>
       </table>`
@@ -189,7 +190,7 @@ export function buildEmailFunnelHtml(params: {
             <tr>
               <td style="padding:32px 32px 24px;">
                 <p style="margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#9ca3af;">
-                  BoraMarcar
+                  ${BRAND_NAME}
                 </p>
                 <h1 style="margin:0 0 12px;font-size:22px;font-weight:600;line-height:1.3;color:#111827;">
                   ${escapeHtml(params.step.title)}
@@ -204,7 +205,7 @@ export function buildEmailFunnelHtml(params: {
             <tr>
               <td style="padding:20px 32px;border-top:1px solid #f3f4f6;background-color:#fafafa;">
                 <p style="margin:0 0 8px;font-size:12px;line-height:1.5;color:#9ca3af;text-align:center;">
-                  Você recebeu este e-mail porque criou uma conta no Bora Marcar.
+                  Você recebeu este e-mail porque criou uma conta no ${BRAND_NAME}.
                 </p>
                 <p style="margin:0;font-size:12px;line-height:1.5;color:#9ca3af;text-align:center;">
                   <a href="${escapeHtml(params.optOutUrl)}" style="color:#9ca3af;text-decoration:underline;">Não quero receber estes avisos</a>

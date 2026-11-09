@@ -15,7 +15,7 @@ describe('sanitizeApiPath', () => {
 
   it('should extract pathname if full URL is passed', () => {
     expect(
-      sanitizeApiPath('https://api.boramarcar.com.br/tenants/me?refresh=true'),
+      sanitizeApiPath('https://api.horariocerto.app/tenants/me?refresh=true'),
     ).toBe('/tenants/me');
   });
 

@@ -6,8 +6,8 @@ import {
 
 describe('tenant-open-graph.util', () => {
   const urls = {
-    appOrigin: 'https://boramarcar.com.br/',
-    apiOrigin: 'https://api.boramarcar.com.br/',
+    appOrigin: 'https://horariocerto.app/',
+    apiOrigin: 'https://app.horariocerto.app/',
   };
 
   it('uses custom description when present', () => {
@@ -50,9 +50,9 @@ describe('tenant-open-graph.util', () => {
       title: 'Barbearia do Zé | Agendar online',
       description:
         'Agende online em Barbearia do Zé em Curitiba. Horários disponíveis 24h.',
-      canonicalUrl: 'https://boramarcar.com.br/barbearia-do-ze',
+      canonicalUrl: 'https://horariocerto.app/barbearia-do-ze',
       imageUrl:
-        'https://api.boramarcar.com.br/tenants/barbearia-do-ze/og-image',
+        'https://app.horariocerto.app/tenants/barbearia-do-ze/og-image',
       imageAlt: 'Barbearia do Zé',
       siteName: 'Barbearia do Zé',
       faviconUrl: 'https://cdn.example/logo.png',

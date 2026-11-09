@@ -1,2 +1,2 @@
 export const DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE =
-  'Pagamento de sinal não está disponível no seu plano. Faça upgrade para o Elite ou entre em contato com a BoraMarcar.';
+  'Pagamento antecipado não está disponível no seu plano. Mude para o Elite ou fale com o Horário Certo.';

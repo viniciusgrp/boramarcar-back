@@ -1,4 +1,4 @@
-# Planos BoraMarcar (assinatura do estabelecimento)
+﻿# Planos Horário Certo (assinatura do estabelecimento)
 
 Existem 3 planos: **Solo**, **Pro** e **Elite**. A gestão da assinatura (escolher plano, ver trial, portal de pagamento) fica em **Faturamento → Meu plano**, disponível apenas para o Dono (OWNER).
 
@@ -16,7 +16,7 @@ Existem 3 planos: **Solo**, **Pro** e **Elite**. A gestão da assinatura (escolh
 | Fidelidade (pontos, recompensas, indicação) | Sim | Sim | Sim |
 | Assistente IA (chat de suporte no painel) | Complemento* | Complemento* | Complemento* |
 
-\* Sinal também pode ser liberado independentemente do plano se o estabelecimento tiver a flag especial `deposit_feature_enabled` habilitada manualmente (caso avaliado individualmente pela equipe BoraMarcar).
+\* Sinal também pode ser liberado independentemente do plano se o estabelecimento tiver a flag especial `deposit_feature_enabled` habilitada manualmente (caso avaliado individualmente pela equipe Horário Certo).
 
 \* Assistente IA é um **complemento pago** (R$ 29,90/mês), não incluso nos planos. Contrata em **Faturamento → Assistente IA**, só com plano **ativo** (não no trial). A cota diária de mensagens acompanha o plano base: Solo 40/dia (20 por usuário), Pro 100/dia (40 por usuário), Elite 200/dia (50 por usuário).
 

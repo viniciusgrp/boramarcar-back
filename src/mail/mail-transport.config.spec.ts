@@ -5,7 +5,7 @@ const resendEnv = {
   SMTP_PORT: '465',
   SMTP_USER: 'resend',
   SMTP_PASS: 're_test',
-  SMTP_FROM: 'BoraMarcar <noreply@boramarcar.com.br>',
+  SMTP_FROM: 'Horário Certo <noreply@horariocerto.app>',
 };
 
 const sesEnv = {
@@ -13,7 +13,7 @@ const sesEnv = {
   SES_SMTP_PORT: '587',
   SES_SMTP_USER: 'ses-user',
   SES_SMTP_PASS: 'ses-pass',
-  SES_SMTP_FROM: 'BoraMarcar <noreply@boramarcar.com.br>',
+  SES_SMTP_FROM: 'Horário Certo <noreply@horariocerto.app>',
 };
 
 function env(values: Record<string, string | undefined>) {
@@ -34,7 +34,7 @@ describe('resolveMailTransport', () => {
         port: 465,
         secure: true,
         requireTls: false,
-        from: 'BoraMarcar <noreply@boramarcar.com.br>',
+        from: 'Horário Certo <noreply@horariocerto.app>',
       }),
     });
   });
@@ -53,7 +53,7 @@ describe('resolveMailTransport', () => {
         secure: false,
         requireTls: true,
         user: 'ses-user',
-        from: 'BoraMarcar <noreply@boramarcar.com.br>',
+        from: 'Horário Certo <noreply@horariocerto.app>',
       }),
     });
   });

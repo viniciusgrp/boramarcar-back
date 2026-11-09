@@ -1,5 +1,5 @@
 /**
- * Política explícita de sinal (depósito) no BoraMarcar.
+ * Política explícita de sinal (depósito) no Horário Certo.
  *
  * 1. Hold: ao criar agendamento com sinal, o status fica PENDING_PAYMENT e o slot
  *    fica reservado até hold_expires_at (alinhado à expiração do Checkout Stripe, 30 min)

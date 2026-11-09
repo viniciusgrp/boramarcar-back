@@ -7,9 +7,9 @@ describe('EmailFunnelService.sendPreview', () => {
     const step: EmailFunnelStepRow = {
       step_key: 'welcome',
       step_number: 1,
-      subject: 'Sua conta do Bora Marcar está pronta 🎉',
-      title: 'Sua conta do Bora Marcar está pronta 🎉',
-      body_text: 'Você acabou de criar sua conta no Bora Marcar.',
+      subject: 'Sua conta do Horário Certo está pronta 🎉',
+      title: 'Sua conta do Horário Certo está pronta 🎉',
+      body_text: 'Você acabou de criar sua conta no Horário Certo.',
       body_if_setup: null,
       steps_json: null,
       cta_label: 'Configurar minha agenda',
@@ -44,7 +44,7 @@ describe('EmailFunnelService.sendPreview', () => {
     const mailService = { sendHtmlEmail } as unknown as MailService;
     const configService = {
       get: (key: string) =>
-        key === 'FRONTEND_URL' ? 'https://boramarcar.com.br' : undefined,
+        key === 'FRONTEND_URL' ? 'https://horariocerto.app' : undefined,
     };
 
     const service = new EmailFunnelService(
@@ -55,21 +55,21 @@ describe('EmailFunnelService.sendPreview', () => {
 
     const result = await service.sendPreview({
       stepKey: 'welcome',
-      to: 'socio@boramarcar.com.br',
+      to: 'socio@horariocerto.app',
     });
 
-    expect(result.sentTo).toBe('socio@boramarcar.com.br');
+    expect(result.sentTo).toBe('socio@horariocerto.app');
     expect(sendHtmlEmail).toHaveBeenCalledWith(
       expect.objectContaining({
-        to: 'socio@boramarcar.com.br',
-        subject: '[Teste] Sua conta do Bora Marcar está pronta 🎉',
+        to: 'socio@horariocerto.app',
+        subject: '[Teste] Sua conta do Horário Certo está pronta 🎉',
         failIfUnconfigured: true,
       }),
     );
     const html = (sendHtmlEmail.mock.calls[0][0] as { html: string }).html;
     expect(html).toContain('Configurar minha agenda');
     expect(html).toContain(
-      'https://boramarcar.com.br/admin/configuracoes?tab=hours',
+      'https://horariocerto.app/admin/configuracoes?tab=hours',
     );
   });
 });

@@ -1,6 +1,6 @@
-# Visão geral do BoraMarcar
+﻿# Visão geral do Horário Certo
 
-O BoraMarcar é um SaaS de agendamento e gestão para estabelecimentos de serviços (barbearias, salões, studios de estética, etc.), multi-tenant: cada estabelecimento (tenant) tem seus próprios dados, isolados dos demais.
+O Horário Certo é um SaaS de agendamento e gestão para estabelecimentos de serviços (barbearias, salões, studios de estética, etc.), multi-tenant: cada estabelecimento (tenant) tem seus próprios dados, isolados dos demais.
 
 ## Para o dono do negócio (painel admin)
 
@@ -24,7 +24,7 @@ Acessível em `/admin`, com estas áreas principais:
 
 ## Para o cliente final
 
-- Página pública de agendamento por link (`boramarcar.com/slug-do-estabelecimento`).
+- Página pública de agendamento por link (`horariocerto.app/slug-do-estabelecimento`).
 - White-label: logo, banner e cor primária do estabelecimento aparecem na página pública.
 - Fluxo: escolher serviço(s) e profissional (ou "qualquer profissional") → escolher data/hora → identificar-se (conta ou como visitante, conforme configuração do estabelecimento) → confirmar (com pagamento de sinal quando exigido).
 - Pode ter conta de cliente (login) ou agendar como visitante (nome + WhatsApp), dependendo da configuração `require_customer_account` do estabelecimento.

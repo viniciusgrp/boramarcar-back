@@ -1,3 +1,5 @@
+import { BRAND_NAME } from '../../common/brand.constants';
+
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;
 
@@ -75,6 +77,6 @@ export function buildTenantOgSvg(options: TenantOgSvgOptions): string {
 <svg width="${OG_IMAGE_WIDTH}" height="${OG_IMAGE_HEIGHT}" viewBox="0 0 ${OG_IMAGE_WIDTH} ${OG_IMAGE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
   <text x="${titleX}" y="${titleY}" fill="${options.textColor}" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="700">${displayName}</text>
   <text x="${titleX}" y="${subtitleY}" fill="${options.textColor}" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="500" opacity="0.85">Agendar online</text>
-  <text x="80" y="560" fill="${options.textColor}" font-family="Arial, Helvetica, sans-serif" font-size="22" opacity="0.7">BoraMarcar</text>
+  <text x="80" y="560" fill="${options.textColor}" font-family="Arial, Helvetica, sans-serif" font-size="22" opacity="0.7">${BRAND_NAME}</text>
 </svg>`;
 }

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantUsersService } from '../tenants/tenant-users.service';
+import { BRAND_PRIVACY_EMAIL } from '../common/brand.constants';
 import type { DeleteUserResponse } from './entities/delete-user-response.entity';
 
 const DELETED_CUSTOMER_NAME = 'Usuário Excluído';
@@ -28,7 +29,7 @@ export class UsersService {
 
     if (tenantMembership) {
       throw new BadRequestException(
-        'Contas vinculadas ao painel administrativo não podem ser excluídas por este fluxo. Envie um e-mail para privacidade@boramarcar.com.br.',
+        `Contas vinculadas ao painel administrativo não podem ser excluídas por este fluxo. Envie um e-mail para ${BRAND_PRIVACY_EMAIL}.`,
       );
     }
 

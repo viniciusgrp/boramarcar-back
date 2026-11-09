@@ -12,6 +12,7 @@ describe('cors-origin.util', () => {
     expect(isPrivateLanHostname('10.0.0.8')).toBe(true);
     expect(isPrivateLanHostname('172.16.1.4')).toBe(true);
     expect(isPrivateLanHostname('8.8.8.8')).toBe(false);
+    expect(isPrivateLanHostname('horariocerto.app')).toBe(false);
     expect(isPrivateLanHostname('boramarcar.com.br')).toBe(false);
   });
 

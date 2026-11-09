@@ -9,12 +9,12 @@ describe('establishment-email-verification.util', () => {
   it('builds the callback URL with token hash and intent', () => {
     expect(
       buildEstablishmentVerificationCallbackUrl(
-        'https://boramarcar.com.br/',
+        'https://horariocerto.app/',
         'abc+hash',
         'magiclink',
       ),
     ).toBe(
-      'https://boramarcar.com.br/auth/callback?token_hash=abc%2Bhash&type=magiclink&intent=tenant-register',
+      'https://horariocerto.app/auth/callback?token_hash=abc%2Bhash&type=magiclink&intent=tenant-register',
     );
   });
 

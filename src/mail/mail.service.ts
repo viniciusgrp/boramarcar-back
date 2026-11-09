@@ -12,6 +12,7 @@ import {
   type MailTransportResolution,
 } from './mail-transport.config';
 import { formatTenantAddress } from './utils/format-tenant-address.util';
+import { BRAND_NAME } from '../common/brand.constants';
 
 @Injectable()
 export class MailService {
@@ -199,12 +200,12 @@ export class MailService {
 
     await this.sendMail({
       to: params.recipientEmail,
-      subject: 'Confirme seu e-mail no BoraMarcar',
+      subject: `Confirme seu e-mail no ${BRAND_NAME}`,
       failIfUnconfigured: true,
       html: `
         <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">
           <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af;">
-            BoraMarcar
+            ${BRAND_NAME}
           </p>
           <h1 style="font-size: 20px; margin: 0 0 12px;">Confirme seu e-mail</h1>
           <p style="margin: 0 0 16px; color: #4b5563;">
@@ -280,7 +281,7 @@ export class MailService {
 
     await this.sendMail({
       to: params.recipientEmail,
-      subject: `[Suporte BoraMarcar] ${params.subject}`,
+      subject: `[Suporte ${BRAND_NAME}] ${params.subject}`,
       replyTo: params.senderEmail,
       html: `
         <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">

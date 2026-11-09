@@ -1,7 +1,7 @@
 import type { PlanTier } from '../entities/plan-tier.type';
 
-export const DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT = '#b45309';
-export const DEFAULT_ADMIN_SECONDARY_COLOR_DARK = '#f59e0b';
+export const DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT = '#4338ca';
+export const DEFAULT_ADMIN_SECONDARY_COLOR_DARK = '#818cf8';
 
 export function canCustomizeAdminThemeColors(planTier: PlanTier): boolean {
   return planTier === 'PRO' || planTier === 'ELITE';
