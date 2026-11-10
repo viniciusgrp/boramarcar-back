@@ -52,7 +52,7 @@ describe('tenant-open-graph.util', () => {
         'Agende online em Barbearia do Zé em Curitiba. Horários disponíveis 24h.',
       canonicalUrl: 'https://horariocerto.app/barbearia-do-ze',
       imageUrl:
-        'https://app.horariocerto.app/tenants/barbearia-do-ze/og-image',
+        'https://horariocerto.app/api/tenants/barbearia-do-ze/og-image',
       imageAlt: 'Barbearia do Zé',
       siteName: 'Barbearia do Zé',
       faviconUrl: 'https://cdn.example/logo.png',

@@ -83,7 +83,7 @@ export class TenantOpenGraphService {
     }
 
     if (logoBuffer) {
-      const logoSize = 160;
+      const logoSize = 208;
       const logo = await sharp(logoBuffer)
         .resize(logoSize, logoSize, {
           fit: 'cover',

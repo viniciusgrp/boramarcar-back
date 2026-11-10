@@ -69,7 +69,6 @@ export function buildTenantOpenGraphPayload(
   const name = input.name.trim();
   const slug = input.slug.trim();
   const appOrigin = trimTrailingSlash(urls.appOrigin);
-  const apiOrigin = trimTrailingSlash(urls.apiOrigin);
   const description = resolveTenantOpenGraphDescription(
     input.description,
     name,
@@ -80,7 +79,7 @@ export function buildTenantOpenGraphPayload(
     title: `${name} | Agendar online`,
     description,
     canonicalUrl: `${appOrigin}/${slug}`,
-    imageUrl: `${apiOrigin}/tenants/${encodeURIComponent(slug)}/og-image`,
+    imageUrl: `${appOrigin}/api/tenants/${encodeURIComponent(slug)}/og-image`,
     imageAlt: name,
     siteName: name,
     faviconUrl: input.logoUrl?.trim() || null,

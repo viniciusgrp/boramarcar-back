@@ -64,7 +64,7 @@ export interface TenantOgSvgOptions {
 
 /** Transparent SVG overlay with tenant name (and optional logo placeholder spacing). */
 export function buildTenantOgSvg(options: TenantOgSvgOptions): string {
-  const titleX = options.hasLogo ? 280 : 80;
+  const titleX = options.hasLogo ? 328 : 80;
   const titleY = options.hasBanner ? 220 : 280;
   const subtitleY = titleY + 64;
   const maxNameChars = options.hasLogo ? 28 : 34;
