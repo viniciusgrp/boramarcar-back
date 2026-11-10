@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'hml-boramarcar-api',
+      name: 'api-hml',
       script: 'dist/main.js',
       instances: 1,
       exec_mode: 'fork',
