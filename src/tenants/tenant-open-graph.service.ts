@@ -49,7 +49,7 @@ export class TenantOpenGraphService {
       throw new NotFoundException(`Tenant with slug "${slug}" was not found`);
     }
 
-    const primaryColor = tenant.primary_color?.trim() || '#111827';
+    const primaryColor = tenant.primary_color?.trim() || '#0F5F58';
     const safeName = escapeXml(tenant.name.trim() || 'Estabelecimento');
 
     const [bannerBuffer, logoBuffer] = await Promise.all([

@@ -863,7 +863,7 @@ export class TenantsService {
       .insert({
         name: tenantName,
         slug: normalizedSlug,
-        primary_color: '#111827',
+        primary_color: '#0F5F58',
         owner_id: ownerId,
         subscription_status: 'INACTIVE',
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
@@ -977,7 +977,7 @@ export class TenantsService {
       .insert({
         name: tenantName,
         slug: normalizedSlug,
-        primary_color: '#111827',
+        primary_color: '#0F5F58',
         owner_id: userId,
         subscription_status: 'INACTIVE',
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
