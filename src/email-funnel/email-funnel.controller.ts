@@ -11,6 +11,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { PlatformAdminGuard } from '../platform/guards/platform-admin.guard';
 import {
   SendEmailFunnelPreviewDto,
+  SendEmailFunnelTestDto,
   UpdateEmailFunnelStepDto,
 } from './dto/email-funnel.dto';
 import { EmailFunnelService } from './email-funnel.service';
@@ -38,6 +39,18 @@ export class EmailFunnelController {
     return this.emailFunnelService.sendPreview({
       stepKey: dto.step_key,
       to: dto.to,
+    });
+  }
+
+  @Post('steps/:stepKey/test')
+  sendTestEmail(
+    @Param('stepKey') stepKey: string,
+    @Body() dto: SendEmailFunnelTestDto,
+  ) {
+    return this.emailFunnelService.sendTestEmail({
+      stepKey,
+      to: dto.to,
+      tenantId: dto.tenant_id,
     });
   }
 

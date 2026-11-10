@@ -156,6 +156,19 @@ function resolveDueAt(
     );
   }
 
+  if (params.triggerType === 'days_after_trial_end') {
+    if (!params.trialEndsAt) {
+      return null;
+    }
+    const end = getZonedParts(params.trialEndsAt, timeZone);
+    const targetDay = addCalendarDays(end, params.triggerOffset);
+    const hour = params.sendHour ?? 10;
+    return zonedDateTimeToUtc(
+      { ...targetDay, hour, minute: 0 },
+      timeZone,
+    );
+  }
+
   return null;
 }
 

@@ -120,4 +120,72 @@ describe('isEmailFunnelStepDue', () => {
       }),
     ).toBe(true);
   });
+
+  it('fires on the last day of trial (offset 0 before trial end) at 10:00 local', () => {
+    const trialEndsAt = new Date('2026-09-22T17:00:00.000Z');
+    const tooEarly = new Date('2026-09-22T12:50:00.000Z');
+    const due = new Date('2026-09-22T13:05:00.000Z');
+
+    expect(
+      isEmailFunnelStepDue({
+        now: tooEarly,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_before_trial_end',
+        triggerOffset: 0,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(false);
+
+    expect(
+      isEmailFunnelStepDue({
+        now: due,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_before_trial_end',
+        triggerOffset: 0,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(true);
+  });
+
+  it('fires three calendar days after trial end at 10:00 local', () => {
+    const trialEndsAt = new Date('2026-09-22T17:00:00.000Z');
+    const tooEarly = new Date('2026-09-25T12:50:00.000Z');
+    const due = new Date('2026-09-25T13:05:00.000Z');
+
+    expect(
+      isEmailFunnelStepDue({
+        now: tooEarly,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_after_trial_end',
+        triggerOffset: 3,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(false);
+
+    expect(
+      isEmailFunnelStepDue({
+        now: due,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_after_trial_end',
+        triggerOffset: 3,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(true);
+  });
 });

@@ -14,6 +14,10 @@ export function resolveEmailFunnelEligibility(params: {
   alreadyProcessed: boolean;
   isDue: boolean;
   hasRecipientEmail: boolean;
+  sendOnlyIf: string | null;
+  hasBookingLinkShared: boolean;
+  hasPublicBooking: boolean;
+  isPostTrialStep: boolean;
 }): EmailFunnelEligibility {
   if (params.alreadyProcessed) {
     return 'already_processed';
@@ -31,7 +35,7 @@ export function resolveEmailFunnelEligibility(params: {
     return 'paid';
   }
 
-  if (params.trialEnded) {
+  if (params.trialEnded && !params.isPostTrialStep) {
     return 'trial_ended';
   }
 
@@ -41,6 +45,22 @@ export function resolveEmailFunnelEligibility(params: {
     params.hasBusinessHours
   ) {
     return 'setup_complete';
+  }
+
+  if (params.sendOnlyIf === 'setup_complete_and_not_shared') {
+    if (
+      !params.hasService ||
+      !params.hasBusinessHours ||
+      params.hasBookingLinkShared
+    ) {
+      return 'condition_not_met';
+    }
+  }
+
+  if (params.sendOnlyIf === 'no_public_booking') {
+    if (!params.hasService || !params.hasBusinessHours || params.hasPublicBooking) {
+      return 'condition_not_met';
+    }
   }
 
   if (!params.isDue) {
@@ -65,6 +85,7 @@ export function shouldRecordSkip(
     eligibility === 'setup_complete' ||
     eligibility === 'opted_out' ||
     eligibility === 'no_email' ||
-    eligibility === 'trial_ended'
+    eligibility === 'trial_ended' ||
+    eligibility === 'condition_not_met'
   );
 }

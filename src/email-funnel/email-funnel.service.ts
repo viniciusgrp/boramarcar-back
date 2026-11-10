@@ -28,6 +28,7 @@ import type {
 interface FunnelTenantRow {
   id: string;
   name: string;
+  slug: string | null;
   owner_id: string | null;
   subscription_status: string;
   trial_starts_at: string | null;
@@ -35,6 +36,7 @@ interface FunnelTenantRow {
   created_at: string;
   trial_email_funnel_opted_out_at: string | null;
   trial_email_funnel_opt_out_token: string;
+  initial_setup_booking_link_shared_at: string | null;
 }
 
 @Injectable()
@@ -107,16 +109,18 @@ export class EmailFunnelService {
     let processed = 0;
 
     for (const tenant of tenants) {
-      const ownerEmail = await this.resolveOwnerEmail(tenant.owner_id);
+      const ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
       const setup = await this.resolveSetupFlags(tenant.id);
 
       for (const step of steps) {
         const result = await this.processLoadedTenantStep({
           step,
           tenant,
-          ownerEmail,
+          ownerEmail: ownerDetails.email,
+          ownerFirstName: ownerDetails.firstName,
           hasService: setup.hasService,
           hasBusinessHours: setup.hasBusinessHours,
+          hasPublicBooking: setup.hasPublicBooking,
           now,
         });
         if (result === 'sent' || result === 'skipped' || result === 'failed') {
@@ -143,6 +147,9 @@ export class EmailFunnelService {
       token: 'preview',
       trialEndsAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
       useSetupCopy: false,
+      ownerFirstName: 'Maria',
+      tenantName: 'Estabelecimento Exemplo',
+      tenantSlug: 'exemplo',
     });
 
     await this.mailService.sendHtmlEmail({
@@ -150,6 +157,60 @@ export class EmailFunnelService {
       subject: `[Teste] ${step.subject}`,
       html,
       failIfUnconfigured: true,
+    });
+
+    return { sentTo: to };
+  }
+
+  async sendTestEmail(params: {
+    stepKey: string;
+    to: string;
+    tenantId?: string;
+  }): Promise<{ sentTo: string }> {
+    const step = await this.getStep(params.stepKey);
+    const to = params.to.trim().toLowerCase();
+
+    if (!to) {
+      throw new BadRequestException('Informe um e-mail de destino.');
+    }
+
+    let tenant: FunnelTenantRow | null = null;
+    let ownerDetails: { email: string | null; firstName: string | null } = {
+      email: null,
+      firstName: 'Maria',
+    };
+
+    if (params.tenantId) {
+      tenant = await this.getFunnelTenant(params.tenantId);
+      if (tenant) {
+        ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
+      }
+    }
+
+    const html = this.renderStep(step, {
+      token: tenant?.trial_email_funnel_opt_out_token || 'test-token',
+      trialEndsAt:
+        tenant?.trial_ends_at ||
+        new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      useSetupCopy: false,
+      ownerFirstName: ownerDetails.firstName,
+      tenantName: tenant?.name || 'Estabelecimento Exemplo',
+      tenantSlug: tenant?.slug || 'exemplo',
+    });
+
+    const frontendUrl = (
+      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:5173'
+    ).replace(/\/$/, '');
+    const postOptOutUrl = `${frontendUrl}/api/email-funnel/unsubscribe`;
+
+    await this.mailService.sendTestEmail({
+      to,
+      subject: `[Teste] ${step.subject}`,
+      html,
+      headers: {
+        'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:contato@horariocerto.app?subject=descadastrar>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
     });
 
     return { sentTo: to };
@@ -189,13 +250,16 @@ export class EmailFunnelService {
       return 'ignored';
     }
 
+    const ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
     const setup = await this.resolveSetupFlags(tenantId);
     return this.processLoadedTenantStep({
       step,
       tenant,
-      ownerEmail,
+      ownerEmail: ownerEmail || ownerDetails.email,
+      ownerFirstName: ownerDetails.firstName,
       hasService: setup.hasService,
       hasBusinessHours: setup.hasBusinessHours,
+      hasPublicBooking: setup.hasPublicBooking,
       now: new Date(),
     });
   }
@@ -204,8 +268,10 @@ export class EmailFunnelService {
     step: EmailFunnelStepRow;
     tenant: FunnelTenantRow;
     ownerEmail: string | null;
+    ownerFirstName: string | null;
     hasService: boolean;
     hasBusinessHours: boolean;
+    hasPublicBooking: boolean;
     now: Date;
   }): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
     const already = await this.hasSendRecord(
@@ -229,6 +295,8 @@ export class EmailFunnelService {
       windowEndHour: params.step.window_end_hour,
     });
 
+    const isPostTrialStep = params.step.trigger_type === 'days_after_trial_end';
+
     const eligibility = resolveEmailFunnelEligibility({
       isActive: params.step.is_active,
       optedOut: Boolean(params.tenant.trial_email_funnel_opted_out_at),
@@ -242,6 +310,12 @@ export class EmailFunnelService {
       alreadyProcessed: already,
       isDue,
       hasRecipientEmail: Boolean(params.ownerEmail?.trim()),
+      sendOnlyIf: params.step.send_only_if,
+      hasBookingLinkShared: Boolean(
+        params.tenant.initial_setup_booking_link_shared_at,
+      ),
+      hasPublicBooking: params.hasPublicBooking,
+      isPostTrialStep,
     });
 
     if (eligibility === 'already_processed' || eligibility === 'not_due') {
@@ -272,6 +346,7 @@ export class EmailFunnelService {
       step: params.step,
       tenant: params.tenant,
       recipientEmail: params.ownerEmail,
+      ownerFirstName: params.ownerFirstName,
       useSetupCopy: params.hasService && params.hasBusinessHours,
     });
 
@@ -313,9 +388,10 @@ export class EmailFunnelService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
+    const ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
+
     const recipient =
-      existing.recipient_email?.trim() ||
-      (await this.resolveOwnerEmail(tenant.owner_id));
+      existing.recipient_email?.trim() || ownerDetails.email;
 
     if (!recipient) {
       await this.recordSend({
@@ -334,6 +410,7 @@ export class EmailFunnelService {
       step,
       tenant,
       recipientEmail: recipient,
+      ownerFirstName: ownerDetails.firstName,
       useSetupCopy: setup.hasService && setup.hasBusinessHours,
     });
 
@@ -355,6 +432,9 @@ export class EmailFunnelService {
       token: string;
       trialEndsAt: string | null;
       useSetupCopy: boolean;
+      ownerFirstName: string | null;
+      tenantName: string | null;
+      tenantSlug: string | null;
     },
   ): string {
     const frontendUrl = (
@@ -363,12 +443,7 @@ export class EmailFunnelService {
     const ctaPath = step.cta_path.trim() || '/admin/login';
     const ctaUrl = `${frontendUrl}${ctaPath.startsWith('/') ? ctaPath : `/${ctaPath}`}`;
     const optOutUrl = `${frontendUrl}/descadastrar-emails-trial?token=${encodeURIComponent(params.token)}`;
-    const trialEndsLabel =
-      step.step_key === 'trial_ending' && params.trialEndsAt
-        ? format(new Date(params.trialEndsAt), "d 'de' MMMM 'de' yyyy", {
-            locale: ptBR,
-          })
-        : null;
+    const companyAddress = this.configService.get<string>('COMPANY_ADDRESS') || null;
 
     return buildEmailFunnelHtml({
       step,
@@ -376,7 +451,11 @@ export class EmailFunnelService {
       ctaUrl,
       optOutUrl,
       useSetupCopy: params.useSetupCopy,
-      trialEndsLabel,
+      trialEndsAt: params.trialEndsAt,
+      ownerFirstName: params.ownerFirstName,
+      tenantName: params.tenantName,
+      tenantSlug: params.tenantSlug,
+      companyAddress,
     });
   }
 
@@ -406,7 +485,7 @@ export class EmailFunnelService {
       .getClient()
       .from('tenants')
       .select(
-        'id, name, owner_id, subscription_status, trial_starts_at, trial_ends_at, created_at, trial_email_funnel_opted_out_at, trial_email_funnel_opt_out_token',
+        'id, name, slug, owner_id, subscription_status, trial_starts_at, trial_ends_at, created_at, trial_email_funnel_opted_out_at, trial_email_funnel_opt_out_token, initial_setup_booking_link_shared_at',
       )
       .eq('id', tenantId)
       .maybeSingle();
@@ -423,9 +502,8 @@ export class EmailFunnelService {
       .getClient()
       .from('tenants')
       .select(
-        'id, name, owner_id, subscription_status, trial_starts_at, trial_ends_at, created_at, trial_email_funnel_opted_out_at, trial_email_funnel_opt_out_token',
+        'id, name, slug, owner_id, subscription_status, trial_starts_at, trial_ends_at, created_at, trial_email_funnel_opted_out_at, trial_email_funnel_opt_out_token, initial_setup_booking_link_shared_at',
       )
-      .neq('subscription_status', 'ACTIVE')
       .is('trial_email_funnel_opted_out_at', null);
 
     if (error) {
@@ -438,9 +516,10 @@ export class EmailFunnelService {
   private async resolveSetupFlags(tenantId: string): Promise<{
     hasService: boolean;
     hasBusinessHours: boolean;
+    hasPublicBooking: boolean;
   }> {
     const client = this.supabaseService.getClient();
-    const [services, hours] = await Promise.all([
+    const [services, hours, publicBookings] = await Promise.all([
       client
         .from('services')
         .select('id', { count: 'exact', head: true })
@@ -450,6 +529,12 @@ export class EmailFunnelService {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('is_closed', false),
+      client
+        .from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('booking_source', 'PUBLIC')
+        .limit(1),
     ]);
 
     if (services.error) {
@@ -458,10 +543,14 @@ export class EmailFunnelService {
     if (hours.error) {
       throw new InternalServerErrorException(hours.error.message);
     }
+    if (publicBookings.error) {
+      throw new InternalServerErrorException(publicBookings.error.message);
+    }
 
     return {
       hasService: (services.count ?? 0) > 0,
       hasBusinessHours: (hours.count ?? 0) > 0,
+      hasPublicBooking: (publicBookings.count ?? 0) > 0,
     };
   }
 
@@ -482,6 +571,33 @@ export class EmailFunnelService {
     }
 
     return data.user?.email?.trim().toLowerCase() ?? null;
+  }
+
+  private async resolveOwnerDetails(ownerId: string | null): Promise<{
+    email: string | null;
+    firstName: string | null;
+  }> {
+    if (!ownerId) {
+      return { email: null, firstName: null };
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(ownerId);
+
+    if (error) {
+      this.logger.warn(`Could not resolve owner details for ${ownerId}`);
+      return { email: null, firstName: null };
+    }
+
+    const email = data.user?.email?.trim().toLowerCase() ?? null;
+    const fullName =
+      typeof data.user?.user_metadata?.full_name === 'string'
+        ? data.user.user_metadata.full_name.trim()
+        : null;
+    const firstName = fullName ? fullName.split(/\s+/)[0] : null;
+
+    return { email, firstName };
   }
 
   private async hasSendRecord(
@@ -508,19 +624,33 @@ export class EmailFunnelService {
     step: EmailFunnelStepRow;
     tenant: FunnelTenantRow;
     recipientEmail: string;
+    ownerFirstName: string | null;
     useSetupCopy: boolean;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const html = this.renderStep(params.step, {
       token: params.tenant.trial_email_funnel_opt_out_token,
       trialEndsAt: params.tenant.trial_ends_at,
       useSetupCopy: params.useSetupCopy,
+      ownerFirstName: params.ownerFirstName,
+      tenantName: params.tenant.name,
+      tenantSlug: params.tenant.slug,
     });
+
+    const frontendUrl = (
+      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:5173'
+    ).replace(/\/$/, '');
+    const optOutUrl = `${frontendUrl}/descadastrar-emails-trial?token=${encodeURIComponent(params.tenant.trial_email_funnel_opt_out_token)}`;
+    const postOptOutUrl = `${frontendUrl}/api/email-funnel/unsubscribe`;
 
     try {
       await this.mailService.sendHtmlEmail({
         to: params.recipientEmail,
         subject: params.step.subject,
         html,
+        headers: {
+          'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:contato@horariocerto.app?subject=descadastrar>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
         failIfUnconfigured: true,
       });
       return { ok: true };
@@ -643,6 +773,7 @@ export class EmailFunnelService {
       step_key: String(row.step_key),
       step_number: Number(row.step_number),
       subject: String(row.subject ?? ''),
+      preheader: typeof row.preheader === 'string' ? row.preheader : null,
       title: String(row.title ?? ''),
       body_text: String(row.body_text ?? ''),
       body_if_setup:
@@ -667,6 +798,10 @@ export class EmailFunnelService {
           ? null
           : Number(row.window_end_hour),
       skip_if_setup_complete: Boolean(row.skip_if_setup_complete),
+      send_only_if:
+        typeof row.send_only_if === 'string'
+          ? (row.send_only_if as EmailFunnelStepRow['send_only_if'])
+          : null,
       is_active: Boolean(row.is_active),
       image_url: typeof row.image_url === 'string' ? row.image_url : null,
       video_url: typeof row.video_url === 'string' ? row.video_url : null,
