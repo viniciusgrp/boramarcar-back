@@ -52,6 +52,8 @@ import { ConfigService } from '@nestjs/config';
 import { isProductionAppEnv } from '../common/app-env.util';
 import { isDisposableEmail } from '../security/disposable-email.util';
 import { MetaCapiService } from '../tracking/meta-capi.service';
+import type { Request } from 'express';
+import { getClientIp } from '../security/client-ip.util';
 import {
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
   ESTABLISHMENT_EMAIL_IN_USE_MESSAGE,
@@ -817,7 +819,7 @@ export class TenantsService {
 
   async register(
     dto: RegisterTenantDto,
-    metaTracking?: MetaTrackingData,
+    request?: Request,
   ): Promise<RegisterTenantResult> {
     const ownerName = dto.owner_name?.trim() ?? '';
     const email = dto.email?.trim().toLowerCase() ?? '';
@@ -954,19 +956,13 @@ export class TenantsService {
       () => undefined,
     );
 
-    void this.metaCapiService
-      .sendCompleteRegistration({
-        email,
-        userId: ownerId,
-        clientIpAddress: metaTracking?.clientIpAddress,
-        clientUserAgent: metaTracking?.clientUserAgent,
-        eventId: metaTracking?.eventId || dto.event_id,
-        fbp: metaTracking?.fbp || dto.fbp,
-        fbc: metaTracking?.fbc || dto.fbc,
-        fbclid: trackingData.fbclid || undefined,
-        firstVisitAt: trackingData.firstVisitAt || undefined,
-      })
-      .catch(() => undefined);
+    void this.sendMetaCompleteRegistrationEvent({
+      email,
+      userId: ownerId,
+      dto,
+      request,
+      trackingData,
+    }).catch(() => undefined);
 
     if (skipEmailVerification) {
       this.logger.log(
@@ -996,7 +992,7 @@ export class TenantsService {
   async onboardForAuthenticatedUser(
     userId: string,
     dto: OnboardTenantDto,
-    metaTracking?: MetaTrackingData,
+    request?: Request,
   ): Promise<Tenant> {
     const existing = await this.findMeResponse(userId);
 
@@ -1104,19 +1100,13 @@ export class TenantsService {
     const email = authUser?.user?.email;
 
     if (email) {
-      void this.metaCapiService
-        .sendCompleteRegistration({
-          email,
-          userId,
-          clientIpAddress: metaTracking?.clientIpAddress,
-          clientUserAgent: metaTracking?.clientUserAgent,
-          eventId: metaTracking?.eventId || dto.event_id,
-          fbp: metaTracking?.fbp || dto.fbp,
-          fbc: metaTracking?.fbc || dto.fbc,
-          fbclid: trackingData.fbclid || undefined,
-          firstVisitAt: trackingData.firstVisitAt || undefined,
-        })
-        .catch(() => undefined);
+      void this.sendMetaCompleteRegistrationEvent({
+        email,
+        userId,
+        dto,
+        request,
+        trackingData,
+      }).catch(() => undefined);
     }
 
     return mapTenantRow(tenantData as Tenant);
@@ -1702,5 +1692,55 @@ export class TenantsService {
     }
 
     return nextValue;
+  }
+
+  private async sendMetaCompleteRegistrationEvent(params: {
+    email: string;
+    userId: string;
+    dto: RegisterTenantDto | OnboardTenantDto;
+    request?: Request;
+    trackingData?: TenantTrackingData;
+  }): Promise<void> {
+    const clientIpAddress = params.request
+      ? getClientIp(params.request)
+      : undefined;
+    const clientUserAgent = params.request?.headers['user-agent'];
+    const referer = params.request?.headers.referer;
+    const origin = params.request?.headers.origin;
+
+    const eventSourceUrl =
+      referer || origin || 'https://horariocerto.app/register';
+
+    let fbp = params.dto.fbp;
+    let fbc = params.dto.fbc;
+
+    if (!fbp && params.request?.headers.cookie) {
+      const cookies = params.request.headers.cookie.split(';');
+      for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === '_fbp' && !fbp) {
+          fbp = value;
+        } else if (name === '_fbc' && !fbc) {
+          fbc = value;
+        }
+      }
+    }
+
+    const eventId =
+      ('metaEventId' in params.dto ? params.dto.metaEventId : undefined) ||
+      ('event_id' in params.dto ? params.dto.event_id : undefined);
+
+    await this.metaCapiService.sendCompleteRegistration({
+      email: params.email,
+      userId: params.userId,
+      clientIpAddress,
+      clientUserAgent,
+      eventSourceUrl,
+      eventId,
+      fbp,
+      fbc,
+      fbclid: params.trackingData?.fbclid || undefined,
+      firstVisitAt: params.trackingData?.firstVisitAt || undefined,
+    });
   }
 }

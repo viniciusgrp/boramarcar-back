@@ -80,9 +80,7 @@ export class MetaCapiService {
     return `fb.1.${timestamp}.${fbclid}`;
   }
 
-  private buildEventPayload(
-    payload: MetaCapiEventPayload,
-  ): Record<string, unknown> {
+  private buildEventPayload(payload: MetaCapiEventPayload): Record<string, unknown> {
     const userData: Record<string, string> = {};
 
     if (payload.userData.email) {

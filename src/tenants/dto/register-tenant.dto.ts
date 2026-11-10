@@ -37,8 +37,6 @@ export class RegisterTenantDto {
   @IsString()
   recaptcha_token?: string;
 
-  @IsOptional()
-  @IsString()
   @MaxLength(255)
   utm_source?: string;
 
@@ -70,6 +68,11 @@ export class RegisterTenantDto {
   @IsString()
   @MaxLength(255)
   event_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  metaEventId?: string;
 
   @IsOptional()
   @IsString()

@@ -69,15 +69,7 @@ export class TenantsController {
       expectedAction: RECAPTCHA_ACTION_TENANT_REGISTER,
     });
 
-    const metaTracking = {
-      eventId: dto.event_id,
-      fbp: dto.fbp,
-      fbc: dto.fbc,
-      clientIpAddress: getClientIp(request),
-      clientUserAgent: request.headers['user-agent'],
-    };
-
-    const result = await this.tenantsService.register(dto, metaTracking);
+    const result = await this.tenantsService.register(dto, request);
     return {
       tenant: result.tenant,
       requires_email_confirmation: result.requiresEmailConfirmation,
@@ -166,18 +158,10 @@ export class TenantsController {
     @Body() dto: OnboardTenantDto,
     @Req() request: Request,
   ): Promise<RegisterTenantResponseDto> {
-    const metaTracking = {
-      eventId: dto.event_id,
-      fbp: dto.fbp,
-      fbc: dto.fbc,
-      clientIpAddress: getClientIp(request),
-      clientUserAgent: request.headers['user-agent'],
-    };
-
     const tenant = await this.tenantsService.onboardForAuthenticatedUser(
       user.id,
       dto,
-      metaTracking,
+      request,
     );
     return { tenant };
   }
