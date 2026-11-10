@@ -68,6 +68,18 @@ export class MetaCapiService {
     return `55${digits}`;
   }
 
+  buildFbc(fbclid: string, firstVisitAt?: string): string | undefined {
+    if (!fbclid) {
+      return undefined;
+    }
+
+    const timestamp = firstVisitAt
+      ? new Date(firstVisitAt).getTime()
+      : Date.now();
+
+    return `fb.1.${timestamp}.${fbclid}`;
+  }
+
   private buildEventPayload(payload: MetaCapiEventPayload): Record<string, unknown> {
     const userData: Record<string, string> = {};
 
@@ -177,7 +189,15 @@ export class MetaCapiService {
     eventId?: string;
     fbp?: string;
     fbc?: string;
+    fbclid?: string;
+    firstVisitAt?: string;
   }): Promise<void> {
+    let fbc = params.fbc;
+
+    if (!fbc && params.fbclid) {
+      fbc = this.buildFbc(params.fbclid, params.firstVisitAt);
+    }
+
     await this.sendEvent({
       eventName: 'CompleteRegistration',
       eventTime: Math.floor(Date.now() / 1000),
@@ -190,7 +210,7 @@ export class MetaCapiService {
         clientIpAddress: params.clientIpAddress,
         clientUserAgent: params.clientUserAgent,
         fbp: params.fbp,
-        fbc: params.fbc,
+        fbc,
       },
       customData: {
         currency: 'BRL',

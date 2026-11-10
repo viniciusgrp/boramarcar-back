@@ -29,6 +29,30 @@ describe('MetaCapiService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('buildFbc', () => {
+    it('should build fbc from fbclid and firstVisitAt', () => {
+      const fbclid = 'test_click_id';
+      const firstVisitAt = '2026-11-10T19:00:00.000Z';
+      const result = service.buildFbc(fbclid, firstVisitAt);
+
+      expect(result).toBeDefined();
+      expect(result).toMatch(/^fb\.1\.\d+\.test_click_id$/);
+    });
+
+    it('should build fbc with current timestamp if firstVisitAt not provided', () => {
+      const fbclid = 'test_click_id';
+      const result = service.buildFbc(fbclid);
+
+      expect(result).toBeDefined();
+      expect(result).toMatch(/^fb\.1\.\d+\.test_click_id$/);
+    });
+
+    it('should return undefined if fbclid is empty', () => {
+      const result = service.buildFbc('');
+      expect(result).toBeUndefined();
+    });
+  });
+
   describe('configuration', () => {
     it('should skip sending events when not configured', async () => {
       mockConfigService.get.mockReturnValue(undefined);
@@ -152,13 +176,93 @@ describe('MetaCapiService', () => {
 
     it('should not call fetch when not configured', async () => {
       mockConfigService.get.mockReturnValue(undefined);
+>>>>>>> origin/master
 
       await service.sendCompleteRegistration({
         email: 'test@example.com',
         userId: 'user123',
+<<<<<<< HEAD
+        clientIpAddress: '192.168.1.1',
+        clientUserAgent: 'Mozilla/5.0',
+        eventId: 'event123',
+        fbp: 'fb.1.123456789.987654321',
+        fbc: 'fb.1.123456789.click123',
+      });
+
+      expect(sendEventSpy).toHaveBeenCalledWith({
+        eventName: 'CompleteRegistration',
+        eventTime: expect.any(Number),
+        eventSourceUrl: 'https://horariocerto.app/register',
+        eventId: 'event123',
+        userData: {
+          email: 'test@example.com',
+          externalId: 'user123',
+          clientIpAddress: '192.168.1.1',
+          clientUserAgent: 'Mozilla/5.0',
+          fbp: 'fb.1.123456789.987654321',
+          fbc: 'fb.1.123456789.click123',
+        },
+        customData: {
+          currency: 'BRL',
+          value: 0,
+        },
+      });
+    });
+
+    it('should build fbc from fbclid if fbc not provided', async () => {
+      const sendEventSpy = jest.spyOn(service, 'sendEvent').mockResolvedValue();
+
+      await service.sendCompleteRegistration({
+        email: 'test@example.com',
+        userId: 'user123',
+        fbclid: 'click123',
+        firstVisitAt: '2026-11-10T19:00:00.000Z',
+      });
+
+      expect(sendEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userData: expect.objectContaining({
+            fbc: expect.stringMatching(/^fb\.1\.\d+\.click123$/),
+          }),
+        }),
+=======
       });
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should send event with fbclid and build fbc when provided', async () => {
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'META_PIXEL_ID') return '1556427229547864';
+        if (key === 'META_CAPI_ACCESS_TOKEN') return 'test_token';
+        return undefined;
+      });
+
+      const newModule = await Test.createTestingModule({
+        providers: [
+          MetaCapiService,
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      const newService = newModule.get<MetaCapiService>(MetaCapiService);
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+      });
+
+      await newService.sendCompleteRegistration({
+        email: 'test@example.com',
+        userId: 'user123',
+        fbclid: 'click123',
+        firstVisitAt: '2026-11-10T19:00:00.000Z',
+      });
+
+      const callArgs = (global.fetch as jest.Mock).mock.calls[0];
+      const body = JSON.parse(callArgs[1].body);
+
+      expect(body.data[0].user_data.fbc).toMatch(/^fb\.1\.\d+\.click123$/);
     });
 
     it('should send event with correct payload when configured', async () => {

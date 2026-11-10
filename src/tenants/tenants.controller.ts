@@ -156,10 +156,12 @@ export class TenantsController {
   async onboard(
     @CurrentUser() user: User,
     @Body() dto: OnboardTenantDto,
+    @Req() request: Request,
   ): Promise<RegisterTenantResponseDto> {
     const tenant = await this.tenantsService.onboardForAuthenticatedUser(
       user.id,
       dto,
+      request,
     );
     return { tenant };
   }

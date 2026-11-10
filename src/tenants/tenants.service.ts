@@ -106,6 +106,23 @@ export interface RegisterTenantResult {
   otpType?: string;
 }
 
+interface TenantTrackingData {
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmContent?: string | null;
+  fbclid?: string | null;
+  firstVisitAt?: string | null;
+}
+
+interface MetaTrackingData {
+  eventId?: string;
+  fbp?: string;
+  fbc?: string;
+  clientIpAddress?: string;
+  clientUserAgent?: string;
+}
+
 function applySubscriptionTrialFields(
   updatePayload: Record<string, string | null>,
   payload: Pick<
@@ -782,6 +799,24 @@ export class TenantsService {
     return { slug, available: !existing };
   }
 
+  private normalizeTrackingData(dto: {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    fbclid?: string;
+    first_visit_at?: string;
+  }): TenantTrackingData {
+    return {
+      utmSource: this.normalizeOptionalText(dto.utm_source),
+      utmMedium: this.normalizeOptionalText(dto.utm_medium),
+      utmCampaign: this.normalizeOptionalText(dto.utm_campaign),
+      utmContent: this.normalizeOptionalText(dto.utm_content),
+      fbclid: this.normalizeOptionalText(dto.fbclid),
+      firstVisitAt: dto.first_visit_at || null,
+    };
+  }
+
   async register(
     dto: RegisterTenantDto,
     request?: Request,
@@ -864,13 +899,15 @@ export class TenantsService {
       signupUserId: ownerId,
     });
 
+    const trackingData = this.normalizeTrackingData(dto);
+
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
       .from('tenants')
       .insert({
         name: tenantName,
         slug: normalizedSlug,
-        primary_color: '#111827',
+        primary_color: '#0F5F58',
         owner_id: ownerId,
         subscription_status: 'INACTIVE',
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
@@ -878,6 +915,12 @@ export class TenantsService {
         trial_ends_at: trialEndsAt,
         referred_by_affiliate_id: attribution?.affiliateId ?? null,
         affiliate_attributed_at: attribution?.attributedAt ?? null,
+        utm_source: trackingData.utmSource,
+        utm_medium: trackingData.utmMedium,
+        utm_campaign: trackingData.utmCampaign,
+        utm_content: trackingData.utmContent,
+        fbclid: trackingData.fbclid,
+        first_visit_at: trackingData.firstVisitAt,
       })
       .select('*')
       .single();
@@ -918,6 +961,7 @@ export class TenantsService {
       userId: ownerId,
       dto,
       request,
+      trackingData,
     }).catch(() => undefined);
 
     if (skipEmailVerification) {
@@ -948,6 +992,7 @@ export class TenantsService {
   async onboardForAuthenticatedUser(
     userId: string,
     dto: OnboardTenantDto,
+    request?: Request,
   ): Promise<Tenant> {
     const existing = await this.findMeResponse(userId);
 
@@ -985,13 +1030,15 @@ export class TenantsService {
       signupUserId: userId,
     });
 
+    const trackingData = this.normalizeTrackingData(dto);
+
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
       .from('tenants')
       .insert({
         name: tenantName,
         slug: normalizedSlug,
-        primary_color: '#111827',
+        primary_color: '#0F5F58',
         owner_id: userId,
         subscription_status: 'INACTIVE',
         plan_tier: TRIAL_DEFAULT_PLAN_TIER,
@@ -999,6 +1046,12 @@ export class TenantsService {
         trial_ends_at: trialEndsAt,
         referred_by_affiliate_id: attribution?.affiliateId ?? null,
         affiliate_attributed_at: attribution?.attributedAt ?? null,
+        utm_source: trackingData.utmSource,
+        utm_medium: trackingData.utmMedium,
+        utm_campaign: trackingData.utmCampaign,
+        utm_content: trackingData.utmContent,
+        fbclid: trackingData.fbclid,
+        first_visit_at: trackingData.firstVisitAt,
       })
       .select('*')
       .single();
@@ -1039,6 +1092,22 @@ export class TenantsService {
       undefined,
       userId,
     ).catch(() => undefined);
+
+    const { data: authUser } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(userId);
+
+    const email = authUser?.user?.email;
+
+    if (email) {
+      void this.sendMetaCompleteRegistrationEvent({
+        email,
+        userId,
+        dto,
+        request,
+        trackingData,
+      }).catch(() => undefined);
+    }
 
     return mapTenantRow(tenantData as Tenant);
   }
@@ -1628,8 +1697,9 @@ export class TenantsService {
   private async sendMetaCompleteRegistrationEvent(params: {
     email: string;
     userId: string;
-    dto: RegisterTenantDto;
+    dto: RegisterTenantDto | OnboardTenantDto;
     request?: Request;
+    trackingData?: TenantTrackingData;
   }): Promise<void> {
     const clientIpAddress = params.request
       ? getClientIp(params.request)
@@ -1656,15 +1726,21 @@ export class TenantsService {
       }
     }
 
+    const eventId =
+      ('metaEventId' in params.dto ? params.dto.metaEventId : undefined) ||
+      ('event_id' in params.dto ? params.dto.event_id : undefined);
+
     await this.metaCapiService.sendCompleteRegistration({
       email: params.email,
       userId: params.userId,
       clientIpAddress,
       clientUserAgent,
       eventSourceUrl,
-      eventId: params.dto.metaEventId,
+      eventId,
       fbp,
       fbc,
+      fbclid: params.trackingData?.fbclid || undefined,
+      firstVisitAt: params.trackingData?.firstVisitAt || undefined,
     });
   }
 }
