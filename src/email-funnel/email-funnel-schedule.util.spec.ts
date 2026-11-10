@@ -155,6 +155,27 @@ describe('isEmailFunnelStepDue', () => {
     ).toBe(true);
   });
 
+  it('fires trial_last_day even when trial ends before send_hour', () => {
+    // Trial ends at 08:00 BRT (11:00 UTC), but send_hour is 10:00 BRT (13:00 UTC)
+    // The email should still be due at 10:00 BRT on the last day
+    const trialEndsAt = new Date('2026-09-22T11:00:00.000Z'); // 08:00 BRT
+    const at10amBRT = new Date('2026-09-22T13:00:00.000Z'); // 10:00 BRT
+
+    expect(
+      isEmailFunnelStepDue({
+        now: at10amBRT,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_before_trial_end',
+        triggerOffset: 0,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(true);
+  });
+
   it('fires three calendar days after trial end at 10:00 local', () => {
     const trialEndsAt = new Date('2026-09-22T17:00:00.000Z');
     const tooEarly = new Date('2026-09-25T12:50:00.000Z');

@@ -18,6 +18,7 @@ export function resolveEmailFunnelEligibility(params: {
   hasBookingLinkShared: boolean;
   hasPublicBooking: boolean;
   isPostTrialStep: boolean;
+  isLastDayOfTrialStep: boolean;
 }): EmailFunnelEligibility {
   if (params.alreadyProcessed) {
     return 'already_processed';
@@ -35,7 +36,9 @@ export function resolveEmailFunnelEligibility(params: {
     return 'paid';
   }
 
-  if (params.trialEnded && !params.isPostTrialStep) {
+  // Allow last-day-of-trial steps (offset 0 before trial end) even after trial technically ended
+  // This ensures trial_last_day sends at 10h even if trial_ends_at was earlier (e.g. 08h)
+  if (params.trialEnded && !params.isPostTrialStep && !params.isLastDayOfTrialStep) {
     return 'trial_ended';
   }
 

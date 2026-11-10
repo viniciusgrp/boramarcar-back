@@ -7,6 +7,30 @@ ALTER TABLE public.email_funnel_steps
   ADD COLUMN IF NOT EXISTS preheader TEXT,
   ADD COLUMN IF NOT EXISTS send_only_if TEXT CHECK (send_only_if IN ('setup_complete_and_not_shared', 'no_public_booking'));
 
+-- Define reusable UPDATE SET clause (all fields except step_key)
+-- UPDATE template for all steps:
+-- ON CONFLICT (step_key) DO UPDATE SET
+--   step_number = EXCLUDED.step_number,
+--   subject = EXCLUDED.subject,
+--   preheader = EXCLUDED.preheader,
+--   title = EXCLUDED.title,
+--   body_text = EXCLUDED.body_text,
+--   body_if_setup = EXCLUDED.body_if_setup,
+--   steps_json = EXCLUDED.steps_json,
+--   cta_label = EXCLUDED.cta_label,
+--   cta_path = EXCLUDED.cta_path,
+--   trigger_type = EXCLUDED.trigger_type,
+--   trigger_offset = EXCLUDED.trigger_offset,
+--   send_hour = EXCLUDED.send_hour,
+--   window_start_hour = EXCLUDED.window_start_hour,
+--   window_end_hour = EXCLUDED.window_end_hour,
+--   skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+--   send_only_if = EXCLUDED.send_only_if,
+--   is_active = EXCLUDED.is_active,
+--   image_url = EXCLUDED.image_url,
+--   video_url = EXCLUDED.video_url,
+--   updated_at = NOW();
+
 -- UPSERT existing steps with Part A copy (7 existing steps)
 
 -- 1. welcome
@@ -14,7 +38,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'welcome', 1,
   'Sua conta do Horário Certo está pronta',
@@ -24,12 +48,27 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Abrir o Início', '/admin/dashboard',
   'immediate', 0, NULL, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 2. nudge_agenda
@@ -37,7 +76,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'nudge_agenda', 2,
   'Já configurou sua agenda?',
@@ -47,13 +86,27 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Cadastrar meu primeiro serviço', '/admin/servicos',
   'hours_after_signup', 18, NULL, NULL, NULL, true, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
   skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 3. leave_whatsapp
@@ -61,7 +114,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'leave_whatsapp', 3,
   'Pare de organizar a agenda no WhatsApp',
@@ -71,13 +124,27 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Configurar minha agenda', '/admin/servicos',
   'days_after_signup', 2, 10, NULL, NULL, true, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
   skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 4. tutorial
@@ -85,7 +152,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'tutorial', 4,
   'Vamos configurar sua agenda juntos',
@@ -109,14 +176,27 @@ INSERT INTO public.email_funnel_steps (
   ]'::jsonb,
   'Começar pelo primeiro serviço', '/admin/servicos',
   'days_after_signup', 3, 10, NULL, NULL, true, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
   steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
   skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 5. video_agenda
@@ -124,7 +204,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'video_agenda', 5,
   'Sua agenda pode estar organizada assim',
@@ -134,12 +214,27 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Abrir a agenda', '/admin/agenda',
   'days_after_signup', 4, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 6. trial_mid
@@ -147,7 +242,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'trial_mid', 6,
   'Você ainda tem 7 dias para testar',
@@ -158,13 +253,27 @@ INSERT INTO public.email_funnel_steps (
   NULL,
   'Continuar pelo Início', '/admin/dashboard',
   'days_after_signup', 7, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
   body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- 7. trial_ending
@@ -172,7 +281,7 @@ INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'trial_ending', 7,
   'Seu período de teste está chegando ao fim',
@@ -182,22 +291,38 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Escolher meu plano', '/admin/faturamento',
   'days_before_trial_end', 2, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
+  NULL, NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,
   preheader = EXCLUDED.preheader,
   title = EXCLUDED.title,
   body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
   updated_at = NOW();
 
 -- INSERT new steps (Part B: 4 new steps)
+-- Using DO UPDATE for new steps too so re-running converges
 
 -- 8. page_ready_share (D1, send only if setup complete and not shared)
 INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'page_ready_share', 8,
   'Sua página já pode receber horário',
@@ -207,15 +332,35 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Ver o link e o QR', '/admin/dashboard',
   'days_after_signup', 1, 10, NULL, NULL, false, 'setup_complete_and_not_shared', true,
-  NULL, NULL, NOW(), NOW()
-) ON CONFLICT (step_key) DO NOTHING;
+  NULL, NULL, NOW()
+) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
+  subject = EXCLUDED.subject,
+  preheader = EXCLUDED.preheader,
+  title = EXCLUDED.title,
+  body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
+  updated_at = NOW();
 
 -- 9. no_public_booking (D5, send only if no public booking yet)
 INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'no_public_booking', 9,
   'Sua página ainda não recebeu um horário',
@@ -225,15 +370,35 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Copiar o link de agendamento', '/admin/dashboard',
   'days_after_signup', 5, 10, NULL, NULL, false, 'no_public_booking', true,
-  NULL, NULL, NOW(), NOW()
-) ON CONFLICT (step_key) DO NOTHING;
+  NULL, NULL, NOW()
+) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
+  subject = EXCLUDED.subject,
+  preheader = EXCLUDED.preheader,
+  title = EXCLUDED.title,
+  body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
+  updated_at = NOW();
 
 -- 10. trial_last_day (last day of trial, offset 0 from trial_ends_at)
 INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'trial_last_day', 10,
   'Hoje é o último dia do seu teste',
@@ -243,26 +408,66 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Escolher meu plano', '/admin/faturamento',
   'days_before_trial_end', 0, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
-) ON CONFLICT (step_key) DO NOTHING;
+  NULL, NULL, NOW()
+) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
+  subject = EXCLUDED.subject,
+  preheader = EXCLUDED.preheader,
+  title = EXCLUDED.title,
+  body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
+  updated_at = NOW();
 
 -- 11. trial_ended_winback (3 days after trial end)
 INSERT INTO public.email_funnel_steps (
   step_key, step_number, subject, preheader, title, body_text, body_if_setup, steps_json,
   cta_label, cta_path, trigger_type, trigger_offset, send_hour,
   window_start_hour, window_end_hour, skip_if_setup_complete, send_only_if, is_active,
-  image_url, video_url, created_at, updated_at
+  image_url, video_url, updated_at
 ) VALUES (
   'trial_ended_winback', 11,
   'Seu teste terminou. A agenda continua aqui.',
   'Solo, Pro ou Elite, no mesmo painel em que você testou.',
   'O teste acabou. Você pode voltar quando fizer sentido.',
-  E'Oi, {{nome}}.\n\nO período de teste do Horário Certo encerrou. Se quiser seguir com a agenda online e a página de {{nome_negocio}}, é só escolher o plano em Meu plano.\n\nSolo por R$ 34,90, Pro por R$ 69,90 (o mais escolhido) ou Elite por R$ 120,00 ao mês. Sem surpresa no valor do plano. Cancele quando quiser.\n\nSe tiver alguma dúvida para retomar, responda este e-mail ou fale com a gente pelo Suporte no painel.',
+  E'Oi, {{nome}}.\n\nO período de teste do Horário Certo encerrou. Se quiser seguir com a agenda online e a página de {{nome_negocio}}, é só escolher o plano em Meu plano.\n\nSolo por R$ 34,90, Pro por R$ 69,90 (o mais escolhido) ou Elite por R$ 120,00 ao mês. Sem surpresa no valor do plano. Cancele quando quiser.\n\nTodos os seus dados estão salvos (serviços, equipe, clientes, histórico). Quando você ativar um plano, a página pública volta a aceitar agendamentos.\n\nSe tiver alguma dúvida para retomar, responda este e-mail ou fale com a gente pelo Suporte no painel.',
   NULL, NULL,
   'Ver os planos', '/admin/faturamento',
   'days_after_trial_end', 3, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW(), NOW()
-) ON CONFLICT (step_key) DO NOTHING;
+  NULL, NULL, NOW()
+) ON CONFLICT (step_key) DO UPDATE SET
+  step_number = EXCLUDED.step_number,
+  subject = EXCLUDED.subject,
+  preheader = EXCLUDED.preheader,
+  title = EXCLUDED.title,
+  body_text = EXCLUDED.body_text,
+  body_if_setup = EXCLUDED.body_if_setup,
+  steps_json = EXCLUDED.steps_json,
+  cta_label = EXCLUDED.cta_label,
+  cta_path = EXCLUDED.cta_path,
+  trigger_type = EXCLUDED.trigger_type,
+  trigger_offset = EXCLUDED.trigger_offset,
+  send_hour = EXCLUDED.send_hour,
+  window_start_hour = EXCLUDED.window_start_hour,
+  window_end_hour = EXCLUDED.window_end_hour,
+  skip_if_setup_complete = EXCLUDED.skip_if_setup_complete,
+  send_only_if = EXCLUDED.send_only_if,
+  is_active = EXCLUDED.is_active,
+  image_url = EXCLUDED.image_url,
+  video_url = EXCLUDED.video_url,
+  updated_at = NOW();
 
 -- Add index on send_only_if for query performance
 CREATE INDEX IF NOT EXISTS idx_email_funnel_steps_send_only_if ON public.email_funnel_steps (send_only_if);

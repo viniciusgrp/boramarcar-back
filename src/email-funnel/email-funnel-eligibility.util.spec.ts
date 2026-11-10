@@ -16,6 +16,7 @@ describe('resolveEmailFunnelEligibility', () => {
     hasBookingLinkShared: false,
     hasPublicBooking: false,
     isPostTrialStep: false,
+    isLastDayOfTrialStep: false,
   };
 
   it('sends when the tenant did nothing and the step is due', () => {
@@ -87,6 +88,20 @@ describe('resolveEmailFunnelEligibility', () => {
         skipIfSetupComplete: false,
         trialEnded: true,
         isPostTrialStep: true,
+      }),
+    ).toBe('send');
+  });
+
+  it('allows last-day-of-trial step even when trial has technically ended', () => {
+    // This handles the case where trial_ends_at is 08:00 but send_hour is 10:00
+    // At 10:00, trialEnded is true, but we still want to send the last-day email
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        trialEnded: true,
+        isPostTrialStep: false,
+        isLastDayOfTrialStep: true,
       }),
     ).toBe('send');
   });

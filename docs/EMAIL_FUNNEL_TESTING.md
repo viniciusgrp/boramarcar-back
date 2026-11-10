@@ -29,11 +29,18 @@ POST /platform/email-funnel/steps/:stepKey/test
 
 #### 1. Get Platform Admin Token
 
-First, authenticate as platform admin to get your JWT token:
+First, authenticate as platform admin. The platform admin authentication uses the `/plataforma` path with the `PLATFORM_LOGIN_PASSPHRASE`.
+
+**Note**: Replace `$BACKEND_URL` with your actual HML backend URL (e.g., the URL where the NestJS backend is deployed).
 
 ```bash
-# Login to platform (requires PLATFORM_LOGIN_PASSPHRASE)
-curl -X POST https://app-hml.horariocerto.app/platform/auth/login \
+# Set your backend URL
+export BACKEND_URL="https://your-hml-backend.example.com"
+
+# Login to platform (requires PLATFORM_LOGIN_PASSPHRASE from .env)
+# This endpoint is at /plataforma/auth/login (not /platform/auth/login)
+# Contact the backend team for the correct passphrase
+curl -X POST $BACKEND_URL/plataforma/auth/login \
   -H "Content-Type: application/json" \
   -d '{"passphrase": "YOUR_PLATFORM_PASSPHRASE"}' \
   | jq -r '.access_token'
@@ -46,7 +53,7 @@ Save the returned token as `PLATFORM_TOKEN`.
 Test the welcome email with example data:
 
 ```bash
-curl -X POST https://app-hml.horariocerto.app/platform/email-funnel/steps/welcome/test \
+curl -X POST $BACKEND_URL/platform/email-funnel/steps/welcome/test \
   -H "Authorization: Bearer $PLATFORM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -57,7 +64,7 @@ curl -X POST https://app-hml.horariocerto.app/platform/email-funnel/steps/welcom
 Test with real tenant data (will use actual tenant name, slug, and owner first name):
 
 ```bash
-curl -X POST https://app-hml.horariocerto.app/platform/email-funnel/steps/welcome/test \
+curl -X POST $BACKEND_URL/platform/email-funnel/steps/welcome/test \
   -H "Authorization: Bearer $PLATFORM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +80,7 @@ Test each of the 11 steps:
 ```bash
 # Existing steps (updated copy)
 for step in welcome nudge_agenda leave_whatsapp tutorial video_agenda trial_mid trial_ending; do
-  curl -X POST https://app-hml.horariocerto.app/platform/email-funnel/steps/$step/test \
+  curl -X POST $BACKEND_URL/platform/email-funnel/steps/$step/test \
     -H "Authorization: Bearer $PLATFORM_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"to\": \"your-email@example.com\"}"
@@ -83,7 +90,7 @@ done
 
 # New steps (Part B)
 for step in page_ready_share no_public_booking trial_last_day trial_ended_winback; do
-  curl -X POST https://app-hml.horariocerto.app/platform/email-funnel/steps/$step/test \
+  curl -X POST $BACKEND_URL/platform/email-funnel/steps/$step/test \
     -H "Authorization: Bearer $PLATFORM_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"to\": \"your-email@example.com\"}"
@@ -157,11 +164,11 @@ done
 
 #### POST Unsubscribe (RFC 8058)
 
-Test the one-click unsubscribe endpoint:
+Test the one-click unsubscribe endpoint (no authentication required):
 
 ```bash
-# Get a real opt-out token from a tenant record
-curl -X POST https://horariocerto.app/api/email-funnel/unsubscribe \
+# Get a real opt-out token from a tenant record in the database
+curl -X POST $BACKEND_URL/public/email-funnel/unsubscribe \
   -H "Content-Type: application/json" \
   -d '{"token": "TENANT_OPT_OUT_TOKEN"}'
 ```
@@ -175,6 +182,10 @@ Expected response:
 ```
 
 Verify the tenant's `trial_email_funnel_opted_out_at` field is now set in the database.
+
+**Note**: The List-Unsubscribe header in emails points to:
+- `<$FRONTEND_URL/public/email-funnel/unsubscribe>` (POST endpoint, one-click)
+- `<mailto:contato@horariocerto.app?subject=descadastrar>` (email fallback)
 
 ### Environment Variables
 

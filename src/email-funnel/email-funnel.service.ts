@@ -296,6 +296,7 @@ export class EmailFunnelService {
     });
 
     const isPostTrialStep = params.step.trigger_type === 'days_after_trial_end';
+    const isLastDayOfTrialStep = params.step.trigger_type === 'days_before_trial_end' && params.step.trigger_offset === 0;
 
     const eligibility = resolveEmailFunnelEligibility({
       isActive: params.step.is_active,
@@ -316,6 +317,7 @@ export class EmailFunnelService {
       ),
       hasPublicBooking: params.hasPublicBooking,
       isPostTrialStep,
+      isLastDayOfTrialStep,
     });
 
     if (eligibility === 'already_processed' || eligibility === 'not_due') {
