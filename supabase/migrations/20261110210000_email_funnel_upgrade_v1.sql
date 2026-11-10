@@ -2,10 +2,20 @@
 -- Part A: Updates 7 existing steps with new copy
 -- Part B: Adds 4 new steps (page_ready_share, no_public_booking, trial_last_day, trial_ended_winback)
 
+-- Drop and recreate trigger_type constraint to allow 'days_after_trial_end'
+ALTER TABLE public.email_funnel_steps DROP CONSTRAINT IF EXISTS email_funnel_steps_trigger_type_check;
+ALTER TABLE public.email_funnel_steps ADD CONSTRAINT email_funnel_steps_trigger_type_check 
+  CHECK (trigger_type IN ('immediate','hours_after_signup','days_after_signup','days_before_trial_end','days_after_trial_end'));
+
 -- Add new columns to email_funnel_steps
 ALTER TABLE public.email_funnel_steps
   ADD COLUMN IF NOT EXISTS preheader TEXT,
-  ADD COLUMN IF NOT EXISTS send_only_if TEXT CHECK (send_only_if IN ('setup_complete_and_not_shared', 'no_public_booking'));
+  ADD COLUMN IF NOT EXISTS send_only_if TEXT;
+
+-- Add named send_only_if constraint idempotently
+ALTER TABLE public.email_funnel_steps DROP CONSTRAINT IF EXISTS email_funnel_steps_send_only_if_check;
+ALTER TABLE public.email_funnel_steps ADD CONSTRAINT email_funnel_steps_send_only_if_check 
+  CHECK (send_only_if IN ('setup_complete_and_not_shared', 'no_public_booking'));
 
 -- Define reusable UPDATE SET clause (all fields except step_key)
 -- UPDATE template for all steps:
