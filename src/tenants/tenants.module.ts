@@ -5,6 +5,7 @@ import { NtfyModule } from '../notifications/ntfy.module';
 import { AffiliatesModule } from '../affiliates/affiliates.module';
 import { EmailFunnelModule } from '../email-funnel/email-funnel.module';
 import { RecaptchaModule } from '../security/recaptcha.module';
+import { TrackingModule } from '../tracking/tracking.module';
 import { TenantsController } from './tenants.controller';
 import { TenantUsersController } from './tenant-users.controller';
 import { TenantAccessGuard } from './guards/tenant-access.guard';
@@ -22,6 +23,7 @@ import { TenantOpenGraphService } from './tenant-open-graph.service';
     AffiliatesModule,
     EmailFunnelModule,
     RecaptchaModule,
+    TrackingModule,
   ],
   controllers: [TenantsController, TenantUsersController],
   providers: [

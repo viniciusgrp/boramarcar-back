@@ -51,6 +51,7 @@ import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { isProductionAppEnv } from '../common/app-env.util';
 import { isDisposableEmail } from '../security/disposable-email.util';
+import { MetaCapiService } from '../tracking/meta-capi.service';
 import {
   ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
   ESTABLISHMENT_EMAIL_IN_USE_MESSAGE,
@@ -101,6 +102,23 @@ export interface RegisterTenantResult {
   requiresEmailConfirmation: boolean;
   email?: string;
   otpType?: string;
+}
+
+interface TenantTrackingData {
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmContent?: string | null;
+  fbclid?: string | null;
+  firstVisitAt?: string | null;
+}
+
+interface MetaTrackingData {
+  eventId?: string;
+  fbp?: string;
+  fbc?: string;
+  clientIpAddress?: string;
+  clientUserAgent?: string;
 }
 
 function applySubscriptionTrialFields(
@@ -248,6 +266,7 @@ export class TenantsService {
     private readonly emailFunnelService: EmailFunnelService,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
+    private readonly metaCapiService: MetaCapiService,
   ) {}
 
   async findById(tenantId: string): Promise<Tenant | null> {
@@ -778,7 +797,28 @@ export class TenantsService {
     return { slug, available: !existing };
   }
 
-  async register(dto: RegisterTenantDto): Promise<RegisterTenantResult> {
+  private normalizeTrackingData(dto: {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    fbclid?: string;
+    first_visit_at?: string;
+  }): TenantTrackingData {
+    return {
+      utmSource: this.normalizeOptionalText(dto.utm_source),
+      utmMedium: this.normalizeOptionalText(dto.utm_medium),
+      utmCampaign: this.normalizeOptionalText(dto.utm_campaign),
+      utmContent: this.normalizeOptionalText(dto.utm_content),
+      fbclid: this.normalizeOptionalText(dto.fbclid),
+      firstVisitAt: dto.first_visit_at || null,
+    };
+  }
+
+  async register(
+    dto: RegisterTenantDto,
+    metaTracking?: MetaTrackingData,
+  ): Promise<RegisterTenantResult> {
     const ownerName = dto.owner_name?.trim() ?? '';
     const email = dto.email?.trim().toLowerCase() ?? '';
     const password = dto.password ?? '';
@@ -857,6 +897,8 @@ export class TenantsService {
       signupUserId: ownerId,
     });
 
+    const trackingData = this.normalizeTrackingData(dto);
+
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
       .from('tenants')
@@ -871,6 +913,12 @@ export class TenantsService {
         trial_ends_at: trialEndsAt,
         referred_by_affiliate_id: attribution?.affiliateId ?? null,
         affiliate_attributed_at: attribution?.attributedAt ?? null,
+        utm_source: trackingData.utmSource,
+        utm_medium: trackingData.utmMedium,
+        utm_campaign: trackingData.utmCampaign,
+        utm_content: trackingData.utmContent,
+        fbclid: trackingData.fbclid,
+        first_visit_at: trackingData.firstVisitAt,
       })
       .select('*')
       .single();
@@ -906,6 +954,20 @@ export class TenantsService {
       () => undefined,
     );
 
+    void this.metaCapiService
+      .sendCompleteRegistration({
+        email,
+        userId: ownerId,
+        clientIpAddress: metaTracking?.clientIpAddress,
+        clientUserAgent: metaTracking?.clientUserAgent,
+        eventId: metaTracking?.eventId || dto.event_id,
+        fbp: metaTracking?.fbp || dto.fbp,
+        fbc: metaTracking?.fbc || dto.fbc,
+        fbclid: trackingData.fbclid || undefined,
+        firstVisitAt: trackingData.firstVisitAt || undefined,
+      })
+      .catch(() => undefined);
+
     if (skipEmailVerification) {
       this.logger.log(
         'Skipping establishment email verification outside production.',
@@ -934,6 +996,7 @@ export class TenantsService {
   async onboardForAuthenticatedUser(
     userId: string,
     dto: OnboardTenantDto,
+    metaTracking?: MetaTrackingData,
   ): Promise<Tenant> {
     const existing = await this.findMeResponse(userId);
 
@@ -971,6 +1034,8 @@ export class TenantsService {
       signupUserId: userId,
     });
 
+    const trackingData = this.normalizeTrackingData(dto);
+
     const { data: tenantData, error: tenantError } = await this.supabaseService
       .getClient()
       .from('tenants')
@@ -985,6 +1050,12 @@ export class TenantsService {
         trial_ends_at: trialEndsAt,
         referred_by_affiliate_id: attribution?.affiliateId ?? null,
         affiliate_attributed_at: attribution?.attributedAt ?? null,
+        utm_source: trackingData.utmSource,
+        utm_medium: trackingData.utmMedium,
+        utm_campaign: trackingData.utmCampaign,
+        utm_content: trackingData.utmContent,
+        fbclid: trackingData.fbclid,
+        first_visit_at: trackingData.firstVisitAt,
       })
       .select('*')
       .single();
@@ -1025,6 +1096,28 @@ export class TenantsService {
       undefined,
       userId,
     ).catch(() => undefined);
+
+    const { data: authUser } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(userId);
+
+    const email = authUser?.user?.email;
+
+    if (email) {
+      void this.metaCapiService
+        .sendCompleteRegistration({
+          email,
+          userId,
+          clientIpAddress: metaTracking?.clientIpAddress,
+          clientUserAgent: metaTracking?.clientUserAgent,
+          eventId: metaTracking?.eventId || dto.event_id,
+          fbp: metaTracking?.fbp || dto.fbp,
+          fbc: metaTracking?.fbc || dto.fbc,
+          fbclid: trackingData.fbclid || undefined,
+          firstVisitAt: trackingData.firstVisitAt || undefined,
+        })
+        .catch(() => undefined);
+    }
 
     return mapTenantRow(tenantData as Tenant);
   }

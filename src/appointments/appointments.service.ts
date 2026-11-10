@@ -3871,6 +3871,12 @@ export class AppointmentsService {
       support_ai_enabled: false,
       support_ai_stripe_subscription_item_id: null,
       support_ai_status: null,
+      utm_source: null,
+      utm_medium: null,
+      utm_campaign: null,
+      utm_content: null,
+      fbclid: null,
+      first_visit_at: null,
       created_at: '',
       updated_at: '',
     };

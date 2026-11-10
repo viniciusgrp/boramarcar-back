@@ -69,6 +69,12 @@ export interface Tenant {
   initial_setup_first_appointment_at: string | null;
   referred_by_affiliate_id?: string | null;
   affiliate_attributed_at?: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  fbclid: string | null;
+  first_visit_at: string | null;
   created_at: string;
   updated_at: string;
 }
