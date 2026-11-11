@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength, IsISO8601 } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  IsISO8601,
+} from 'class-validator';
+import { normalizeFirstVisitAt } from '../utils/normalize-first-visit-at.util';
 
 export class OnboardTenantDto {
   @IsString()
@@ -43,6 +51,7 @@ export class OnboardTenantDto {
   @MaxLength(500)
   fbclid?: string;
 
+  @Transform(({ value }) => normalizeFirstVisitAt(value) ?? undefined)
   @IsOptional()
   @IsISO8601()
   first_visit_at?: string;
@@ -51,6 +60,11 @@ export class OnboardTenantDto {
   @IsString()
   @MaxLength(255)
   event_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  metaEventId?: string;
 
   @IsOptional()
   @IsString()

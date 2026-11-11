@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsNotEmpty,
@@ -7,6 +8,7 @@ import {
   MinLength,
   IsISO8601,
 } from 'class-validator';
+import { normalizeFirstVisitAt } from '../utils/normalize-first-visit-at.util';
 
 export class RegisterTenantDto {
   @IsString()
@@ -37,6 +39,8 @@ export class RegisterTenantDto {
   @IsString()
   recaptcha_token?: string;
 
+  @IsOptional()
+  @IsString()
   @MaxLength(255)
   utm_source?: string;
 
@@ -60,6 +64,7 @@ export class RegisterTenantDto {
   @MaxLength(500)
   fbclid?: string;
 
+  @Transform(({ value }) => normalizeFirstVisitAt(value) ?? undefined)
   @IsOptional()
   @IsISO8601()
   first_visit_at?: string;

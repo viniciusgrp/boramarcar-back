@@ -10,7 +10,9 @@ function buildConfig(appEnv?: string) {
 
 function buildService(appEnv?: string) {
   return new TenantsService(
-    { getClient: () => ({ auth: { admin: { createUser: jest.fn() } } }) } as never,
+    {
+      getClient: () => ({ auth: { admin: { createUser: jest.fn() } } }),
+    } as never,
     {} as never,
     {} as never,
     {} as never,
@@ -35,7 +37,9 @@ describe('TenantsService', () => {
     const service = buildService();
     jest.spyOn(service, 'findBySlug').mockResolvedValue(null);
 
-    await expect(service.checkSlugAvailability('barbearia-nova')).resolves.toEqual({
+    await expect(
+      service.checkSlugAvailability('barbearia-nova'),
+    ).resolves.toEqual({
       slug: 'barbearia-nova',
       available: true,
     });
@@ -91,7 +95,8 @@ describe('TenantsService', () => {
         recaptcha_token: 'token',
       }),
     ).rejects.toMatchObject({
-      message: 'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      message:
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
     });
 
     expect(createUser).not.toHaveBeenCalled();
@@ -120,7 +125,8 @@ describe('TenantsService', () => {
         recaptcha_token: 'token',
       }),
     ).rejects.toMatchObject({
-      message: 'A senha deve ter pelo menos 8 caracteres, com letras e números.',
+      message:
+        'A senha deve ter pelo menos 8 caracteres, com letras e números.',
     });
 
     expect(createUser).not.toHaveBeenCalled();
@@ -209,5 +215,43 @@ describe('TenantsService', () => {
         user_metadata: { requires_email_verification: true },
       }),
     ).not.toThrow();
+  });
+
+  it('normalizes first_visit_at to ISO before tracking data is stored', () => {
+    const service = buildService();
+
+    const trackingData = (
+      service as unknown as {
+        normalizeTrackingData: (dto: {
+          first_visit_at?: string | number;
+          utm_source?: string;
+        }) => { firstVisitAt: string | null; utmSource: string | null };
+      }
+    ).normalizeTrackingData({
+      utm_source: 'facebook',
+      first_visit_at: 1794425797521,
+    });
+
+    expect(trackingData.firstVisitAt).toBe('2026-11-11T19:36:37.521Z');
+    expect(trackingData.utmSource).toBe('facebook');
+    expect(Number.isNaN(new Date(trackingData.firstVisitAt!).getTime())).toBe(
+      false,
+    );
+  });
+
+  it('drops invalid first_visit_at in tracking data instead of keeping raw input', () => {
+    const service = buildService();
+
+    const trackingData = (
+      service as unknown as {
+        normalizeTrackingData: (dto: { first_visit_at?: string | number }) => {
+          firstVisitAt: string | null;
+        };
+      }
+    ).normalizeTrackingData({
+      first_visit_at: 'not-a-timestamp',
+    });
+
+    expect(trackingData.firstVisitAt).toBeNull();
   });
 });
