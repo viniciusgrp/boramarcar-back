@@ -147,6 +147,11 @@ done
 
 #### 7. **New Step Content**
 
+**video_agenda** (D4):
+- Image from `{FRONTEND_URL}/email/agenda-timeline-equipe-1040.png` (relative `image_url` in DB)
+- Displayed at `width="520"` (asset is 1040×1760 @2x)
+- Alt describes Lucas/Rafael agenda timeline
+
 **page_ready_share** (D1):
 - Mentions logo, banner, and QR code
 - Shows booking link

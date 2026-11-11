@@ -19,7 +19,7 @@ describe('resolveMediaUrl', () => {
     ).toBe('https://horariocerto.app/email-funnel/agenda-bora-marcar.png');
   });
 
-  it('renders an email with image and UTM parameters', () => {
+  it('renders video_agenda with environment-relative image, width 520, and design alt', () => {
     const step: EmailFunnelStepRow = {
       step_key: 'video_agenda',
       step_number: 5,
@@ -39,16 +39,16 @@ describe('resolveMediaUrl', () => {
       skip_if_setup_complete: false,
       send_only_if: null,
       is_active: true,
-      image_url: '/email-funnel/agenda-preview.jpg',
+      image_url: '/email/agenda-timeline-equipe-1040.png',
       video_url: null,
       updated_at: '2026-09-08T00:00:00.000Z',
     };
 
     const html = buildEmailFunnelHtml({
       step,
-      frontendUrl: 'https://horariocerto.app',
-      ctaUrl: 'https://horariocerto.app/admin/agenda',
-      optOutUrl: 'https://horariocerto.app/descadastrar-emails-trial?token=x',
+      frontendUrl: 'https://hml.horariocerto.app',
+      ctaUrl: 'https://hml.horariocerto.app/admin/agenda',
+      optOutUrl: 'https://hml.horariocerto.app/descadastrar-emails-trial?token=x',
       useSetupCopy: false,
       trialEndsAt: null,
       ownerFirstName: 'Maria',
@@ -57,7 +57,16 @@ describe('resolveMediaUrl', () => {
       companyAddress: null,
     });
 
-    expect(html).toContain('https://horariocerto.app/email-funnel/agenda-preview.jpg');
+    expect(html).toContain(
+      'https://hml.horariocerto.app/email/agenda-timeline-equipe-1040.png',
+    );
+    expect(html).not.toContain(
+      'src="https://horariocerto.app/email/agenda-timeline-equipe-1040.png"',
+    );
+    expect(html).toContain('width="520"');
+    expect(html).toContain(
+      'alt="Agenda do Horário Certo com o dia de Lucas e Rafael, com horários de corte e barba confirmados de manhã e à tarde"',
+    );
     expect(html).toContain('utm_source=email');
     expect(html).toContain('utm_medium=lifecycle');
     expect(html).toContain('utm_campaign=trial');

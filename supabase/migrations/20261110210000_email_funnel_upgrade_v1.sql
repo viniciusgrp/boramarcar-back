@@ -224,7 +224,8 @@ INSERT INTO public.email_funnel_steps (
   NULL, NULL,
   'Abrir a agenda', '/admin/agenda',
   'days_after_signup', 4, 10, NULL, NULL, false, NULL, true,
-  NULL, NULL, NOW()
+  -- Relative path: backend prefixes FRONTEND_URL so HML uses hml.horariocerto.app
+  '/email/agenda-timeline-equipe-1040.png', NULL, NOW()
 ) ON CONFLICT (step_key) DO UPDATE SET
   step_number = EXCLUDED.step_number,
   subject = EXCLUDED.subject,

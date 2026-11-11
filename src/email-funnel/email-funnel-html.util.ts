@@ -11,6 +11,16 @@ import {
   type RenderEmailTemplateParams,
 } from './email-funnel-template.util';
 
+/** Per-step image alt text when the asset is more specific than the generic brand label. */
+export const EMAIL_FUNNEL_IMAGE_ALTS: Record<string, string> = {
+  video_agenda:
+    'Agenda do Horário Certo com o dia de Lucas e Rafael, com horários de corte e barba confirmados de manhã e à tarde',
+};
+
+export function resolveImageAlt(stepKey: string): string {
+  return EMAIL_FUNNEL_IMAGE_ALTS[stepKey] ?? `Agenda do ${BRAND_NAME}`;
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -125,7 +135,7 @@ export function buildEmailFunnelContent(params: {
     corpo: body,
     passos,
     image_url: imageUrl || undefined,
-    image_alt: `Agenda do ${BRAND_NAME}`,
+    image_alt: resolveImageAlt(params.step.step_key),
     cta_label: ctaLabel,
     cta_url: ctaUrl,
     unsubscribe_url: params.optOutUrl,
