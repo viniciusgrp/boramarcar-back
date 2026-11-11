@@ -131,8 +131,10 @@ export class SendEmailFunnelPreviewDto {
 }
 
 export class SendEmailFunnelTestDto {
+  /** Optional: step key comes from the URL param; body value is ignored if present. */
+  @IsOptional()
   @IsString()
-  step_key!: string;
+  step_key?: string;
 
   @IsEmail()
   to!: string;
