@@ -1,5 +1,8 @@
 export const EMAIL_FUNNEL_TIME_ZONE = 'America/Sao_Paulo';
 
+/** Max hours after dueAt that a non-immediate step may still send. Past this → skip as `stale`. */
+export const EMAIL_FUNNEL_MAX_LATENESS_HOURS = 24;
+
 export const EMAIL_FUNNEL_STEP_KEYS = [
   'welcome',
   'nudge_agenda',
@@ -32,7 +35,10 @@ export type EmailFunnelSkipReason =
   | 'inactive_step'
   | 'already_processed'
   | 'trial_ended'
-  | 'condition_not_met';
+  | 'condition_not_met'
+  | 'stale';
+
+export type EmailFunnelDueStatus = 'not_due' | 'due' | 'stale';
 
 export type EmailFunnelEligibility = 'send' | EmailFunnelSkipReason;
 

@@ -1,4 +1,5 @@
 import type {
+  EmailFunnelDueStatus,
   EmailFunnelEligibility,
   EmailFunnelSkipReason,
 } from './email-funnel.types';
@@ -12,7 +13,9 @@ export function resolveEmailFunnelEligibility(params: {
   hasService: boolean;
   hasBusinessHours: boolean;
   alreadyProcessed: boolean;
-  isDue: boolean;
+  /** @deprecated Prefer dueStatus. Kept for call sites that only know due/not-due. */
+  isDue?: boolean;
+  dueStatus?: EmailFunnelDueStatus;
   hasRecipientEmail: boolean;
   sendOnlyIf: string | null;
   hasBookingLinkShared: boolean;
@@ -66,8 +69,15 @@ export function resolveEmailFunnelEligibility(params: {
     }
   }
 
-  if (!params.isDue) {
+  const dueStatus =
+    params.dueStatus ?? (params.isDue === true ? 'due' : 'not_due');
+
+  if (dueStatus === 'not_due') {
     return 'not_due';
+  }
+
+  if (dueStatus === 'stale') {
+    return 'stale';
   }
 
   if (!params.hasRecipientEmail) {
@@ -89,6 +99,7 @@ export function shouldRecordSkip(
     eligibility === 'opted_out' ||
     eligibility === 'no_email' ||
     eligibility === 'trial_ended' ||
-    eligibility === 'condition_not_met'
+    eligibility === 'condition_not_met' ||
+    eligibility === 'stale'
   );
 }

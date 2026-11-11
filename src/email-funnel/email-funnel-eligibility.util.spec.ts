@@ -1,4 +1,7 @@
-import { resolveEmailFunnelEligibility } from './email-funnel-eligibility.util';
+import {
+  resolveEmailFunnelEligibility,
+  shouldRecordSkip,
+} from './email-funnel-eligibility.util';
 
 describe('resolveEmailFunnelEligibility', () => {
   const base = {
@@ -182,5 +185,32 @@ describe('resolveEmailFunnelEligibility', () => {
         hasPublicBooking: false,
       }),
     ).toBe('send');
+  });
+
+  it('returns stale when dueStatus is stale', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        dueStatus: 'stale',
+      }),
+    ).toBe('stale');
+  });
+
+  it('still allows last-day step when trial ended and dueStatus is due', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        trialEnded: true,
+        isLastDayOfTrialStep: true,
+        dueStatus: 'due',
+      }),
+    ).toBe('send');
+  });
+
+  it('records skip for stale but not for not_due', () => {
+    expect(shouldRecordSkip('stale')).toBe(true);
+    expect(shouldRecordSkip('not_due')).toBe(false);
   });
 });

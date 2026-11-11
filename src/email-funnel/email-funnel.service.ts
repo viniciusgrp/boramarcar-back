@@ -16,7 +16,7 @@ import {
   shouldRecordSkip,
 } from './email-funnel-eligibility.util';
 import { buildEmailFunnelHtml } from './email-funnel-html.util';
-import { isEmailFunnelStepDue } from './email-funnel-schedule.util';
+import { resolveEmailFunnelStepDueStatus } from './email-funnel-schedule.util';
 import type { UpdateEmailFunnelStepDto } from './dto/email-funnel.dto';
 import type {
   EmailFunnelSendListItem,
@@ -284,7 +284,7 @@ export class EmailFunnelService {
     const trialEndsAt = params.tenant.trial_ends_at
       ? new Date(params.tenant.trial_ends_at)
       : null;
-    const isDue = isEmailFunnelStepDue({
+    const dueStatus = resolveEmailFunnelStepDueStatus({
       now: params.now,
       signupAt,
       trialEndsAt,
@@ -309,7 +309,7 @@ export class EmailFunnelService {
       hasService: params.hasService,
       hasBusinessHours: params.hasBusinessHours,
       alreadyProcessed: already,
-      isDue,
+      dueStatus,
       hasRecipientEmail: Boolean(params.ownerEmail?.trim()),
       sendOnlyIf: params.step.send_only_if,
       hasBookingLinkShared: Boolean(

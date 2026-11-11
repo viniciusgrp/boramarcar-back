@@ -1,4 +1,7 @@
-import { isEmailFunnelStepDue } from './email-funnel-schedule.util';
+import {
+  isEmailFunnelStepDue,
+  resolveEmailFunnelStepDueStatus,
+} from './email-funnel-schedule.util';
 
 describe('isEmailFunnelStepDue', () => {
   const timeZone = 'America/Sao_Paulo';
@@ -18,6 +21,37 @@ describe('isEmailFunnelStepDue', () => {
         timeZone,
       }),
     ).toBe(true);
+  });
+
+  it('keeps immediate steps due even when far past signup (no lateness cap)', () => {
+    const signupAt = new Date('2026-09-08T17:00:00.000Z');
+    const weeksLater = new Date('2026-10-01T17:00:00.000Z');
+    expect(
+      isEmailFunnelStepDue({
+        now: weeksLater,
+        signupAt,
+        trialEndsAt: new Date('2026-09-22T17:00:00.000Z'),
+        triggerType: 'immediate',
+        triggerOffset: 0,
+        sendHour: null,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(true);
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: weeksLater,
+        signupAt,
+        trialEndsAt: new Date('2026-09-22T17:00:00.000Z'),
+        triggerType: 'immediate',
+        triggerOffset: 0,
+        sendHour: null,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('due');
   });
 
   it('holds the 18h nudge until the 9-20 local window', () => {
@@ -208,5 +242,141 @@ describe('isEmailFunnelStepDue', () => {
         timeZone,
       }),
     ).toBe(true);
+  });
+
+  it('still sends D+1 on-time inside the 24h lateness window', () => {
+    const signupAt = new Date('2026-09-08T17:00:00.000Z');
+    // D+1 at 10:00 BRT = 2026-09-09T13:00:00.000Z; 23h later is still due
+    const almostStale = new Date('2026-09-10T12:00:00.000Z');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: almostStale,
+        signupAt,
+        trialEndsAt: null,
+        triggerType: 'days_after_signup',
+        triggerOffset: 1,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('due');
+    expect(
+      isEmailFunnelStepDue({
+        now: almostStale,
+        signupAt,
+        trialEndsAt: null,
+        triggerType: 'days_after_signup',
+        triggerOffset: 1,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(true);
+  });
+
+  it('marks D+1 as stale after the 24h lateness window', () => {
+    const signupAt = new Date('2026-09-08T17:00:00.000Z');
+    // dueAt = 2026-09-09T13:00:00.000Z; +24h = 2026-09-10T13:00:00.000Z
+    const staleAt = new Date('2026-09-10T13:00:00.000Z');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: staleAt,
+        signupAt,
+        trialEndsAt: null,
+        triggerType: 'days_after_signup',
+        triggerOffset: 1,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('stale');
+    expect(
+      isEmailFunnelStepDue({
+        now: staleAt,
+        signupAt,
+        trialEndsAt: null,
+        triggerType: 'days_after_signup',
+        triggerOffset: 1,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe(false);
+  });
+
+  it('marks trial_last_day as stale after the 24h lateness window', () => {
+    const trialEndsAt = new Date('2026-09-22T17:00:00.000Z');
+    // dueAt = 2026-09-22T13:00:00.000Z (10:00 BRT); +24h = 2026-09-23T13:00:00.000Z
+    const onTime = new Date('2026-09-22T20:00:00.000Z');
+    const staleAt = new Date('2026-09-23T13:00:00.000Z');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: onTime,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_before_trial_end',
+        triggerOffset: 0,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('due');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: staleAt,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_before_trial_end',
+        triggerOffset: 0,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('stale');
+  });
+
+  it('marks trial_ended_winback as stale after the 24h lateness window', () => {
+    const trialEndsAt = new Date('2026-09-22T17:00:00.000Z');
+    // days_after_trial_end offset 3 → dueAt 2026-09-25T13:00:00.000Z
+    const onTime = new Date('2026-09-25T18:00:00.000Z');
+    const staleAt = new Date('2026-09-26T13:00:00.000Z');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: onTime,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_after_trial_end',
+        triggerOffset: 3,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('due');
+
+    expect(
+      resolveEmailFunnelStepDueStatus({
+        now: staleAt,
+        signupAt: new Date('2026-09-08T17:00:00.000Z'),
+        trialEndsAt,
+        triggerType: 'days_after_trial_end',
+        triggerOffset: 3,
+        sendHour: 10,
+        windowStartHour: null,
+        windowEndHour: null,
+        timeZone,
+      }),
+    ).toBe('stale');
   });
 });
