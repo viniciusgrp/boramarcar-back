@@ -2,10 +2,14 @@ import {
   escapeHtml,
   addUtmParams,
   getTrialDaysRemaining,
+  formatDiasLabel,
+  formatRestamLabel,
   interpolateVariables,
   renderEmailTemplate,
   renderEmailPlainText,
 } from './email-funnel-template.util';
+
+const defaultFrontendUrl = 'https://horariocerto.app';
 
 describe('escapeHtml', () => {
   it('escapes HTML special characters', () => {
@@ -96,6 +100,19 @@ describe('getTrialDaysRemaining', () => {
   });
 });
 
+describe('formatDiasLabel / formatRestamLabel', () => {
+  it('uses singular forms for 1 day', () => {
+    expect(formatDiasLabel(1)).toBe('dia');
+    expect(formatRestamLabel(1)).toBe('resta');
+  });
+
+  it('uses plural forms for other counts', () => {
+    expect(formatDiasLabel(0)).toBe('dias');
+    expect(formatDiasLabel(7)).toBe('dias');
+    expect(formatRestamLabel(7)).toBe('restam');
+  });
+});
+
 describe('interpolateVariables', () => {
   it('interpolates single variable', () => {
     const text = 'Olá, {{nome}}.';
@@ -125,6 +142,14 @@ describe('interpolateVariables', () => {
     );
   });
 
+  it('can skip HTML escaping for subject lines', () => {
+    const text = 'Você ainda tem {{dias_restantes}} {{dias_label}} para testar';
+    const variables = { dias_restantes: '7', dias_label: 'dias' };
+    expect(
+      interpolateVariables(text, variables, { escapeHtml: false }),
+    ).toBe('Você ainda tem 7 dias para testar');
+  });
+
   it('handles variables with spaces around braces', () => {
     const text = '{{ nome }} está aqui';
     const variables = { nome: 'Maria' };
@@ -142,6 +167,7 @@ describe('renderEmailTemplate', () => {
       cta_label: 'Clique aqui',
       cta_url: 'https://example.com',
       unsubscribe_url: 'https://example.com/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(html).toContain('<title>Teste</title>');
@@ -151,6 +177,36 @@ describe('renderEmailTemplate', () => {
     expect(html).toContain('Clique aqui');
     expect(html).toContain('https://example.com');
     expect(html).toContain('https://example.com/unsubscribe');
+    expect(html).toContain(
+      'https://horariocerto.app/email/logo-horariocerto-400x67.png',
+    );
+    expect(html).toContain('ses:no-track');
+  });
+
+  it('uses the environment frontend origin for logo and brand links', () => {
+    const html = renderEmailTemplate({
+      assunto: 'HML',
+      preheader: null,
+      titulo: 'Teste HML',
+      corpo: 'Corpo',
+      cta_label: 'Abrir',
+      cta_url: 'https://hml.horariocerto.app/admin/dashboard',
+      unsubscribe_url:
+        'https://hml.horariocerto.app/descadastrar-emails-trial?token=x',
+      frontendUrl: 'https://hml.horariocerto.app',
+    });
+
+    expect(html).toContain(
+      'https://hml.horariocerto.app/email/logo-horariocerto-400x67.png',
+    );
+    expect(html).toContain(
+      'https://hml.horariocerto.app/email/logo-horariocerto-dark-400x67.png',
+    );
+    expect(html).toContain('href="https://hml.horariocerto.app"');
+    expect(html).toContain('>hml.horariocerto.app<');
+    expect(html).not.toContain(
+      'src="https://horariocerto.app/email/logo-horariocerto-400x67.png"',
+    );
   });
 
   it('renders email with tutorial steps', () => {
@@ -167,6 +223,7 @@ describe('renderEmailTemplate', () => {
       cta_label: 'Começar',
       cta_url: '/admin/dashboard',
       unsubscribe_url: '/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(html).toContain('Siga as instruções:');
@@ -187,6 +244,7 @@ describe('renderEmailTemplate', () => {
       cta_label: 'Ver mais',
       cta_url: '/admin/dashboard',
       unsubscribe_url: '/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(html).toContain('https://example.com/image.png');
@@ -203,6 +261,7 @@ describe('renderEmailTemplate', () => {
       cta_url: '/',
       unsubscribe_url: '/unsubscribe',
       empresa_endereco: 'Rua Exemplo, 123 - CNPJ 00.000.000/0000-00',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(html).toContain('Rua Exemplo, 123 - CNPJ 00.000.000/0000-00');
@@ -217,6 +276,7 @@ describe('renderEmailTemplate', () => {
       cta_label: 'OK',
       cta_url: '/',
       unsubscribe_url: '/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(html).not.toMatch(/display:none[^>]*Preheader/);
@@ -233,6 +293,7 @@ describe('renderEmailPlainText', () => {
       cta_label: 'Clique',
       cta_url: 'https://example.com',
       unsubscribe_url: 'https://example.com/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(text).toContain('Horário Certo');
@@ -240,6 +301,8 @@ describe('renderEmailPlainText', () => {
     expect(text).toContain('Corpo do email');
     expect(text).toContain('Clique: https://example.com');
     expect(text).toContain('Descadastrar: https://example.com/unsubscribe');
+    expect(text).toContain('https://horariocerto.app');
+    expect(text).toContain('contato@horariocerto.app');
   });
 
   it('includes tutorial steps in plain text', () => {
@@ -256,6 +319,7 @@ describe('renderEmailPlainText', () => {
       cta_label: 'Começar',
       cta_url: '/start',
       unsubscribe_url: '/unsubscribe',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(text).toContain('Instruções:');
@@ -275,6 +339,7 @@ describe('renderEmailPlainText', () => {
       cta_url: '/',
       unsubscribe_url: '/unsubscribe',
       empresa_endereco: 'Endereço da Empresa',
+      frontendUrl: defaultFrontendUrl,
     });
 
     expect(text).toContain('Endereço da Empresa');

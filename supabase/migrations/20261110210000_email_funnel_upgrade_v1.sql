@@ -255,11 +255,11 @@ INSERT INTO public.email_funnel_steps (
   image_url, video_url, updated_at
 ) VALUES (
   'trial_mid', 6,
-  'Você ainda tem 7 dias para testar',
-  'Sete dias do Pro pela frente. Agenda, caixa, fidelidade e cupons no mesmo painel.',
+  'Você ainda tem {{dias_restantes}} {{dias_label}} para testar',
+  '{{dias_restantes}} {{dias_label}} do Pro pela frente. Agenda, caixa, fidelidade e cupons no mesmo painel.',
   'Você está no meio do teste de 14 dias.',
-  E'Oi, {{nome}}.\n\nAinda restam {{dias_restantes}} dias do plano Pro, sem cartão. Se os serviços e os horários ainda não estão no ar, o teste está passando sem o cliente conseguir marcar.\n\nVale fazer o básico agora: cadastre um serviço, revise os horários e compartilhe o link ou o QR no Início. É isso que transforma os dias que restam num teste de verdade.\n\nDepois, se quiser, você olha o caixa do dia, os pontos de fidelidade e os cupons. Nada disso é obrigatório no primeiro momento.',
-  E'Oi, {{nome}}.\n\nA agenda de {{nome_negocio}} já pode receber horário. Ainda restam {{dias_restantes}} dias do Pro para você experimentar o que vem depois da grade.\n\nNo mesmo painel: o fluxo de caixa (abrir, lançar e fechar o expediente), os relatórios de faturamento com exportação em CSV, os pontos de fidelidade e os cupons para uma primeira visita ou um horário mais fraco.\n\nSe tiver equipe, o sistema calcula a comissão de cada profissional. No detalhe do horário, o botão Enviar lembrete no WhatsApp deixa a mensagem pronta: é só tocar em enviar.\n\nQuando quiser continuar depois do teste, é só escolher o plano em Meu plano. Sem cartão até lá. Cancele quando quiser.',
+  E'Oi, {{nome}}.\n\nAinda {{restam_ou_resta}} {{dias_restantes}} {{dias_label}} do plano Pro, sem cartão. Se os serviços e os horários ainda não estão no ar, o teste está passando sem o cliente conseguir marcar.\n\nVale fazer o básico agora: cadastre um serviço, revise os horários e compartilhe o link ou o QR no Início. É isso que transforma os dias que restam num teste de verdade.\n\nDepois, se quiser, você olha o caixa do dia, os pontos de fidelidade e os cupons. Nada disso é obrigatório no primeiro momento.',
+  E'Oi, {{nome}}.\n\nA agenda de {{nome_negocio}} já pode receber horário. Ainda {{restam_ou_resta}} {{dias_restantes}} {{dias_label}} do Pro para você experimentar o que vem depois da grade.\n\nNo mesmo painel: o fluxo de caixa (abrir, lançar e fechar o expediente), os relatórios de faturamento com exportação em CSV, os pontos de fidelidade e os cupons para uma primeira visita ou um horário mais fraco.\n\nSe tiver equipe, o sistema calcula a comissão de cada profissional. No detalhe do horário, o botão Enviar lembrete no WhatsApp deixa a mensagem pronta: é só tocar em enviar.\n\nQuando quiser continuar depois do teste, é só escolher o plano em Meu plano. Sem cartão até lá. Cancele quando quiser.',
   NULL,
   'Continuar pelo Início', '/admin/dashboard',
   'days_after_signup', 7, 10, NULL, NULL, false, NULL, true,

@@ -8,14 +8,16 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { BRAND_CONTACT_EMAIL } from '../common/brand.constants';
 import { MailService } from '../mail/mail.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { isTrialActive } from '../tenants/utils/tenant-access.util';
+import { TRIAL_DURATION_DAYS } from '../tenants/utils/trial-period.util';
 import {
   resolveEmailFunnelEligibility,
   shouldRecordSkip,
 } from './email-funnel-eligibility.util';
-import { buildEmailFunnelHtml } from './email-funnel-html.util';
+import { buildEmailFunnelContent } from './email-funnel-html.util';
 import { resolveEmailFunnelStepDueStatus } from './email-funnel-schedule.util';
 import type { UpdateEmailFunnelStepDto } from './dto/email-funnel.dto';
 import type {
@@ -143,9 +145,9 @@ export class EmailFunnelService {
       throw new BadRequestException('Informe um e-mail de destino.');
     }
 
-    const html = this.renderStep(step, {
+    const rendered = this.renderStep(step, {
       token: 'preview',
-      trialEndsAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      trialEndsAt: resolvePreviewTrialEndsAt(step),
       useSetupCopy: false,
       ownerFirstName: 'Maria',
       tenantName: 'Estabelecimento Exemplo',
@@ -154,8 +156,9 @@ export class EmailFunnelService {
 
     await this.mailService.sendHtmlEmail({
       to,
-      subject: `[Teste] ${step.subject}`,
-      html,
+      subject: `[Teste] ${rendered.subject}`,
+      html: rendered.html,
+      text: rendered.text,
       failIfUnconfigured: true,
     });
 
@@ -187,11 +190,9 @@ export class EmailFunnelService {
       }
     }
 
-    const html = this.renderStep(step, {
+    const rendered = this.renderStep(step, {
       token: tenant?.trial_email_funnel_opt_out_token || 'test-token',
-      trialEndsAt:
-        tenant?.trial_ends_at ||
-        new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      trialEndsAt: tenant?.trial_ends_at || resolvePreviewTrialEndsAt(step),
       useSetupCopy: false,
       ownerFirstName: ownerDetails.firstName,
       tenantName: tenant?.name || 'Estabelecimento Exemplo',
@@ -205,10 +206,11 @@ export class EmailFunnelService {
 
     await this.mailService.sendTestEmail({
       to,
-      subject: `[Teste] ${step.subject}`,
-      html,
+      subject: `[Teste] ${rendered.subject}`,
+      html: rendered.html,
+      text: rendered.text,
       headers: {
-        'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:contato@horariocerto.app?subject=descadastrar>`,
+        'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:${BRAND_CONTACT_EMAIL}?subject=descadastrar>`,
         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
       },
     });
@@ -438,7 +440,7 @@ export class EmailFunnelService {
       tenantName: string | null;
       tenantSlug: string | null;
     },
-  ): string {
+  ) {
     const frontendUrl = (
       this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:5173'
     ).replace(/\/$/, '');
@@ -447,7 +449,7 @@ export class EmailFunnelService {
     const optOutUrl = `${frontendUrl}/descadastrar-emails-trial?token=${encodeURIComponent(params.token)}`;
     const companyAddress = this.configService.get<string>('COMPANY_ADDRESS') || null;
 
-    return buildEmailFunnelHtml({
+    return buildEmailFunnelContent({
       step,
       frontendUrl,
       ctaUrl,
@@ -629,7 +631,7 @@ export class EmailFunnelService {
     ownerFirstName: string | null;
     useSetupCopy: boolean;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
-    const html = this.renderStep(params.step, {
+    const rendered = this.renderStep(params.step, {
       token: params.tenant.trial_email_funnel_opt_out_token,
       trialEndsAt: params.tenant.trial_ends_at,
       useSetupCopy: params.useSetupCopy,
@@ -641,16 +643,16 @@ export class EmailFunnelService {
     const frontendUrl = (
       this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:5173'
     ).replace(/\/$/, '');
-    const optOutUrl = `${frontendUrl}/descadastrar-emails-trial?token=${encodeURIComponent(params.tenant.trial_email_funnel_opt_out_token)}`;
     const postOptOutUrl = `${frontendUrl}/api/email-funnel/unsubscribe`;
 
     try {
       await this.mailService.sendHtmlEmail({
         to: params.recipientEmail,
-        subject: params.step.subject,
-        html,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
         headers: {
-          'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:contato@horariocerto.app?subject=descadastrar>`,
+          'List-Unsubscribe': `<${postOptOutUrl}>, <mailto:${BRAND_CONTACT_EMAIL}?subject=descadastrar>`,
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
         },
         failIfUnconfigured: true,
@@ -810,6 +812,34 @@ export class EmailFunnelService {
       updated_at: String(row.updated_at ?? ''),
     };
   }
+}
+
+/**
+ * Realistic trial_ends_at for platform test/preview sends, so
+ * {{dias_restantes}} matches the step (e.g. 7 for trial_mid).
+ */
+export function resolvePreviewTrialEndsAt(
+  step: Pick<EmailFunnelStepRow, 'trigger_type' | 'trigger_offset'>,
+  now: Date = new Date(),
+): string {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const nowMs = now.getTime();
+
+  if (step.trigger_type === 'days_before_trial_end') {
+    return new Date(nowMs + step.trigger_offset * dayMs).toISOString();
+  }
+
+  if (step.trigger_type === 'days_after_trial_end') {
+    return new Date(nowMs - step.trigger_offset * dayMs).toISOString();
+  }
+
+  if (step.trigger_type === 'days_after_signup') {
+    const remaining = Math.max(0, TRIAL_DURATION_DAYS - step.trigger_offset);
+    return new Date(nowMs + remaining * dayMs).toISOString();
+  }
+
+  // immediate / hours_after_signup: near the start of a full trial
+  return new Date(nowMs + TRIAL_DURATION_DAYS * dayMs).toISOString();
 }
 
 function firstRelation(

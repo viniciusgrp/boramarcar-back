@@ -1,5 +1,9 @@
 import Handlebars from 'handlebars';
-import { BRAND_NAME } from '../common/brand.constants';
+import {
+  BRAND_CONTACT_EMAIL,
+  BRAND_NAME,
+  BRAND_SITE_DOMAIN,
+} from '../common/brand.constants';
 
 /**
  * Escapes HTML special characters to prevent XSS
@@ -49,17 +53,45 @@ export function getTrialDaysRemaining(trialEndsAt: string | null): number {
   return Math.max(0, diffDays);
 }
 
+/** Portuguese singular/plural for "dia" / "dias". */
+export function formatDiasLabel(days: number): 'dia' | 'dias' {
+  return days === 1 ? 'dia' : 'dias';
+}
+
+/** Verb agreement for "resta(m) N dia(s)". */
+export function formatRestamLabel(days: number): 'resta' | 'restam' {
+  return days === 1 ? 'resta' : 'restam';
+}
+
+export function resolveBrandHomeUrl(frontendUrl: string): string {
+  return frontendUrl.replace(/\/$/, '') || `https://${BRAND_SITE_DOMAIN}`;
+}
+
+export function resolveBrandDomainLabel(frontendUrl: string): string {
+  const origin = resolveBrandHomeUrl(frontendUrl);
+  try {
+    return new URL(origin).hostname || BRAND_SITE_DOMAIN;
+  } catch {
+    return BRAND_SITE_DOMAIN;
+  }
+}
+
 /**
  * Safely interpolates variables in text, escaping HTML and handling missing values
  */
 export function interpolateVariables(
   text: string,
   variables: Record<string, string>,
+  options?: { escapeHtml?: boolean },
 ): string {
-  return text.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+  const shouldEscape = options?.escapeHtml !== false;
+  return text.replace(/\{\{([^}]+)\}\}/g, (_match, key) => {
     const trimmedKey = key.trim();
     const value = variables[trimmedKey];
-    return value !== undefined ? escapeHtml(value) : '';
+    if (value === undefined) {
+      return '';
+    }
+    return shouldEscape ? escapeHtml(value) : value;
   });
 }
 
@@ -128,10 +160,10 @@ const EMAIL_TEMPLATE = `<!DOCTYPE html>
 
           <tr>
             <td class="hc-head" align="left" style="padding:32px 40px 20px 40px;background-color:#FFFFFF;border-radius:16px 16px 0 0;">
-              <a href="https://horariocerto.app" target="_blank" style="text-decoration:none;">
-                <img class="hc-logo-light" src="https://horariocerto.app/email/logo-horariocerto-400x67.png" width="200" height="33" alt="${BRAND_NAME}" style="display:block;width:200px;height:33px;border:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:18px;font-weight:700;color:#0F5F58;">
+              <a href="{{{brand_home_url}}}" target="_blank" style="text-decoration:none;">
+                <img class="hc-logo-light" src="{{{logo_light_url}}}" width="200" height="33" alt="${BRAND_NAME}" style="display:block;width:200px;height:33px;border:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:18px;font-weight:700;color:#0F5F58;">
                 <!--[if !mso]><!-->
-                <img class="hc-logo-dark" src="https://horariocerto.app/email/logo-horariocerto-dark-400x67.png" width="200" height="33" alt="${BRAND_NAME}" style="display:none;max-height:0;overflow:hidden;width:200px;height:33px;border:0;mso-hide:all;font-family:Inter, Arial, Helvetica, sans-serif;font-size:18px;font-weight:700;color:#4FD1C0;">
+                <img class="hc-logo-dark" src="{{{logo_dark_url}}}" width="200" height="33" alt="${BRAND_NAME}" style="display:none;max-height:0;overflow:hidden;width:200px;height:33px;border:0;mso-hide:all;font-family:Inter, Arial, Helvetica, sans-serif;font-size:18px;font-weight:700;color:#4FD1C0;">
                 <!--<![endif]-->
               </a>
             </td>
@@ -213,10 +245,10 @@ const EMAIL_TEMPLATE = `<!DOCTYPE html>
 
           <tr>
             <td class="hc-pad hc-foot" style="padding:24px 40px 32px 40px;border-top:1px solid #E7E3DA;">
-              <p class="hc-muted" style="margin:0 0 8px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;"><strong>${BRAND_NAME}</strong> &middot; <a class="hc-link" href="https://horariocerto.app" target="_blank" style="color:#0F5F58;text-decoration:underline;">horariocerto.app</a> &middot; <a class="hc-link" href="mailto:contato@horariocerto.app" style="color:#0F5F58;text-decoration:underline;">contato@horariocerto.app</a></p>
+              <p class="hc-muted" style="margin:0 0 8px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;"><strong>${BRAND_NAME}</strong> &middot; <a class="hc-link" href="{{{brand_home_url}}}" target="_blank" style="color:#0F5F58;text-decoration:underline;">{{brand_domain_label}}</a> &middot; <a class="hc-link" href="mailto:{{contact_email}}" style="color:#0F5F58;text-decoration:underline;">{{contact_email}}</a></p>
               {{#if empresa_endereco}}<p class="hc-muted" style="margin:0 0 8px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;">{{{empresa_endereco}}}</p>{{/if}}
               <p class="hc-muted" style="margin:0 0 12px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;">Você recebeu este e-mail porque criou uma conta de teste no ${BRAND_NAME}.</p>
-              <p style="margin:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;"><a class="hc-link" href="{{{unsubscribe_url}}}" target="_blank" style="color:#0F5F58;text-decoration:underline;display:inline-block;padding:12px 0;">Não quero mais receber estes e-mails</a></p>
+              <p style="margin:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;"><a class="hc-link" href="{{{unsubscribe_url}}}" ses:no-track target="_blank" style="color:#0F5F58;text-decoration:underline;display:inline-block;padding:12px 0;">Não quero mais receber estes e-mails</a></p>
             </td>
           </tr>
 
@@ -261,6 +293,25 @@ export interface RenderEmailTemplateParams {
   cta_url: string;
   unsubscribe_url: string;
   empresa_endereco?: string;
+  /** Frontend origin for the current environment (logo + brand link). */
+  frontendUrl: string;
+}
+
+function resolveTemplateBrandUrls(frontendUrl: string): {
+  brand_home_url: string;
+  logo_light_url: string;
+  logo_dark_url: string;
+  brand_domain_label: string;
+  contact_email: string;
+} {
+  const brandHomeUrl = resolveBrandHomeUrl(frontendUrl);
+  return {
+    brand_home_url: brandHomeUrl,
+    logo_light_url: `${brandHomeUrl}/email/logo-horariocerto-400x67.png`,
+    logo_dark_url: `${brandHomeUrl}/email/logo-horariocerto-dark-400x67.png`,
+    brand_domain_label: resolveBrandDomainLabel(frontendUrl),
+    contact_email: BRAND_CONTACT_EMAIL,
+  };
 }
 
 /**
@@ -271,6 +322,7 @@ export function renderEmailTemplate(params: RenderEmailTemplateParams): string {
 
   return compiledTemplate({
     ...params,
+    ...resolveTemplateBrandUrls(params.frontendUrl),
     corpo,
   });
 }
@@ -279,6 +331,7 @@ export function renderEmailTemplate(params: RenderEmailTemplateParams): string {
  * Generates a plain text version of the email
  */
 export function renderEmailPlainText(params: RenderEmailTemplateParams): string {
+  const brand = resolveTemplateBrandUrls(params.frontendUrl);
   let text = `${BRAND_NAME}\n\n`;
   text += `${params.titulo}\n\n`;
   text += `${params.corpo}\n\n`;
@@ -299,8 +352,8 @@ export function renderEmailPlainText(params: RenderEmailTemplateParams): string 
 
   text += `---\n\n`;
   text += `${BRAND_NAME}\n`;
-  text += `https://horariocerto.app\n`;
-  text += `contato@horariocerto.app\n\n`;
+  text += `${brand.brand_home_url}\n`;
+  text += `${brand.contact_email}\n\n`;
 
   if (params.empresa_endereco) {
     text += `${params.empresa_endereco}\n\n`;

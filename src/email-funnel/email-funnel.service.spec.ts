@@ -1,6 +1,33 @@
 import { MailService } from '../mail/mail.service';
-import { EmailFunnelService } from './email-funnel.service';
+import {
+  EmailFunnelService,
+  resolvePreviewTrialEndsAt,
+} from './email-funnel.service';
 import type { EmailFunnelStepRow } from './email-funnel.types';
+
+describe('resolvePreviewTrialEndsAt', () => {
+  const now = new Date('2026-11-11T13:00:00.000Z');
+
+  it('uses remaining trial days for days_after_signup (trial_mid = 7)', () => {
+    const endsAt = resolvePreviewTrialEndsAt(
+      { trigger_type: 'days_after_signup', trigger_offset: 7 },
+      now,
+    );
+    const days =
+      (new Date(endsAt).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+    expect(days).toBe(7);
+  });
+
+  it('uses trigger offset for days_before_trial_end', () => {
+    const endsAt = resolvePreviewTrialEndsAt(
+      { trigger_type: 'days_before_trial_end', trigger_offset: 2 },
+      now,
+    );
+    const days =
+      (new Date(endsAt).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+    expect(days).toBe(2);
+  });
+});
 
 describe('EmailFunnelService.sendPreview', () => {
   it('renders the step and sends HTML mail to the requested address', async () => {

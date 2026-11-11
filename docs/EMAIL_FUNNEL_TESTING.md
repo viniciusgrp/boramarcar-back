@@ -112,8 +112,11 @@ done
 - `{{nome}}` → Owner's first name (e.g., "Maria")
 - `{{nome_negocio}}` → Tenant name (e.g., "Salão Exemplo")
 - `{{link_agendamento}}` → Public booking URL (e.g., https://horariocerto.app/exemplo)
-- `{{dias_restantes}}` → Trial days remaining (calculated dynamically)
+- `{{dias_restantes}}` → Trial days remaining (calculated dynamically; also used in subject/preheader)
+- `{{dias_label}}` → `dia` or `dias` (Portuguese agreement)
+- `{{restam_ou_resta}}` → `resta` or `restam` (verb agreement in body copy)
 - No `{{...}}` placeholders leaked into the email
+- Platform test sends without a tenant pick a realistic `trial_ends_at` for the step (e.g. 7 days left for `trial_mid`)
 
 #### 3. **Preheader**
 - Hidden preheader text appears in email preview (check in Gmail, Outlook)
@@ -198,12 +201,15 @@ SMTP_HOST=smtp.resend.com
 SMTP_PORT=465
 SMTP_USER=resend
 SMTP_PASS=your_resend_api_key
-SMTP_FROM="Horário Certo <ola@horariocerto.app>"
+SMTP_FROM="Horário Certo <contato@horariocerto.app>"
+
+# When MAIL_PROVIDER=ses, use the SES sender instead:
+# SES_SMTP_FROM="Horário Certo <contato@horariocerto.app>"
 
 # Optional: company address in footer
 COMPANY_ADDRESS="Sua Empresa Ltda, Rua Exemplo 123, São Paulo - SP, CNPJ 00.000.000/0000-00"
 
-# Frontend URL for links
+# Frontend URL for links (logo, brand footer, CTA and unsubscribe all use this origin)
 FRONTEND_URL=https://horariocerto.app
 ```
 
