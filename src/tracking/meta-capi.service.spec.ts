@@ -176,56 +176,10 @@ describe('MetaCapiService', () => {
 
     it('should not call fetch when not configured', async () => {
       mockConfigService.get.mockReturnValue(undefined);
->>>>>>> origin/master
 
       await service.sendCompleteRegistration({
         email: 'test@example.com',
         userId: 'user123',
-<<<<<<< HEAD
-        clientIpAddress: '192.168.1.1',
-        clientUserAgent: 'Mozilla/5.0',
-        eventId: 'event123',
-        fbp: 'fb.1.123456789.987654321',
-        fbc: 'fb.1.123456789.click123',
-      });
-
-      expect(sendEventSpy).toHaveBeenCalledWith({
-        eventName: 'CompleteRegistration',
-        eventTime: expect.any(Number),
-        eventSourceUrl: 'https://horariocerto.app/register',
-        eventId: 'event123',
-        userData: {
-          email: 'test@example.com',
-          externalId: 'user123',
-          clientIpAddress: '192.168.1.1',
-          clientUserAgent: 'Mozilla/5.0',
-          fbp: 'fb.1.123456789.987654321',
-          fbc: 'fb.1.123456789.click123',
-        },
-        customData: {
-          currency: 'BRL',
-          value: 0,
-        },
-      });
-    });
-
-    it('should build fbc from fbclid if fbc not provided', async () => {
-      const sendEventSpy = jest.spyOn(service, 'sendEvent').mockResolvedValue();
-
-      await service.sendCompleteRegistration({
-        email: 'test@example.com',
-        userId: 'user123',
-        fbclid: 'click123',
-        firstVisitAt: '2026-11-10T19:00:00.000Z',
-      });
-
-      expect(sendEventSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userData: expect.objectContaining({
-            fbc: expect.stringMatching(/^fb\.1\.\d+\.click123$/),
-          }),
-        }),
-=======
       });
 
       expect(global.fetch).not.toHaveBeenCalled();
