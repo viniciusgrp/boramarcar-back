@@ -444,8 +444,11 @@ export class MailService {
     to: string;
     subject: string;
     html: string;
+    text?: string;
     replyTo?: string;
+    headers?: Record<string, string>;
     failIfUnconfigured?: boolean;
+    bypassProductionCheck?: boolean;
   }): Promise<void> {
     const recipient = params.to.trim().toLowerCase();
 
@@ -456,7 +459,10 @@ export class MailService {
       return;
     }
 
-    if (!isProductionAppEnv(this.configService.get<string>('APP_ENV'))) {
+    if (
+      !params.bypassProductionCheck &&
+      !isProductionAppEnv(this.configService.get<string>('APP_ENV'))
+    ) {
       this.logger.warn(
         `Skipped email "${params.subject}" because APP_ENV is not production.`,
       );
@@ -495,7 +501,9 @@ export class MailService {
       to: recipient,
       subject: params.subject,
       html: params.html,
+      ...(params.text ? { text: params.text } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(params.headers ? { headers: params.headers } : {}),
     });
   }
 
@@ -503,9 +511,25 @@ export class MailService {
     to: string;
     subject: string;
     html: string;
+    text?: string;
+    headers?: Record<string, string>;
     failIfUnconfigured?: boolean;
   }): Promise<void> {
     await this.sendMail(params);
+  }
+
+  async sendTestEmail(params: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+    headers?: Record<string, string>;
+  }): Promise<void> {
+    await this.sendMail({
+      ...params,
+      bypassProductionCheck: true,
+      failIfUnconfigured: true,
+    });
   }
 
   private escapeHtml(value: string): string {

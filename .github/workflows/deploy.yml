@@ -77,10 +77,10 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            cd "${{ secrets.EC2_APP_PATH_HML }}"
+            cd /home/ubuntu/hml/boramarcar-back
             git fetch origin development
             git reset --hard origin/development
             DEPLOY_BRANCH=development \
-            PM2_APP_NAME=hml-boramarcar-api \
+            PM2_APP_NAME=api-hml \
             PM2_ECOSYSTEM=ecosystem.hml.config.cjs \
             bash scripts/deploy.sh

@@ -1,5 +1,11 @@
-import { EMAIL_FUNNEL_TIME_ZONE } from './email-funnel.types';
-import type { EmailFunnelTriggerType } from './email-funnel.types';
+import {
+  EMAIL_FUNNEL_MAX_LATENESS_HOURS,
+  EMAIL_FUNNEL_TIME_ZONE,
+} from './email-funnel.types';
+import type {
+  EmailFunnelDueStatus,
+  EmailFunnelTriggerType,
+} from './email-funnel.types';
 
 export interface ZonedParts {
   year: number;
@@ -90,6 +96,45 @@ export function addCalendarDays(
   };
 }
 
+export function resolveEmailFunnelStepDueStatus(params: {
+  now: Date;
+  signupAt: Date;
+  trialEndsAt: Date | null;
+  triggerType: EmailFunnelTriggerType;
+  triggerOffset: number;
+  sendHour: number | null;
+  windowStartHour: number | null;
+  windowEndHour: number | null;
+  timeZone?: string;
+  maxLatenessHours?: number;
+}): EmailFunnelDueStatus {
+  const timeZone = params.timeZone ?? EMAIL_FUNNEL_TIME_ZONE;
+  const dueAt = resolveDueAt(params, timeZone);
+  if (!dueAt) {
+    return 'not_due';
+  }
+
+  const nowMs = params.now.getTime();
+  const dueMs = dueAt.getTime();
+  if (nowMs < dueMs) {
+    return 'not_due';
+  }
+
+  // Immediate steps (e.g. welcome) stay sendable once due — no lateness cap.
+  if (params.triggerType === 'immediate') {
+    return 'due';
+  }
+
+  const maxLatenessHours =
+    params.maxLatenessHours ?? EMAIL_FUNNEL_MAX_LATENESS_HOURS;
+  const staleAfterMs = dueMs + maxLatenessHours * 60 * 60 * 1000;
+  if (nowMs >= staleAfterMs) {
+    return 'stale';
+  }
+
+  return 'due';
+}
+
 export function isEmailFunnelStepDue(params: {
   now: Date;
   signupAt: Date;
@@ -100,13 +145,9 @@ export function isEmailFunnelStepDue(params: {
   windowStartHour: number | null;
   windowEndHour: number | null;
   timeZone?: string;
+  maxLatenessHours?: number;
 }): boolean {
-  const timeZone = params.timeZone ?? EMAIL_FUNNEL_TIME_ZONE;
-  const dueAt = resolveDueAt(params, timeZone);
-  if (!dueAt) {
-    return false;
-  }
-  return params.now.getTime() >= dueAt.getTime();
+  return resolveEmailFunnelStepDueStatus(params) === 'due';
 }
 
 function resolveDueAt(
@@ -149,6 +190,19 @@ function resolveDueAt(
     }
     const end = getZonedParts(params.trialEndsAt, timeZone);
     const targetDay = addCalendarDays(end, -params.triggerOffset);
+    const hour = params.sendHour ?? 10;
+    return zonedDateTimeToUtc(
+      { ...targetDay, hour, minute: 0 },
+      timeZone,
+    );
+  }
+
+  if (params.triggerType === 'days_after_trial_end') {
+    if (!params.trialEndsAt) {
+      return null;
+    }
+    const end = getZonedParts(params.trialEndsAt, timeZone);
+    const targetDay = addCalendarDays(end, params.triggerOffset);
     const hour = params.sendHour ?? 10;
     return zonedDateTimeToUtc(
       { ...targetDay, hour, minute: 0 },

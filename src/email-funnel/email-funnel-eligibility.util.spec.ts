@@ -1,4 +1,7 @@
-import { resolveEmailFunnelEligibility } from './email-funnel-eligibility.util';
+import {
+  resolveEmailFunnelEligibility,
+  shouldRecordSkip,
+} from './email-funnel-eligibility.util';
 
 describe('resolveEmailFunnelEligibility', () => {
   const base = {
@@ -12,6 +15,11 @@ describe('resolveEmailFunnelEligibility', () => {
     alreadyProcessed: false,
     isDue: true,
     hasRecipientEmail: true,
+    sendOnlyIf: null,
+    hasBookingLinkShared: false,
+    hasPublicBooking: false,
+    isPostTrialStep: false,
+    isLastDayOfTrialStep: false,
   };
 
   it('sends when the tenant did nothing and the step is due', () => {
@@ -64,5 +72,145 @@ describe('resolveEmailFunnelEligibility', () => {
         isDue: false,
       }),
     ).toBe('not_due');
+  });
+
+  it('blocks during trial steps after trial ends', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        trialEnded: true,
+        isPostTrialStep: false,
+      }),
+    ).toBe('trial_ended');
+  });
+
+  it('allows post-trial steps after trial ends', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        trialEnded: true,
+        isPostTrialStep: true,
+      }),
+    ).toBe('send');
+  });
+
+  it('allows last-day-of-trial step even when trial has technically ended', () => {
+    // This handles the case where trial_ends_at is 08:00 but send_hour is 10:00
+    // At 10:00, trialEnded is true, but we still want to send the last-day email
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        trialEnded: true,
+        isPostTrialStep: false,
+        isLastDayOfTrialStep: true,
+      }),
+    ).toBe('send');
+  });
+
+  it('skips when setup_complete_and_not_shared condition is not met (no setup)', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'setup_complete_and_not_shared',
+        hasService: false,
+        hasBusinessHours: false,
+        hasBookingLinkShared: false,
+      }),
+    ).toBe('condition_not_met');
+  });
+
+  it('skips when setup_complete_and_not_shared condition is not met (already shared)', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'setup_complete_and_not_shared',
+        hasService: true,
+        hasBusinessHours: true,
+        hasBookingLinkShared: true,
+      }),
+    ).toBe('condition_not_met');
+  });
+
+  it('sends when setup_complete_and_not_shared condition is met', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'setup_complete_and_not_shared',
+        hasService: true,
+        hasBusinessHours: true,
+        hasBookingLinkShared: false,
+      }),
+    ).toBe('send');
+  });
+
+  it('skips when no_public_booking condition is not met (no setup)', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'no_public_booking',
+        hasService: false,
+        hasBusinessHours: false,
+        hasPublicBooking: false,
+      }),
+    ).toBe('condition_not_met');
+  });
+
+  it('skips when no_public_booking condition is not met (already has public booking)', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'no_public_booking',
+        hasService: true,
+        hasBusinessHours: true,
+        hasPublicBooking: true,
+      }),
+    ).toBe('condition_not_met');
+  });
+
+  it('sends when no_public_booking condition is met', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'no_public_booking',
+        hasService: true,
+        hasBusinessHours: true,
+        hasPublicBooking: false,
+      }),
+    ).toBe('send');
+  });
+
+  it('returns stale when dueStatus is stale', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        dueStatus: 'stale',
+      }),
+    ).toBe('stale');
+  });
+
+  it('still allows last-day step when trial ended and dueStatus is due', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        trialEnded: true,
+        isLastDayOfTrialStep: true,
+        dueStatus: 'due',
+      }),
+    ).toBe('send');
+  });
+
+  it('records skip for stale but not for not_due', () => {
+    expect(shouldRecordSkip('stale')).toBe(true);
+    expect(shouldRecordSkip('not_due')).toBe(false);
   });
 });

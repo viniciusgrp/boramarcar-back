@@ -1,5 +1,8 @@
 export const EMAIL_FUNNEL_TIME_ZONE = 'America/Sao_Paulo';
 
+/** Max hours after dueAt that a non-immediate step may still send. Past this → skip as `stale`. */
+export const EMAIL_FUNNEL_MAX_LATENESS_HOURS = 24;
+
 export const EMAIL_FUNNEL_STEP_KEYS = [
   'welcome',
   'nudge_agenda',
@@ -8,6 +11,10 @@ export const EMAIL_FUNNEL_STEP_KEYS = [
   'video_agenda',
   'trial_mid',
   'trial_ending',
+  'page_ready_share',
+  'no_public_booking',
+  'trial_last_day',
+  'trial_ended_winback',
 ] as const;
 
 export type EmailFunnelStepKey = (typeof EMAIL_FUNNEL_STEP_KEYS)[number];
@@ -16,7 +23,8 @@ export type EmailFunnelTriggerType =
   | 'immediate'
   | 'hours_after_signup'
   | 'days_after_signup'
-  | 'days_before_trial_end';
+  | 'days_before_trial_end'
+  | 'days_after_trial_end';
 
 export type EmailFunnelSkipReason =
   | 'paid'
@@ -26,7 +34,11 @@ export type EmailFunnelSkipReason =
   | 'not_due'
   | 'inactive_step'
   | 'already_processed'
-  | 'trial_ended';
+  | 'trial_ended'
+  | 'condition_not_met'
+  | 'stale';
+
+export type EmailFunnelDueStatus = 'not_due' | 'due' | 'stale';
 
 export type EmailFunnelEligibility = 'send' | EmailFunnelSkipReason;
 
@@ -46,10 +58,15 @@ export interface EmailFunnelSendListItem {
   sentAt: string;
 }
 
+export type EmailFunnelSendCondition =
+  | 'setup_complete_and_not_shared'
+  | 'no_public_booking';
+
 export interface EmailFunnelStepRow {
   step_key: string;
   step_number: number;
   subject: string;
+  preheader: string | null;
   title: string;
   body_text: string;
   body_if_setup: string | null;
@@ -62,6 +79,7 @@ export interface EmailFunnelStepRow {
   window_start_hour: number | null;
   window_end_hour: number | null;
   skip_if_setup_complete: boolean;
+  send_only_if: EmailFunnelSendCondition | null;
   is_active: boolean;
   image_url: string | null;
   video_url: string | null;

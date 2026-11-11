@@ -32,6 +32,11 @@ export class UpdateEmailFunnelStepDto {
   @IsOptional()
   @IsString()
   @MaxLength(200)
+  preheader?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
   title?: string;
 
   @IsOptional()
@@ -66,6 +71,7 @@ export class UpdateEmailFunnelStepDto {
     'hours_after_signup',
     'days_after_signup',
     'days_before_trial_end',
+    'days_after_trial_end',
   ])
   trigger_type?: string;
 
@@ -98,6 +104,10 @@ export class UpdateEmailFunnelStepDto {
   skip_if_setup_complete?: boolean;
 
   @IsOptional()
+  @IsIn(['setup_complete_and_not_shared', 'no_public_booking'])
+  send_only_if?: string | null;
+
+  @IsOptional()
   @IsBoolean()
   is_active?: boolean;
 
@@ -118,4 +128,18 @@ export class SendEmailFunnelPreviewDto {
 
   @IsEmail()
   to!: string;
+}
+
+export class SendEmailFunnelTestDto {
+  /** Optional: step key comes from the URL param; body value is ignored if present. */
+  @IsOptional()
+  @IsString()
+  step_key?: string;
+
+  @IsEmail()
+  to!: string;
+
+  @IsOptional()
+  @IsString()
+  tenant_id?: string;
 }
