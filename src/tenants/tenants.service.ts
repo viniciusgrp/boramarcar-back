@@ -28,6 +28,7 @@ import {
   normalizeSlug,
   resolveSlugForUpdate,
 } from './utils/slug.util';
+import { normalizeFirstVisitAt } from './utils/normalize-first-visit-at.util';
 import { normalizePlanTier } from './utils/plan-tier.util';
 import { buildTrialPeriod, TRIAL_DEFAULT_PLAN_TIER } from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
@@ -805,7 +806,7 @@ export class TenantsService {
     utm_campaign?: string;
     utm_content?: string;
     fbclid?: string;
-    first_visit_at?: string;
+    first_visit_at?: string | number;
   }): TenantTrackingData {
     return {
       utmSource: this.normalizeOptionalText(dto.utm_source),
@@ -813,7 +814,7 @@ export class TenantsService {
       utmCampaign: this.normalizeOptionalText(dto.utm_campaign),
       utmContent: this.normalizeOptionalText(dto.utm_content),
       fbclid: this.normalizeOptionalText(dto.fbclid),
-      firstVisitAt: dto.first_visit_at || null,
+      firstVisitAt: normalizeFirstVisitAt(dto.first_visit_at),
     };
   }
 
