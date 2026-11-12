@@ -1518,7 +1518,7 @@ export class TenantsService {
     try {
       await this.mailService.sendEstablishmentEmailVerification({
         recipientEmail: params.email,
-        ownerName: params.ownerName || 'olá',
+        ownerName: params.ownerName.trim(),
         code,
         verifyUrl,
       });
