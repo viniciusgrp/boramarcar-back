@@ -232,6 +232,43 @@ describe('BillingService SaaS billing', () => {
     );
   });
 
+  it('sets expiry one month after the paid charge, ignoring the next subscription due date', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const getSubscription = jest.fn().mockResolvedValue({
+      id: 'sub_1',
+      nextDueDate: '2027-01-01',
+    });
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      { getSubscription },
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_period',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_1',
+        customer: 'cus_1',
+        subscription: 'sub_1',
+        value: 34.9,
+        dueDate: '2026-11-01',
+        externalReference: 'plan:tenant-1:SOLO',
+      },
+    });
+
+    expect(getSubscription).not.toHaveBeenCalled();
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionExpiresAt: '2026-12-01T00:00:00.000Z',
+      }),
+    );
+  });
+
   it('reverses affiliate commission on PAYMENT_REFUNDED', async () => {
     const { service, affiliatesService } = buildService();
 
@@ -549,6 +586,57 @@ describe('BillingService SaaS billing', () => {
     expect(updateSubscriptionByTenantId).toHaveBeenCalledTimes(1);
     expect(updateSubscriptionByTenantId).toHaveBeenCalledWith('tenant-1', {
       subscriptionStatus: 'PAST_DUE',
+    });
+  });
+
+  it('extends the local expiry when the latest due charge is already paid', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-12T12:00:00.000Z'));
+
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const listPayments = jest.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'pay_next',
+          status: 'PENDING',
+          dueDate: '2026-12-01',
+        },
+        {
+          id: 'pay_due',
+          status: 'RECEIVED',
+          dueDate: '2026-11-01',
+        },
+      ],
+    });
+    const { service, from } = buildService(
+      { updateSubscriptionByTenantId },
+      {},
+      { listPayments },
+    );
+
+    from.mockImplementation(() =>
+      createChainableQuery({
+        data: [
+          buildTenant({
+            subscription_status: 'ACTIVE',
+            asaas_subscription_id: 'sub_1',
+            subscription_expires_at: '2026-10-01T00:00:00.000Z',
+          }),
+        ],
+        error: null,
+      }),
+    );
+
+    try {
+      await service.markPastDueAfterGrace();
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledTimes(1);
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith('tenant-1', {
+      subscriptionStatus: 'ACTIVE',
+      subscriptionExpiresAt: '2026-12-01T00:00:00.000Z',
     });
   });
 

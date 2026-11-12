@@ -94,4 +94,138 @@ describe('BillingService deposit lifecycle', () => {
     expect(refundPayment).toHaveBeenCalledWith('pay_dep');
     expect(markDepositRefunded).toHaveBeenCalledWith('appt-1');
   });
+
+  it('confirms a deposit when the checkout is paid', async () => {
+    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
+      outcome: 'confirmed',
+    });
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { findById: jest.fn() } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { confirmDepositPaymentDetailed } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_checkout',
+      event: 'CHECKOUT_PAID',
+      checkout: {
+        id: 'chk_1',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
+    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith('appt-1');
+  });
+
+  it('does not enable charges when only the documents are approved', async () => {
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      {
+        findByAsaasAccountId: jest.fn().mockResolvedValue(buildTenant()),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_docs',
+      event: 'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+      account: {
+        id: 'acc_1',
+        accountStatus: { documentation: 'APPROVED', general: 'PENDING' },
+      },
+    });
+
+    expect(updateAsaasAccountStatus).toHaveBeenCalledWith('tenant-1', {
+      asaasDetailsSubmitted: true,
+    });
+  });
+
+  it('enables charges only after general approval', async () => {
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      {
+        findByAsaasAccountId: jest.fn().mockResolvedValue(buildTenant()),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_general',
+      event: 'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+      account: { id: 'acc_1' },
+    });
+
+    expect(updateAsaasAccountStatus).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ asaasChargesEnabled: true }),
+    );
+  });
+
+  it('registers subaccount webhooks for account status only, on the platform email', async () => {
+    const createAccount = jest.fn().mockResolvedValue({
+      id: 'acc_1',
+      walletId: 'wal_new',
+    });
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            PUBLIC_API_ORIGIN: 'https://api.example.com',
+            ASAAS_WEBHOOK_TOKEN: 'whsec',
+            SUPPORT_EMAIL: 'ops@horariocerto.app',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue({
+          ...buildTenant(),
+          asaas_wallet_id: null,
+        }),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createAccount } as never,
+    );
+
+    await service.createAsaasAccount('tenant-1', {
+      name: 'Studio',
+      email: 'owner@shop.com',
+      cpfCnpj: '12345678901',
+      incomeValue: 5000,
+      address: 'Rua A',
+      addressNumber: '10',
+      province: 'Centro',
+      postalCode: '01001000',
+    });
+
+    const webhook = createAccount.mock.calls[0][0].webhooks[0] as {
+      email: string;
+      events: string[];
+    };
+
+    expect(webhook.email).toBe('ops@horariocerto.app');
+    expect(webhook.events).toEqual([
+      'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+      'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
+      'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+      'ACCOUNT_STATUS_DOCUMENT_REJECTED',
+    ]);
+  });
 });

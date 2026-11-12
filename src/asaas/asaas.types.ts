@@ -67,6 +67,8 @@ export interface AsaasPayment {
 export interface AsaasCheckout {
   id: string;
   link?: string | null;
+  status?: string | null;
+  externalReference?: string | null;
 }
 
 export interface AsaasAccount {
@@ -98,6 +100,7 @@ export interface AsaasWebhookEvent {
   event?: string;
   payment?: AsaasPayment;
   subscription?: AsaasSubscription;
+  checkout?: AsaasCheckout;
   account?: AsaasAccount & { id?: string };
 }
 

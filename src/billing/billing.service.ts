@@ -46,6 +46,7 @@ import { isProductionAppEnv } from '../common/app-env.util';
 import { resolveTenantDepositApplicationFeePercent } from './utils/deposit-application-fee.util';
 import {
   isPaidSubscriptionGraceExpired,
+  periodEndFromPaidChargeDate,
   toAsaasDate,
 } from './utils/billing-grace.util';
 import {
@@ -90,13 +91,6 @@ const CHECKOUT_ITEM_IMAGE_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 const SUBACCOUNT_WEBHOOK_EVENTS = [
-  'PAYMENT_CONFIRMED',
-  'PAYMENT_RECEIVED',
-  'PAYMENT_OVERDUE',
-  'PAYMENT_DELETED',
-  'PAYMENT_REFUNDED',
-  'SUBSCRIPTION_INACTIVATED',
-  'SUBSCRIPTION_DELETED',
   'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
   'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
   'ACCOUNT_STATUS_DOCUMENT_APPROVED',
@@ -242,6 +236,11 @@ export class BillingService {
       return;
     }
 
+    if (type.startsWith('CHECKOUT_')) {
+      await this.handleCheckoutEvent(type, event);
+      return;
+    }
+
     this.logger.debug(`Unhandled Asaas event type: ${type}`);
   }
 
@@ -310,7 +309,7 @@ export class BillingService {
 
     const planRef = parsePlanExternalReference(payment.externalReference);
     const planTier = planRef?.planTier ?? tenant.plan_tier;
-    const subscriptionExpiresAt = await this.resolvePeriodEndFromPayment(payment);
+    const subscriptionExpiresAt = this.periodEndFromPaidCharge(payment);
     const trialTransition = resolveSubscriptionTrialTransition(tenant, 'ACTIVE');
 
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
@@ -513,6 +512,72 @@ export class BillingService {
     });
   }
 
+  private async handleCheckoutEvent(
+    type: string,
+    event: AsaasWebhookEvent,
+  ): Promise<void> {
+    if (type !== 'CHECKOUT_PAID') {
+      return;
+    }
+
+    const reference =
+      event.checkout?.externalReference?.trim() ||
+      event.payment?.externalReference?.trim() ||
+      '';
+    const appointmentId = parseDepositExternalReference(reference);
+
+    if (!appointmentId) {
+      this.logger.warn(
+        `CHECKOUT_PAID ${event.checkout?.id ?? event.id ?? ''} without a deposit reference`,
+      );
+      return;
+    }
+
+    const result =
+      await this.appointmentsService.confirmDepositPaymentDetailed(appointmentId);
+
+    if (result.outcome === 'confirmed' || result.outcome === 'already_confirmed') {
+      return;
+    }
+
+    if (result.outcome !== 'late_payment_needs_refund') {
+      return;
+    }
+
+    const paymentId =
+      event.payment?.id ?? (await this.findPaidDepositPaymentId(reference));
+
+    if (!paymentId) {
+      this.logger.warn(
+        `Late checkout payment for appointment ${appointmentId} has no Asaas payment to refund`,
+      );
+      return;
+    }
+
+    await this.refundLateDepositPayment(paymentId, appointmentId);
+  }
+
+  private async findPaidDepositPaymentId(
+    externalReference: string,
+  ): Promise<string | null> {
+    if (!externalReference || !this.isAsaasOutboundEnabled()) {
+      return null;
+    }
+
+    const listed = await this.asaasClient.listPayments({
+      externalReference,
+      limit: 10,
+    });
+
+    return (
+      listed.data?.find(
+        (payment) =>
+          Boolean(payment.id) &&
+          PAID_PAYMENT_STATUSES.has(payment.status ?? ''),
+      )?.id ?? null
+    );
+  }
+
   private async handleAccountStatusEvent(
     type: string,
     account: AsaasAccount | undefined,
@@ -529,15 +594,33 @@ export class BillingService {
       return;
     }
 
-    const approved =
-      type.includes('APPROVED') ||
-      account?.accountStatus?.general === 'APPROVED';
+    const general = account?.accountStatus?.general?.trim();
+    const chargesEnabled =
+      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED' ||
+      general === 'APPROVED';
+    const generalRejected =
+      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED' ||
+      general === 'REJECTED';
 
-    await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-      asaasChargesEnabled: approved,
-      asaasDetailsSubmitted: true,
-      asaasAccountStatus: type.replace('ACCOUNT_STATUS_', ''),
-    });
+    if (chargesEnabled || generalRejected) {
+      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
+        asaasChargesEnabled: chargesEnabled,
+        asaasDetailsSubmitted:
+          chargesEnabled ||
+          account?.accountStatus?.documentation === 'APPROVED',
+        asaasAccountStatus: chargesEnabled ? 'APPROVED' : 'REJECTED',
+      });
+      return;
+    }
+
+    if (
+      type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED' ||
+      type === 'ACCOUNT_STATUS_DOCUMENT_REJECTED'
+    ) {
+      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
+        asaasDetailsSubmitted: type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+      });
+    }
   }
 
   private async resolveTenantFromPayment(
@@ -575,25 +658,10 @@ export class BillingService {
     return null;
   }
 
-  private async resolvePeriodEndFromPayment(
-    payment: AsaasPayment,
-  ): Promise<string | null> {
-    if (payment.subscription && this.isAsaasOutboundEnabled()) {
-      try {
-        const subscription = await this.asaasClient.getSubscription(
-          payment.subscription,
-        );
-        return this.nextDueDateToIso(subscription.nextDueDate);
-      } catch (error) {
-        this.logger.warn(
-          `Failed to load Asaas subscription ${payment.subscription}: ${
-            error instanceof Error ? error.message : 'unknown'
-          }`,
-        );
-      }
-    }
-
-    return this.nextDueDateToIso(payment.dueDate);
+  private periodEndFromPaidCharge(payment: AsaasPayment): string | null {
+    return periodEndFromPaidChargeDate(
+      payment.dueDate ?? payment.paymentDate ?? payment.confirmedDate,
+    );
   }
 
   private nextDueDateToIso(value: string | null | undefined): string | null {
@@ -927,7 +995,9 @@ export class BillingService {
         asaasPendingPaymentId: null,
         asaasOpenInvoiceUrl: null,
         subscriptionStatus: 'ACTIVE',
-        subscriptionExpiresAt: this.nextDueDateToIso(subscription.nextDueDate),
+        subscriptionExpiresAt:
+          (payment ? this.periodEndFromPaidCharge(payment) : null) ??
+          this.nextDueDateToIso(subscription.nextDueDate),
         planTier,
         ...trialTransition,
       },
@@ -1105,7 +1175,7 @@ export class BillingService {
         ...payload,
         cpfCnpj: payload.cpfCnpj.replace(/\D/g, ''),
         postalCode: payload.postalCode.replace(/\D/g, ''),
-        webhooks: [this.buildSubaccountWebhook(payload.email)],
+        webhooks: [this.buildSubaccountWebhook()],
       });
 
       if (!account.walletId) {
@@ -1206,9 +1276,13 @@ export class BillingService {
         continue;
       }
 
-      const stillCovered = await this.asaasStillCoversSubscription(tenant, now);
+      const coverage = await this.asaasStillCoversSubscription(tenant, now);
 
-      if (stillCovered) {
+      if (coverage.covered) {
+        await this.extendExpiryFromPaidCharge(
+          tenant,
+          coverage.subscriptionExpiresAt,
+        );
         continue;
       }
 
@@ -1283,12 +1357,17 @@ export class BillingService {
     return customer.id;
   }
 
-  private buildSubaccountWebhook(email: string) {
+  private buildSubaccountWebhook() {
     const origin = this.getRequiredUrl('PUBLIC_API_ORIGIN').replace(/\/$/, '');
     const authToken = this.configService.get<string>('ASAAS_WEBHOOK_TOKEN')?.trim();
+    const email = this.configService.get<string>('SUPPORT_EMAIL')?.trim();
 
     if (!authToken) {
       throw new InternalServerErrorException('ASAAS_WEBHOOK_TOKEN is not configured');
+    }
+
+    if (!email) {
+      throw new InternalServerErrorException('SUPPORT_EMAIL is not configured');
     }
 
     return {
@@ -1304,12 +1383,32 @@ export class BillingService {
     };
   }
 
+  private async extendExpiryFromPaidCharge(
+    tenant: Tenant,
+    subscriptionExpiresAt: string | null,
+  ): Promise<void> {
+    if (
+      !subscriptionExpiresAt ||
+      subscriptionExpiresAt <= (tenant.subscription_expires_at ?? '')
+    ) {
+      return;
+    }
+
+    await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+      subscriptionStatus: 'ACTIVE',
+      subscriptionExpiresAt,
+    });
+    this.logger.log(
+      `Updated subscription expiry from paid Asaas charge: tenant=${tenant.id} expires=${subscriptionExpiresAt}`,
+    );
+  }
+
   private async asaasStillCoversSubscription(
     tenant: Tenant,
     now: Date,
-  ): Promise<boolean> {
+  ): Promise<{ covered: boolean; subscriptionExpiresAt: string | null }> {
     if (!tenant.asaas_subscription_id || !this.isAsaasOutboundEnabled()) {
-      return true;
+      return { covered: true, subscriptionExpiresAt: null };
     }
 
     try {
@@ -1321,17 +1420,22 @@ export class BillingService {
         listed.data ?? [],
         now,
       );
-
-      return Boolean(
+      const covered = Boolean(
         latestDue?.status && PAID_PAYMENT_STATUSES.has(latestDue.status),
       );
+
+      return {
+        covered,
+        subscriptionExpiresAt:
+          covered && latestDue ? this.periodEndFromPaidCharge(latestDue) : null,
+      };
     } catch (error) {
       this.logger.warn(
         `Skipped PAST_DUE for tenant ${tenant.id}: ${
           error instanceof Error ? error.message : 'unknown'
         }`,
       );
-      return true;
+      return { covered: true, subscriptionExpiresAt: null };
     }
   }
 

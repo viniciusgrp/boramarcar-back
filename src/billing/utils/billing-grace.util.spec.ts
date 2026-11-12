@@ -2,6 +2,7 @@ import {
   BILLING_GRACE_DAYS,
   hasPendingTrialPaymentGrace,
   isPaidSubscriptionGraceExpired,
+  periodEndFromPaidChargeDate,
 } from './billing-grace.util';
 
 describe('billing-grace.util', () => {
@@ -33,6 +34,15 @@ describe('billing-grace.util', () => {
         now,
       ),
     ).toBe(false);
+  });
+
+  it('sets the period end one month after the paid charge', () => {
+    expect(periodEndFromPaidChargeDate('2026-11-01')).toBe(
+      '2026-12-01T00:00:00.000Z',
+    );
+    expect(periodEndFromPaidChargeDate('2026-01-31')).toBe(
+      '2026-02-28T00:00:00.000Z',
+    );
   });
 
   it('marks paid subscription grace as expired after 5 days', () => {

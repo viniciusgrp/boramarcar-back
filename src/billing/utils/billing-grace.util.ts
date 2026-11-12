@@ -82,3 +82,38 @@ export function isPaidSubscriptionGraceExpired(
 export function toAsaasDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
+
+export function addCalendarMonths(
+  value: string | Date,
+  months: number,
+): Date | null {
+  const date =
+    value instanceof Date
+      ? new Date(value.getTime())
+      : parseInstant(typeof value === 'string' ? value : null);
+
+  if (!date) {
+    return null;
+  }
+
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  const lastDay = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date;
+}
+
+export function periodEndFromPaidChargeDate(
+  value: string | null | undefined,
+): string | null {
+  const dateOnly = value?.trim().slice(0, 10);
+
+  if (!dateOnly || !/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    return null;
+  }
+
+  return addCalendarMonths(`${dateOnly}T00:00:00.000Z`, 1)?.toISOString() ?? null;
+}
