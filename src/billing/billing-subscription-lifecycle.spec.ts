@@ -491,6 +491,67 @@ describe('BillingService SaaS billing', () => {
     );
   });
 
+  it('marks PAST_DUE when the latest charge due today is unpaid', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-12T12:00:00.000Z'));
+
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const listPayments = jest.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'pay_next',
+          status: 'PENDING',
+          dueDate: '2026-12-01',
+          invoiceUrl: 'https://asaas.com/i/next',
+        },
+        {
+          id: 'pay_due',
+          status: 'OVERDUE',
+          dueDate: '2026-11-01',
+          invoiceUrl: 'https://asaas.com/i/due',
+        },
+        {
+          id: 'pay_old',
+          status: 'RECEIVED',
+          dueDate: '2026-10-01',
+        },
+      ],
+    });
+    const { service, from } = buildService(
+      { updateSubscriptionByTenantId },
+      {},
+      { listPayments, getSubscription: jest.fn() },
+    );
+
+    from.mockImplementation(() =>
+      createChainableQuery({
+        data: [
+          buildTenant({
+            subscription_status: 'ACTIVE',
+            asaas_subscription_id: 'sub_1',
+            subscription_expires_at: '2026-10-01T00:00:00.000Z',
+          }),
+        ],
+        error: null,
+      }),
+    );
+
+    try {
+      await service.markPastDueAfterGrace();
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(listPayments).toHaveBeenCalledWith({
+      subscription: 'sub_1',
+      limit: 100,
+    });
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledTimes(1);
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith('tenant-1', {
+      subscriptionStatus: 'PAST_DUE',
+    });
+  });
+
   it('blocks checkout when APP_ENV is not production', async () => {
     const { service } = buildService({}, { APP_ENV: 'development' });
 

@@ -1313,31 +1313,18 @@ export class BillingService {
     }
 
     try {
-      const subscription = await this.asaasClient.getSubscription(
-        tenant.asaas_subscription_id,
-      );
-      const asaasExpiresAt = this.nextDueDateToIso(subscription.nextDueDate);
-
-      if (
-        subscription.status === 'ACTIVE' &&
-        asaasExpiresAt &&
-        !isPaidSubscriptionGraceExpired(
-          { ...tenant, subscription_expires_at: asaasExpiresAt },
-          now,
-        )
-      ) {
-        await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
-          subscriptionStatus: 'ACTIVE',
-          subscriptionExpiresAt: asaasExpiresAt,
-        });
-        return true;
-      }
-
-      const openPayment = await this.findOpenSubscriptionPayment(
-        tenant.asaas_subscription_id,
+      const listed = await this.asaasClient.listPayments({
+        subscription: tenant.asaas_subscription_id,
+        limit: 100,
+      });
+      const latestDue = this.findLatestDueSubscriptionPayment(
+        listed.data ?? [],
+        now,
       );
 
-      return Boolean(openPayment);
+      return Boolean(
+        latestDue?.status && PAID_PAYMENT_STATUSES.has(latestDue.status),
+      );
     } catch (error) {
       this.logger.warn(
         `Skipped PAST_DUE for tenant ${tenant.id}: ${
@@ -1346,6 +1333,28 @@ export class BillingService {
       );
       return true;
     }
+  }
+
+  private findLatestDueSubscriptionPayment(
+    payments: AsaasPayment[],
+    now: Date,
+  ): AsaasPayment | null {
+    const today = toAsaasDate(now);
+    let latest: AsaasPayment | null = null;
+
+    for (const payment of payments) {
+      const dueDate = payment.dueDate?.trim();
+
+      if (!dueDate || dueDate > today) {
+        continue;
+      }
+
+      if (!latest || dueDate > (latest.dueDate ?? '')) {
+        latest = payment;
+      }
+    }
+
+    return latest;
   }
 
   private async findOpenSubscriptionPayment(
