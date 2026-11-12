@@ -43,8 +43,8 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     plan_tier: 'SOLO',
     booking_acceptance_type: 'AUTOMATIC',
     booking_slot_interval_minutes: 60,
-    stripe_connect_account_id: null,
-    stripe_connect_charges_enabled: false,
+    asaas_wallet_id: null,
+    asaas_charges_enabled: false,
     ...overrides,
   } as Tenant;
 }
@@ -1009,6 +1009,96 @@ describe('AppointmentsService', () => {
         }),
         expect.objectContaining({ id: 'tenant-1' }),
       );
+    });
+  });
+
+  describe('rescheduleForTenant', () => {
+    const futureRow = {
+      id: 'appt-1',
+      professional_id: 'pro-1',
+      status: 'CONFIRMED',
+      start_time: '2099-01-15T10:00:00',
+      end_time: '2099-01-15T11:00:00',
+      cancellation_requested_at: null,
+    };
+
+    it('lets the owner move a slot when customer reschedule is off', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ allow_customer_reschedule: false }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: futureRow, error: null }),
+      );
+      const apply = jest
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
+        .mockResolvedValue({});
+      jest
+        .spyOn(
+          ctx.service as never as {
+            findAdminById: () => Promise<{ id: string }>;
+          },
+          'findAdminById',
+        )
+        .mockResolvedValue({ id: 'appt-1' });
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+          serviceIds: ['svc-1'],
+        }),
+      ).resolves.toEqual({ id: 'appt-1' });
+      expect(apply).toHaveBeenCalled();
+    });
+
+    it('rejects a cancelled appointment', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(buildTenant());
+      ctx.from.mockReturnValue(
+        createChainableQuery({
+          data: { ...futureRow, status: 'CANCELLED' },
+          error: null,
+        }),
+      );
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a conflicting slot', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ allow_customer_reschedule: false }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: futureRow, error: null }),
+      );
+      jest
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
+        .mockRejectedValue(new ConflictException('ocupado'));
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+          serviceIds: ['svc-1'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

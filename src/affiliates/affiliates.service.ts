@@ -40,8 +40,8 @@ export interface AffiliateAttribution {
 }
 
 export interface AccruePaidPlanInvoiceParams {
-  stripeInvoiceId: string;
-  stripeCustomerId: string;
+  providerPaymentId: string;
+  asaasCustomerId: string;
   amountPaid: number;
   planGrossCents: number;
   paidAtIso: string;
@@ -498,7 +498,7 @@ export class AffiliatesService {
       .getClient()
       .from('tenants')
       .select('id, referred_by_affiliate_id')
-      .eq('stripe_customer_id', params.stripeCustomerId)
+      .eq('asaas_customer_id', params.asaasCustomerId)
       .maybeSingle();
 
     if (tenantError) {
@@ -541,7 +541,7 @@ export class AffiliatesService {
       .insert({
         affiliate_id: affiliate.id,
         tenant_id: tenant.id,
-        stripe_invoice_id: params.stripeInvoiceId,
+        provider_payment_id: params.providerPaymentId,
         invoice_paid_at: params.paidAtIso,
         gross_amount_cents: params.planGrossCents,
         commission_amount_cents: commissionAmountCents,
@@ -560,12 +560,12 @@ export class AffiliatesService {
     return data as AffiliateCommissionItem;
   }
 
-  async reverseInvoice(stripeInvoiceId: string, reason: string): Promise<void> {
+  async reverseInvoice(providerPaymentId: string, reason: string): Promise<void> {
     const { data: existing, error } = await this.supabaseService
       .getClient()
       .from('affiliate_commission_items')
       .select('*')
-      .eq('stripe_invoice_id', stripeInvoiceId)
+      .eq('provider_payment_id', providerPaymentId)
       .maybeSingle();
 
     if (error) {
@@ -599,7 +599,7 @@ export class AffiliatesService {
       .insert({
         affiliate_id: item.affiliate_id,
         tenant_id: item.tenant_id,
-        stripe_invoice_id: buildReversalInvoiceId(stripeInvoiceId),
+        provider_payment_id: buildReversalInvoiceId(providerPaymentId),
         invoice_paid_at: new Date().toISOString(),
         gross_amount_cents: -Math.abs(Number(item.gross_amount_cents)),
         commission_amount_cents: -Math.abs(Number(item.commission_amount_cents)),

@@ -1,10 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { TenantsService } from '../tenants/tenants.service';
 import { BillingService } from './billing.service';
-import type { StripeEvent } from './types/stripe-api.types';
 import { createChainableQuery } from '../test-utils/supabase-mock';
 
 function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
@@ -14,29 +13,34 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     slug: 'studio',
     plan_tier: 'SOLO',
     subscription_status: 'INACTIVE',
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    stripe_connect_account_id: 'acct_1',
-    stripe_connect_charges_enabled: true,
-    stripe_connect_details_submitted: true,
+    asaas_customer_id: 'cus_1',
+    asaas_subscription_id: null,
+    asaas_pending_payment_id: null,
+    asaas_wallet_id: 'wal_1',
+    asaas_charges_enabled: true,
+    asaas_details_submitted: true,
     deposit_application_fee_percent: 5,
     ...overrides,
   } as Tenant;
 }
 
+const asaasEnv = {
+  APP_ENV: 'production',
+  ASAAS_API_KEY: 'key',
+  ASAAS_WEBHOOK_TOKEN: 'whsec',
+  ASAAS_SOLO_VALUE_BRL: '34.90',
+  ASAAS_PRO_VALUE_BRL: '69.90',
+  ASAAS_ELITE_VALUE_BRL: '120',
+  ASAAS_SUPPORT_AI_VALUE_BRL: '29.90',
+};
+
 function buildService(
   tenants: Partial<TenantsService> = {},
   env: Record<string, string> = {},
+  asaasClient: Record<string, unknown> = {},
 ) {
   const configService = {
-    get: (key: string) =>
-      ({
-        APP_ENV: 'production',
-        STRIPE_SECRET_KEY: 'sk_test_dummy',
-        STRIPE_SOLO_PRICE_ID: 'price_solo',
-        STRIPE_SUPPORT_AI_PRICE_ID: 'price_ai',
-        ...env,
-      })[key],
+    get: (key: string) => ({ ...asaasEnv, ...env })[key],
   } as unknown as ConfigService;
 
   const from = jest.fn(() => createChainableQuery({ data: null, error: null }));
@@ -49,230 +53,199 @@ function buildService(
     configService,
     {
       findById: jest.fn().mockResolvedValue(buildTenant()),
-      findByStripeSubscriptionId: jest.fn().mockResolvedValue(null),
-      findByStripeCustomerId: jest.fn().mockResolvedValue(null),
+      findByAsaasSubscriptionId: jest.fn().mockResolvedValue(null),
+      findByAsaasCustomerId: jest.fn().mockResolvedValue(null),
       updateSubscriptionByTenantId: jest.fn(),
       ...tenants,
     } as TenantsService,
     { getClient: () => ({ from }) } as never,
     {} as AppointmentsService,
     affiliatesService as never,
+    asaasClient as never,
   );
 
-  return { service, affiliatesService, from };
+  return { service, affiliatesService, from, asaasClient };
 }
 
 describe('BillingService SaaS billing', () => {
-  it('marks Connect as ready when charges are enabled', () => {
+  it('marks Asaas account as ready when charges are enabled', () => {
     const { service } = buildService();
-    const status = service.buildStripeConnectStatus(buildTenant());
+    const status = service.buildAsaasAccountStatus(buildTenant());
 
     expect(status.isReady).toBe(true);
     expect(status.onboardingRequired).toBe(false);
-    expect(status.canOpenDashboard).toBe(true);
   });
 
-  it('requires onboarding when Connect charges are off', () => {
+  it('requires onboarding when charges are off', () => {
     const { service } = buildService();
-    const status = service.buildStripeConnectStatus(
-      buildTenant({
-        stripe_connect_account_id: 'acct_1',
-        stripe_connect_charges_enabled: false,
-      }),
+    const status = service.buildAsaasAccountStatus(
+      buildTenant({ asaas_charges_enabled: false }),
     );
 
     expect(status.isReady).toBe(false);
     expect(status.onboardingRequired).toBe(true);
   });
 
-  it('does not retrieve Connect from Stripe when APP_ENV is not production', async () => {
-    const retrieve = jest.fn();
-    const { service } = buildService({}, { APP_ENV: 'development' });
-    (
-      service as unknown as {
-        stripe: { accounts: { retrieve: typeof retrieve } };
-      }
-    ).stripe.accounts.retrieve = retrieve;
+  it('creates a subscription with UNDEFINED billing and stores the pending payment', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const asaasClient = {
+      createSubscription: jest.fn().mockResolvedValue({
+        id: 'sub_asaas',
+        customer: 'cus_1',
+      }),
+      listPayments: jest.fn().mockResolvedValue({
+        data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/1' }],
+      }),
+    };
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({ trial_ends_at: '2026-12-01T00:00:00.000Z' }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      asaasClient,
+    );
 
-    const status = await service.getConnectStatus('tenant-1');
-
-    expect(retrieve).not.toHaveBeenCalled();
-    expect(status.accountId).toBe('acct_1');
-    expect(status.isReady).toBe(true);
-  });
-
-  it('syncs Connect from Stripe when APP_ENV is production', async () => {
-    const retrieve = jest.fn().mockResolvedValue({
-      charges_enabled: true,
-      details_submitted: true,
+    const result = await service.createCheckoutSession({
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      ownerEmail: 'owner@example.com',
+      planTier: 'PRO',
     });
-    const updateStripeConnectStatus = jest
-      .fn()
-      .mockResolvedValue(buildTenant());
-    const { service } = buildService({ updateStripeConnectStatus });
-    (
-      service as unknown as {
-        stripe: { accounts: { retrieve: typeof retrieve } };
-      }
-    ).stripe.accounts.retrieve = retrieve;
 
-    await service.getConnectStatus('tenant-1');
-
-    expect(retrieve).toHaveBeenCalledWith('acct_1');
-    expect(updateStripeConnectStatus).toHaveBeenCalled();
-  });
-
-  it('accrues affiliate commission on invoice.paid', async () => {
-    const { service, affiliatesService } = buildService();
-    const event = {
-      id: 'evt_invoice',
-      type: 'invoice.paid',
-      data: {
-        object: {
-          id: 'in_1',
-          customer: 'cus_1',
-          amount_paid: 5000,
-          created: 1700000000,
-          lines: { data: [{ amount: 5000, price: { id: 'price_solo' } }] },
-        },
-      },
-    } as unknown as StripeEvent;
-
-    await service.handleStripeWebhook(event);
-
-    expect(affiliatesService.accruePaidPlanInvoice).toHaveBeenCalledWith(
+    expect(asaasClient.createSubscription).toHaveBeenCalledWith(
       expect.objectContaining({
-        stripeInvoiceId: 'in_1',
-        stripeCustomerId: 'cus_1',
-        amountPaid: 5000,
+        billingType: 'UNDEFINED',
+        value: 69.9,
+        nextDueDate: '2026-12-01',
+        externalReference: 'plan:tenant-1:PRO',
       }),
     );
-  });
-
-  it('reverses affiliate commission on charge.refunded', async () => {
-    const { service, affiliatesService } = buildService();
-    await service.handleStripeWebhook({
-      id: 'evt_refund',
-      type: 'charge.refunded',
-      data: { object: { invoice: 'in_1' } },
-    } as unknown as StripeEvent);
-
-    expect(affiliatesService.reverseInvoice).toHaveBeenCalledWith(
-      'in_1',
-      'charge_refunded',
-    );
-  });
-
-  it('cancels the tenant subscription on customer.subscription.deleted', async () => {
-    const { service } = buildService();
-    const syncSpy = jest
-      .spyOn(
-        service as never as {
-          syncSubscriptionFromStripe: () => Promise<Tenant>;
-        },
-        'syncSubscriptionFromStripe',
-      )
-      .mockResolvedValue(buildTenant({ subscription_status: 'CANCELED' }));
-
-    await service.handleStripeWebhook({
-      id: 'evt_sub_del',
-      type: 'customer.subscription.deleted',
-      data: {
-        object: {
-          id: 'sub_1',
-          customer: 'cus_1',
-          status: 'canceled',
-          current_period_end: 1700000000,
-        },
-      },
-    } as unknown as StripeEvent);
-
-    expect(syncSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'sub_1' }),
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
       expect.objectContaining({
-        subscriptionStatus: 'CANCELED',
-        planTier: 'SOLO',
-        applyPlanTierOnActive: false,
+        asaasSubscriptionId: 'sub_asaas',
+        asaasPendingPaymentId: 'pay_1',
       }),
     );
+    expect(result).toEqual({ url: 'https://asaas.com/i/1' });
   });
 
-  it('keeps complimentary plan when Stripe subscription is deleted', async () => {
+  it('sends updatePendingPayments when changing plan', async () => {
+    const updateSubscription = jest.fn().mockResolvedValue({});
     const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
-      buildTenant({
-        plan_tier: 'ELITE',
-        subscription_status: 'INACTIVE',
-        comp_until: '2027-01-01T00:00:00.000Z',
-      }),
+      buildTenant({ asaas_subscription_id: 'sub_1', subscription_status: 'ACTIVE' }),
     );
-    const findByStripeSubscriptionId = jest.fn().mockResolvedValue(
-      buildTenant({
-        plan_tier: 'ELITE',
-        subscription_status: 'INACTIVE',
-        stripe_subscription_id: 'sub_1',
-        comp_until: '2027-01-01T00:00:00.000Z',
-      }),
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({ asaas_subscription_id: 'sub_1', subscription_status: 'ACTIVE' }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      { updateSubscription },
     );
 
-    const { service } = buildService({
-      findByStripeSubscriptionId,
+    await service.changePlan('tenant-1', 'ELITE');
+
+    expect(updateSubscription).toHaveBeenCalledWith(
+      'sub_1',
+      expect.objectContaining({
+        value: 120,
+        updatePendingPayments: true,
+      }),
+    );
+  });
+
+  it('cancels the Support AI subscription together with the plan', async () => {
+    const deleteSubscription = jest.fn().mockResolvedValue(undefined);
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_plan',
+            support_ai_asaas_subscription_id: 'sub_ai',
+            subscription_status: 'ACTIVE',
+          }),
+        ),
+        updateSubscriptionByTenantId: jest.fn().mockResolvedValue(buildTenant()),
+        updateSupportAiEntitlement: jest.fn().mockResolvedValue(buildTenant()),
+      },
+      {},
+      { deleteSubscription },
+    );
+
+    await service.cancelSubscription('tenant-1');
+
+    expect(deleteSubscription).toHaveBeenCalledWith('sub_ai');
+    expect(deleteSubscription).toHaveBeenCalledWith('sub_plan');
+  });
+
+  it('activates the plan on PAYMENT_RECEIVED and accrues affiliate commission', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockResolvedValue(buildTenant({ trial_ends_at: '2026-12-01T00:00:00.000Z' })),
       updateSubscriptionByTenantId,
     });
-    const syncSpy = jest.spyOn(
-      service as never as {
-        syncSubscriptionFromStripe: () => Promise<Tenant>;
-      },
-      'syncSubscriptionFromStripe',
-    );
 
-    await service.handleStripeWebhook({
-      id: 'evt_sub_comp',
-      type: 'customer.subscription.deleted',
-      data: {
-        object: {
-          id: 'sub_1',
-          customer: 'cus_1',
-          status: 'canceled',
-          current_period_end: 1700000000,
-        },
+    await service.processAsaasWebhookEvent({
+      id: 'evt_1',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_1',
+        customer: 'cus_1',
+        subscription: 'sub_1',
+        value: 69.9,
+        externalReference: 'plan:tenant-1:PRO',
+        invoiceUrl: 'https://asaas.com/i/1',
       },
-    } as unknown as StripeEvent);
+    });
 
     expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
       'tenant-1',
       expect.objectContaining({
-        subscriptionStatus: 'INACTIVE',
-        stripeSubscriptionId: null,
+        subscriptionStatus: 'ACTIVE',
+        planTier: 'PRO',
+        asaasPendingPaymentId: null,
+        trialEndsAt: null,
       }),
     );
-    expect(syncSpy).not.toHaveBeenCalled();
+    expect(affiliatesService.accruePaidPlanInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerPaymentId: 'pay_1',
+        asaasCustomerId: 'cus_1',
+      }),
+    );
   });
 
-  it('refuses the billing portal without a Stripe customer', async () => {
-    const { service } = buildService({
-      findById: jest.fn().mockResolvedValue(buildTenant({ stripe_customer_id: null })),
+  it('reverses affiliate commission on PAYMENT_REFUNDED', async () => {
+    const { service, affiliatesService } = buildService();
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_2',
+      event: 'PAYMENT_REFUNDED',
+      payment: { id: 'pay_1', customer: 'cus_1' },
     });
 
-    await expect(service.createCustomerPortalSession('tenant-1')).rejects.toBeInstanceOf(
-      BadRequestException,
+    expect(affiliatesService.reverseInvoice).toHaveBeenCalledWith(
+      'pay_1',
+      'payment_refunded',
     );
   });
 
-  it('blocks Support AI addon without an ACTIVE plan', async () => {
-    const { service } = buildService();
+  it('blocks checkout when APP_ENV is not production', async () => {
+    const { service } = buildService({}, { APP_ENV: 'development' });
 
-    await expect(service.addSupportAiAddon('tenant-1')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-  });
-
-  it('throws when the tenant is missing', async () => {
-    const { service } = buildService({
-      findById: jest.fn().mockResolvedValue(null),
-    });
-
-    await expect(service.syncTenantSubscription('missing')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'SOLO',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

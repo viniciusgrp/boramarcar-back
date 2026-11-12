@@ -1,18 +1,15 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   ForbiddenException,
   Headers,
   NotFoundException,
-  Body,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { User } from '@supabase/supabase-js';
-import type { RawBodyRequest } from '@nestjs/common';
-import type { Request } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { SkipTenantAccessCheck } from '../tenants/decorators/skip-tenant-access-check.decorator';
@@ -23,11 +20,13 @@ import {
   normalizePlanTier,
 } from '../tenants/utils/plan-tier.util';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { ChangePlanDto } from './dto/change-plan.dto';
+import { CreateAsaasAccountDto } from './dto/create-asaas-account.dto';
 import { BillingService } from './billing.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
-import type { StripeConnectStatusResponse } from './entities/stripe-connect-status.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
+import type { AsaasWebhookEvent } from '../asaas/asaas.types';
 
 @Controller('billing')
 export class BillingController {
@@ -36,13 +35,13 @@ export class BillingController {
     private readonly tenantsService: TenantsService,
   ) {}
 
-  @Post('webhook')
+  @Post('asaas/webhook')
   @SkipThrottle()
-  async handleWebhook(
-    @Headers('stripe-signature') signature: string | undefined,
-    @Req() request: RawBodyRequest<Request>,
+  async handleAsaasWebhook(
+    @Headers('asaas-access-token') accessToken: string | undefined,
+    @Body() body: AsaasWebhookEvent,
   ): Promise<WebhookAckResponse> {
-    return this.billingService.handleWebhook(signature, request.rawBody);
+    return this.billingService.handleAsaasWebhook(accessToken, body);
   }
 
   @Post('sync-subscription')
@@ -51,16 +50,6 @@ export class BillingController {
   async syncSubscription(@CurrentUser() user: User): Promise<Tenant> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.billingService.syncTenantSubscription(tenant.id);
-  }
-
-  @Post('portal')
-  @SkipTenantAccessCheck()
-  @UseGuards(AuthGuard)
-  async createPortalSession(
-    @CurrentUser() user: User,
-  ): Promise<CheckoutSessionResponse> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.billingService.createCustomerPortalSession(tenant.id);
   }
 
   @Post('checkout')
@@ -86,6 +75,35 @@ export class BillingController {
     });
   }
 
+  @Post('change-plan')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async changePlan(
+    @CurrentUser() user: User,
+    @Body() dto: ChangePlanDto,
+  ): Promise<Tenant> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.changePlan(tenant.id, dto.planTier);
+  }
+
+  @Post('cancel')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async cancel(@CurrentUser() user: User): Promise<Tenant> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.cancelSubscription(tenant.id);
+  }
+
+  @Post('invoice')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async openInvoice(
+    @CurrentUser() user: User,
+  ): Promise<CheckoutSessionResponse> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.getOpenInvoiceUrl(tenant.id);
+  }
+
   @Post('support-ai/subscribe')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
@@ -108,20 +126,11 @@ export class BillingController {
   @UseGuards(AuthGuard)
   async createConnectOnboarding(
     @CurrentUser() user: User,
-  ): Promise<CheckoutSessionResponse> {
+    @Body() dto: CreateAsaasAccountDto,
+  ) {
     const tenant = await this.resolveOwnerTenant(user.id);
     this.assertCanAccessDepositFeatures(tenant);
-
-    if (!user.email?.trim()) {
-      throw new BadRequestException(
-        'Your account must have an email address to connect Stripe',
-      );
-    }
-
-    return this.billingService.createConnectOnboardingLink(
-      tenant.id,
-      user.email,
-    );
+    return this.billingService.createAsaasAccount(tenant.id, dto);
   }
 
   @Post('connect/sync')
@@ -130,7 +139,7 @@ export class BillingController {
   async syncConnectStatus(@CurrentUser() user: User) {
     const tenant = await this.resolveOwnerTenant(user.id);
     this.assertCanAccessDepositFeatures(tenant);
-    await this.billingService.syncConnectAccountFromStripe(tenant.id);
+    await this.billingService.syncAsaasAccount(tenant.id);
     return this.billingService.getConnectStatus(tenant.id);
   }
 

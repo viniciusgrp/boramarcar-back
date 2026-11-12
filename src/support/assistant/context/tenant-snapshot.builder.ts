@@ -18,8 +18,8 @@ export interface SupportTenantSnapshot {
     hasSharedBookingLink: boolean;
     hasCustomerAccountPolicy: boolean;
     hasReviewsEnabled: boolean;
-    hasStripeConnect: boolean;
-    requiresStripeConnect: boolean;
+    hasAsaasAccount: boolean;
+    requiresAsaasAccount: boolean;
     hasActiveSubscription: boolean;
     hasExtraProfessional: boolean;
     hasReviewedBusinessHours: boolean;
@@ -46,8 +46,8 @@ export function buildSupportTenantSnapshot(
       hasSharedBookingLink: setup.hasSharedBookingLink,
       hasCustomerAccountPolicy: setup.hasCustomerAccountPolicy,
       hasReviewsEnabled: setup.hasReviewsEnabled,
-      hasStripeConnect: setup.hasStripeConnect,
-      requiresStripeConnect: setup.requiresStripeConnect,
+      hasAsaasAccount: setup.hasAsaasAccount,
+      requiresAsaasAccount: setup.requiresAsaasAccount,
       hasActiveSubscription: setup.hasActiveSubscription,
       hasExtraProfessional: setup.hasExtraProfessional,
       hasReviewedBusinessHours: setup.hasReviewedBusinessHours,
@@ -65,8 +65,8 @@ export function assertSupportTenantSnapshotHasNoForbiddenFields(
 ): void {
   const serialized = JSON.stringify(snapshot);
   const forbiddenKeys = [
-    'stripe_customer_id',
-    'stripe_account',
+    'asaas_customer_id',
+    'asaas_wallet',
     'contact_email',
     'customer_email',
     'password',

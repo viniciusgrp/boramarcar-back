@@ -445,6 +445,26 @@ export class AppointmentsController {
     );
   }
 
+  @Patch(':id/reschedule-admin')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  rescheduleAdmin(
+    @CurrentTenantContext() context: TenantAccessContext,
+    @Param('id') id: string,
+    @Body() dto: RescheduleAppointmentDto,
+  ): Promise<AdminAppointment> {
+    const scopedProfessionalId = resolveScopedProfessionalId(
+      context.tenantUser,
+    );
+
+    return this.appointmentsService.rescheduleForTenant(
+      context.tenant.id,
+      id,
+      dto,
+      scopedProfessionalId,
+    );
+  }
+
   @Patch(':id/duration')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')

@@ -11,8 +11,8 @@ export interface InitialSetupStatus {
   hasSharedBookingLink: boolean;
   hasCustomerAccountPolicy: boolean;
   hasReviewsEnabled: boolean;
-  hasStripeConnect: boolean;
-  requiresStripeConnect: boolean;
+  hasAsaasAccount: boolean;
+  requiresAsaasAccount: boolean;
   hasActiveSubscription: boolean;
   hasExtraProfessional: boolean;
   hasReviewedBusinessHours: boolean;

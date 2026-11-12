@@ -11,6 +11,7 @@ export interface AdminAppointment {
   status: AppointmentStatus;
   professionalId: string;
   professionalName: string;
+  serviceIds: string[];
   serviceName: string;
   durationMinutes: number;
   servicePrice: number;

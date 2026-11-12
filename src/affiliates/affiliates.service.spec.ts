@@ -259,8 +259,8 @@ describe('AffiliatesService attribution and ledger', () => {
 
     await expect(
       service.accruePaidPlanInvoice({
-        stripeInvoiceId: 'in_trial',
-        stripeCustomerId: 'cus_1',
+        providerPaymentId: 'in_trial',
+        asaasCustomerId: 'cus_1',
         amountPaid: 0,
         planGrossCents: 6990,
         paidAtIso: '2026-09-01T00:00:00.000Z',
@@ -268,8 +268,8 @@ describe('AffiliatesService attribution and ledger', () => {
     ).resolves.toBeNull();
 
     await service.accruePaidPlanInvoice({
-      stripeInvoiceId: 'in_paid',
-      stripeCustomerId: 'cus_1',
+      providerPaymentId: 'in_paid',
+      asaasCustomerId: 'cus_1',
       amountPaid: 6990,
       planGrossCents: 6990,
       paidAtIso: '2026-09-01T00:00:00.000Z',
@@ -286,7 +286,7 @@ describe('AffiliatesService attribution and ledger', () => {
         id: 'item-1',
         affiliate_id: 'aff-1',
         tenant_id: 'tenant-1',
-        stripe_invoice_id: 'in_1',
+        provider_payment_id: 'in_1',
         status: 'accrued',
         payout_id: null,
         gross_amount_cents: 6990,
@@ -314,7 +314,7 @@ describe('AffiliatesService attribution and ledger', () => {
         id: 'item-2',
         affiliate_id: 'aff-1',
         tenant_id: 'tenant-1',
-        stripe_invoice_id: 'in_2',
+        provider_payment_id: 'in_2',
         status: 'accrued',
         payout_id: 'payout-1',
         gross_amount_cents: 6990,
@@ -337,7 +337,7 @@ describe('AffiliatesService attribution and ledger', () => {
     await servicePaid.reverseInvoice('in_2', 'charge_refunded');
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({
-        stripe_invoice_id: 'in_2:rev',
+        provider_payment_id: 'in_2:rev',
         commission_amount_cents: -1398,
         status: 'accrued',
       }),

@@ -107,7 +107,7 @@ export class InitialSetupService {
   }
 
   private async getStatusForTenant(tenant: Tenant): Promise<InitialSetupStatus> {
-    const requiresStripeConnect = canAccessDepositFeatures(
+    const requiresAsaasAccount = canAccessDepositFeatures(
       normalizePlanTier(tenant.plan_tier),
       tenant.deposit_feature_enabled,
     );
@@ -128,8 +128,8 @@ export class InitialSetupService {
         hasSharedBookingLink: true,
         hasCustomerAccountPolicy: true,
         hasReviewsEnabled: true,
-        hasStripeConnect: true,
-        requiresStripeConnect,
+        hasAsaasAccount: true,
+        requiresAsaasAccount,
         hasActiveSubscription: true,
         hasExtraProfessional: professionalCount > 1,
         hasReviewedBusinessHours: Boolean(
@@ -166,7 +166,7 @@ export class InitialSetupService {
     const hasReviewedBusinessHours = Boolean(
       tenant.initial_setup_hours_reviewed_at,
     );
-    const hasStripeConnect = Boolean(tenant.stripe_connect_charges_enabled);
+    const hasAsaasAccount = Boolean(tenant.asaas_charges_enabled);
     const hasActiveSubscription = isSubscriptionActive(
       tenant.subscription_status,
     );
@@ -179,7 +179,7 @@ export class InitialSetupService {
       hasVisitedSettings &&
       hasCustomerAccountPolicy &&
       hasReviewsEnabled &&
-      (!requiresStripeConnect || hasStripeConnect) &&
+      (!requiresAsaasAccount || hasAsaasAccount) &&
       hasActiveSubscription;
 
     if (isComplete) {
@@ -199,8 +199,8 @@ export class InitialSetupService {
       hasSharedBookingLink,
       hasCustomerAccountPolicy,
       hasReviewsEnabled,
-      hasStripeConnect,
-      requiresStripeConnect,
+      hasAsaasAccount,
+      requiresAsaasAccount,
       hasActiveSubscription,
       hasExtraProfessional,
       hasReviewedBusinessHours,

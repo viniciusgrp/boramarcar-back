@@ -73,8 +73,8 @@ const WEEKDAY_LABELS = [
 ] as const;
 
 const FORBIDDEN_ANALYTICS_SUBSTRINGS = [
-  'stripe_customer',
-  'stripe_account',
+  'asaas_customer',
+  'asaas_wallet',
   'contact_email',
   'customer_email',
   'customer_phone',

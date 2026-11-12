@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { AffiliatesModule } from '../affiliates/affiliates.module';
+import { AsaasClient } from '../asaas/asaas.client';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { PlatformAdminsService } from './platform-admins.service';
 import { PlatformAuthController } from './platform-auth.controller';
@@ -10,7 +11,12 @@ import { PlatformService } from './platform.service';
 @Module({
   imports: [AuthModule, AffiliatesModule],
   controllers: [PlatformAuthController, PlatformController],
-  providers: [PlatformAdminsService, PlatformService, PlatformAdminGuard],
+  providers: [
+    AsaasClient,
+    PlatformAdminsService,
+    PlatformService,
+    PlatformAdminGuard,
+  ],
   exports: [PlatformAdminsService, PlatformAdminGuard],
 })
 export class PlatformModule {}

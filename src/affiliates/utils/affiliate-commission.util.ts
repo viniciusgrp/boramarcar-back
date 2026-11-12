@@ -20,6 +20,6 @@ export function canIncludeInPayout(availableCents: number, minimumCents: number)
   return availableCents >= minimumCents;
 }
 
-export function buildReversalInvoiceId(stripeInvoiceId: string): string {
-  return `${stripeInvoiceId}:rev`;
+export function buildReversalInvoiceId(providerPaymentId: string): string {
+  return `${providerPaymentId}:rev`;
 }

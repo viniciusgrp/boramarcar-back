@@ -7,7 +7,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Stripe from 'stripe';
+import { AsaasClient } from '../asaas/asaas.client';
+import { resolvePlanValueBrl } from '../billing/utils/asaas-plan-value.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -15,10 +16,6 @@ import {
   isComplimentaryAccessActive,
   parseUtcInstant,
 } from '../tenants/utils/tenant-access.util';
-import {
-  extractSubscriptionPeriodEnd,
-  stripePeriodEndToIso,
-} from '../billing/utils/stripe-period-end.util';
 import type {
   PlatformApiErrorEvent,
   PlatformAppointmentListItem,
@@ -42,8 +39,6 @@ import {
   resolvePlatformAccessLabel,
   toMonthKey,
 } from './utils/platform-access.util';
-
-type StripeClient = InstanceType<typeof Stripe>;
 
 function parsePage(
   page?: number,
@@ -79,16 +74,13 @@ interface ListTenantsQuery {
 @Injectable()
 export class PlatformService {
   private readonly logger = new Logger(PlatformService.name);
-  private readonly stripe: StripeClient | null;
   private planPriceCentsCache: Partial<Record<PlanTier, number>> | null = null;
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
-  ) {
-    const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
-    this.stripe = secretKey?.trim() ? new Stripe(secretKey) : null;
-  }
+    private readonly asaasClient: AsaasClient,
+  ) {}
 
   async listTenants(
     query: ListTenantsQuery,
@@ -156,7 +148,7 @@ export class PlatformService {
         this.computeUsage(tenant.id),
         this.isLoyaltyActive(tenant.id),
         this.resolveLoginActivity(tenant.id, tenant.owner_id),
-        this.resolveStripeSubscriptionExtras(tenant.stripe_subscription_id),
+        this.resolveAsaasSubscriptionExtras(tenant),
         this.fetchRecentApiErrors(tenant.id),
         this.fetchBusinessHours(tenant.id),
       ]);
@@ -185,8 +177,8 @@ export class PlatformService {
         planTier: tenant.plan_tier,
         trialEndsAt: tenant.trial_ends_at,
         subscriptionExpiresAt: tenant.subscription_expires_at,
-        stripeCustomerId: tenant.stripe_customer_id,
-        stripeSubscriptionId: tenant.stripe_subscription_id,
+        asaasCustomerId: tenant.asaas_customer_id,
+        asaasSubscriptionId: tenant.asaas_subscription_id,
         monthlyAmountCents: subscriptionExtras.monthlyAmountCents,
         currency: subscriptionExtras.currency,
         nextBillingAt:
@@ -393,7 +385,8 @@ export class PlatformService {
       comp_until: untilValue,
     });
 
-    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+    await this.cancelAsaasSubscription(tenant.asaas_subscription_id);
+    await this.cancelAsaasSubscription(tenant.support_ai_asaas_subscription_id);
     return this.getTenantDetail(tenantId);
   }
 
@@ -401,13 +394,18 @@ export class PlatformService {
     const tenant = await this.fetchTenantById(tenantId);
 
     await this.updateTenantFields(tenantId, { comp_until: null });
-    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+    await this.cancelAsaasSubscription(tenant.asaas_subscription_id);
+    await this.cancelAsaasSubscription(tenant.support_ai_asaas_subscription_id);
 
     await this.updateTenantFields(tenantId, {
       subscription_status: 'CANCELED',
       plan_tier: 'SOLO',
       trial_ends_at: null,
-      stripe_subscription_id: null,
+      asaas_subscription_id: null,
+      asaas_pending_payment_id: null,
+      support_ai_asaas_subscription_id: null,
+      support_ai_enabled: false,
+      support_ai_status: 'canceled',
       comp_until: null,
     });
 
@@ -446,7 +444,8 @@ export class PlatformService {
       );
     }
 
-    await this.cancelStripeSubscription(tenant.stripe_subscription_id);
+    await this.cancelAsaasSubscription(tenant.asaas_subscription_id);
+    await this.cancelAsaasSubscription(tenant.support_ai_asaas_subscription_id);
 
     const authUserIds = await this.listAuthUserIdsForTenant(tenantId);
 
@@ -932,53 +931,22 @@ export class PlatformService {
     return map;
   }
 
-  private async resolveStripeSubscriptionExtras(
-    stripeSubscriptionId: string | null,
+  private async resolveAsaasSubscriptionExtras(
+    tenant: Tenant,
   ): Promise<{
     monthlyAmountCents: number | null;
     currency: string | null;
     nextBillingAt: string | null;
   }> {
-    if (!stripeSubscriptionId || !this.stripe) {
-      return {
-        monthlyAmountCents: null,
-        currency: null,
-        nextBillingAt: null,
-      };
-    }
+    const prices = await this.getPlanPriceCents();
+    const monthlyAmountCents = prices[tenant.plan_tier] ?? null;
 
-    try {
-      const subscription = await this.stripe.subscriptions.retrieve(
-        stripeSubscriptionId,
-        { expand: ['items.data.price'] },
-      );
-
-      const item = subscription.items.data[0];
-      const unitAmount = item?.price?.unit_amount ?? null;
-      const quantity = item?.quantity ?? 1;
-      const currency = item?.price?.currency ?? null;
-      const nextBillingAt = stripePeriodEndToIso(
-        extractSubscriptionPeriodEnd(subscription),
-      );
-
-      return {
-        monthlyAmountCents:
-          unitAmount === null ? null : unitAmount * (quantity || 1),
-        currency,
-        nextBillingAt,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Failed to retrieve Stripe subscription ${stripeSubscriptionId}: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
-      return {
-        monthlyAmountCents: null,
-        currency: null,
-        nextBillingAt: null,
-      };
-    }
+    return {
+      monthlyAmountCents:
+        tenant.subscription_status === 'ACTIVE' ? monthlyAmountCents : null,
+      currency: 'brl',
+      nextBillingAt: tenant.subscription_expires_at,
+    };
   }
 
   private async getPlanPriceCents(): Promise<Partial<Record<PlanTier, number>>> {
@@ -988,38 +956,15 @@ export class PlatformService {
 
     const result: Partial<Record<PlanTier, number>> = {};
 
-    if (!this.stripe) {
-      this.planPriceCentsCache = result;
-      return result;
+    for (const tier of ['SOLO', 'PRO', 'ELITE'] as const) {
+      try {
+        result[tier] = Math.round(
+          resolvePlanValueBrl(this.configService, tier) * 100,
+        );
+      } catch {
+        this.logger.warn(`Missing Asaas value for plan ${tier}`);
+      }
     }
-
-    const priceIds: Array<{ tier: PlanTier; envKey: string }> = [
-      { tier: 'SOLO', envKey: 'STRIPE_SOLO_PRICE_ID' },
-      { tier: 'PRO', envKey: 'STRIPE_PRO_TIER_PRICE_ID' },
-      { tier: 'ELITE', envKey: 'STRIPE_ELITE_PRICE_ID' },
-    ];
-
-    await Promise.all(
-      priceIds.map(async ({ tier, envKey }) => {
-        const priceId = this.configService.get<string>(envKey)?.trim();
-        if (!priceId) {
-          return;
-        }
-
-        try {
-          const price = await this.stripe!.prices.retrieve(priceId);
-          if (typeof price.unit_amount === 'number') {
-            result[tier] = price.unit_amount;
-          }
-        } catch (error) {
-          this.logger.warn(
-            `Failed to retrieve Stripe price ${priceId}: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-          );
-        }
-      }),
-    );
 
     this.planPriceCentsCache = result;
     return result;
@@ -1139,7 +1084,7 @@ export class PlatformService {
 
   private async updateTenantFields(
     tenantId: string,
-    fields: Record<string, string | null>,
+    fields: Record<string, string | number | boolean | null>,
   ): Promise<void> {
     const { error } = await this.supabaseService
       .getClient()
@@ -1152,18 +1097,18 @@ export class PlatformService {
     }
   }
 
-  private async cancelStripeSubscription(
+  private async cancelAsaasSubscription(
     subscriptionId: string | null,
   ): Promise<void> {
-    if (!subscriptionId?.trim() || !this.stripe) {
+    if (!subscriptionId?.trim()) {
       return;
     }
 
     try {
-      await this.stripe.subscriptions.cancel(subscriptionId);
+      await this.asaasClient.deleteSubscription(subscriptionId);
     } catch (error) {
       this.logger.warn(
-        `Failed to cancel Stripe subscription ${subscriptionId}: ${
+        `Failed to cancel Asaas subscription ${subscriptionId}: ${
           error instanceof Error ? error.message : 'unknown error'
         }`,
       );

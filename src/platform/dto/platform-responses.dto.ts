@@ -64,8 +64,8 @@ export interface PlatformTenantSubscriptionDetail {
   planTier: PlanTier;
   trialEndsAt: string | null;
   subscriptionExpiresAt: string | null;
-  stripeCustomerId: string | null;
-  stripeSubscriptionId: string | null;
+  asaasCustomerId: string | null;
+  asaasSubscriptionId: string | null;
   monthlyAmountCents: number | null;
   currency: string | null;
   nextBillingAt: string | null;

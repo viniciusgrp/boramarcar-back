@@ -1,115 +1,91 @@
 import type { ConfigService } from '@nestjs/config';
-import type { AppointmentsService } from '../appointments/appointments.service';
-import type { SupabaseService } from '../supabase/supabase.service';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { TenantsService } from '../tenants/tenants.service';
 import { BillingService } from './billing.service';
-import type { StripeCheckoutSession, StripeEvent } from './types/stripe-api.types';
+import { createChainableQuery } from '../test-utils/supabase-mock';
 
-function buildBillingService(appointments: Partial<AppointmentsService>) {
-  const configService = {
-    get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY'
-        ? 'sk_test_dummy'
-        : key === 'APP_ENV'
-          ? 'production'
-          : undefined,
-  } as unknown as ConfigService;
-
-  const supabaseService = {
-    getClient: () => ({
-      from: () => ({
-        insert: jest.fn().mockResolvedValue({ error: null }),
-        delete: jest.fn(() => ({
-          eq: jest.fn().mockResolvedValue({ error: null }),
-        })),
-      }),
-    }),
-  } as unknown as SupabaseService;
-
-  return new BillingService(
-    configService,
-    {} as TenantsService,
-    supabaseService,
-    appointments as AppointmentsService,
-    {} as import('../affiliates/affiliates.service').AffiliatesService,
-  );
-}
-
-function buildCheckoutEvent(
-  type: 'checkout.session.completed' | 'checkout.session.expired',
-  session: Partial<StripeCheckoutSession>,
-): StripeEvent {
+function buildTenant(): Tenant {
   return {
-    id: `evt_${type}`,
-    type,
-    data: {
-      object: {
-        object: 'checkout.session',
-        mode: 'payment',
-        metadata: {
-          checkout_type: 'appointment_deposit',
-          appointment_id: 'appt-1',
-        },
-        ...session,
-      },
-    },
-  } as unknown as StripeEvent;
+    id: 'tenant-1',
+    name: 'Studio',
+    slug: 'studio',
+    asaas_wallet_id: 'wal_1',
+    asaas_charges_enabled: true,
+    deposit_application_fee_percent: 5,
+  } as Tenant;
 }
 
 describe('BillingService deposit lifecycle', () => {
-  it('confirms deposit on checkout.session.completed when hold is pending', async () => {
-    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
-      outcome: 'confirmed',
-      appointment: { id: 'appt-1', status: 'CONFIRMED' },
+  it('creates a Pix/card checkout with split to the subaccount wallet', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/1',
     });
-    const service = buildBillingService({ confirmDepositPaymentDetailed });
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.completed', {}),
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
     );
 
-    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith('appt-1');
-  });
-
-  it('auto-refunds when payment arrives after hold was cancelled', async () => {
-    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
-      outcome: 'late_payment_needs_refund',
-      appointment: { id: 'appt-1', status: 'CANCELLED' },
-    });
-    const markDepositRefunded = jest.fn().mockResolvedValue({
-      id: 'appt-1',
-      payment_status: 'REFUNDED',
-    });
-    const service = buildBillingService({
-      confirmDepositPaymentDetailed,
-      markDepositRefunded,
+    const url = await service.createDepositCheckoutSession({
+      appointmentId: 'appt-1',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 50,
+      accessToken: 'token',
+      customerName: 'Ana',
+      customerPhone: '11999999999',
     });
 
-    const refundsCreate = jest.fn().mockResolvedValue({ id: 're_1' });
-    (
-      service as unknown as {
-        stripe: { refunds: { create: typeof refundsCreate } };
-      }
-    ).stripe = { refunds: { create: refundsCreate } };
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.completed', {
-        payment_intent: 'pi_late',
+    expect(url).toBe('https://asaas.com/c/1');
+    expect(createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingTypes: ['PIX', 'CREDIT_CARD'],
+        minutesToExpire: 30,
+        externalReference: 'deposit:appt-1',
+        splits: [{ walletId: 'wal_1', percentualValue: 95 }],
       }),
     );
-
-    expect(refundsCreate).toHaveBeenCalledWith({ payment_intent: 'pi_late' });
-    expect(markDepositRefunded).toHaveBeenCalledWith('appt-1');
   });
 
-  it('releases pending hold on checkout.session.expired', async () => {
-    const releasePendingDepositHold = jest.fn().mockResolvedValue(true);
-    const service = buildBillingService({ releasePendingDepositHold });
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.expired', {}),
+  it('refunds a late deposit payment', async () => {
+    const refundPayment = jest.fn().mockResolvedValue({});
+    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
+      outcome: 'late_payment_needs_refund',
+    });
+    const markDepositRefunded = jest.fn();
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { findById: jest.fn() } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { confirmDepositPaymentDetailed, markDepositRefunded } as never,
+      {} as never,
+      { refundPayment } as never,
     );
 
-    expect(releasePendingDepositHold).toHaveBeenCalledWith('appt-1');
+    await service.processAsaasWebhookEvent({
+      id: 'evt_dep',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_dep',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
+    expect(refundPayment).toHaveBeenCalledWith('pay_dep');
+    expect(markDepositRefunded).toHaveBeenCalledWith('appt-1');
   });
 });

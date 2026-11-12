@@ -29,7 +29,7 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     contact_phone: '11999990000',
     deposit_feature_enabled: false,
     support_ai_enabled: false,
-    support_ai_stripe_subscription_item_id: null,
+    support_ai_asaas_subscription_id: null,
     support_ai_status: null,
     deposit_application_fee_percent: null,
     require_customer_email_confirmation: false,
@@ -39,11 +39,15 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     booking_acceptance_type: 'AUTOMATIC',
     booking_slot_interval_minutes: 30,
     owner_id: 'owner-1',
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    stripe_connect_account_id: null,
-    stripe_connect_charges_enabled: false,
-    stripe_connect_details_submitted: false,
+    asaas_customer_id: null,
+    asaas_subscription_id: null,
+    asaas_pending_payment_id: null,
+    asaas_open_invoice_url: null,
+    asaas_account_id: null,
+    asaas_wallet_id: null,
+    asaas_account_status: null,
+    asaas_charges_enabled: false,
+    asaas_details_submitted: false,
     subscription_status: 'ACTIVE',
     subscription_expires_at: null,
     trial_starts_at: null,
@@ -131,7 +135,11 @@ describe('PlatformService', () => {
       get: () => undefined,
     } as unknown as ConfigService;
 
-    const service = new PlatformService(supabaseService, configService);
+    const service = new PlatformService(
+      supabaseService,
+      configService,
+      { deleteSubscription: jest.fn() } as never,
+    );
 
     const all = await service.listTenants({ page: 1, pageSize: 20 });
     expect(all.total).toBe(2);
@@ -184,7 +192,11 @@ describe('PlatformService', () => {
       get: () => undefined,
     } as unknown as ConfigService;
 
-    const service = new PlatformService(supabaseService, configService);
+    const service = new PlatformService(
+      supabaseService,
+      configService,
+      { deleteSubscription: jest.fn() } as never,
+    );
     const summary = await service.getSummary();
 
     expect(summary.totalTenants).toBe(3);
@@ -200,7 +212,7 @@ describe('PlatformService', () => {
   it('grants a complimentary plan until a future date', async () => {
     const tenant = buildTenant({
       subscription_status: 'ACTIVE',
-      stripe_subscription_id: null,
+      asaas_subscription_id: null,
     });
     const updates: Record<string, unknown>[] = [];
 
@@ -225,6 +237,7 @@ describe('PlatformService', () => {
     const service = new PlatformService(
       supabaseService,
       { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
     );
     jest
       .spyOn(service, 'getTenantDetail')
@@ -271,6 +284,7 @@ describe('PlatformService', () => {
     const service = new PlatformService(
       supabaseService,
       { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
     );
     jest
       .spyOn(service, 'getTenantDetail')
@@ -282,7 +296,7 @@ describe('PlatformService', () => {
     expect(updates[0]?.comp_until).toBe('2027-06-11T00:00:00.000Z');
   });
 
-  it('cancels a local plan without Stripe', async () => {
+  it('cancels a local plan without Asaas', async () => {
     const tenant = buildTenant({
       subscription_status: 'INACTIVE',
       trial_ends_at: '2026-10-01T00:00:00.000Z',
@@ -312,6 +326,7 @@ describe('PlatformService', () => {
     const service = new PlatformService(
       supabaseService,
       { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
     );
     jest
       .spyOn(service, 'getTenantDetail')
@@ -324,7 +339,7 @@ describe('PlatformService', () => {
         subscription_status: 'CANCELED',
         plan_tier: 'SOLO',
         trial_ends_at: null,
-        stripe_subscription_id: null,
+        asaas_subscription_id: null,
         comp_until: null,
       }),
     );
@@ -395,6 +410,7 @@ describe('PlatformService', () => {
     const service = new PlatformService(
       supabaseService,
       { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
     );
 
     await service.deleteTenant('t-1', 'Barbearia Teste');
@@ -461,6 +477,7 @@ describe('PlatformService', () => {
     const service = new PlatformService(
       supabaseService,
       { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
     );
 
     await service.deleteTenant('t-1', 'Barbearia Teste');

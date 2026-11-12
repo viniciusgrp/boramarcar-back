@@ -243,6 +243,31 @@ export class MailService {
     });
   }
 
+  async sendTeamInviteAccepted(params: {
+    recipientEmail: string;
+    tenantName: string;
+    memberEmail: string;
+    roleLabel: string;
+  }): Promise<void> {
+    const tenantName = this.escapeHtml(params.tenantName);
+    const memberEmail = this.escapeHtml(params.memberEmail);
+    const roleLabel = this.escapeHtml(params.roleLabel);
+
+    await this.sendMail({
+      to: params.recipientEmail,
+      subject: `Convite aceito - ${params.tenantName}`,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h1 style="font-size: 20px; margin-bottom: 12px;">Alguém entrou na equipe</h1>
+          <p style="margin: 0 0 16px;">
+            <strong>${memberEmail}</strong> aceitou o convite para
+            <strong>${tenantName}</strong> como <strong>${roleLabel}</strong>.
+          </p>
+        </div>
+      `,
+    });
+  }
+
   async sendTeamInvite(params: {
     recipientEmail: string;
     tenantName: string;

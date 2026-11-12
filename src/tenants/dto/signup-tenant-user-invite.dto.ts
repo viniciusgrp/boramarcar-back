@@ -6,6 +6,10 @@ export class SignupTenantUserInviteDto {
   token!: string;
 
   @IsString()
+  @MinLength(1)
+  fullName!: string;
+
+  @IsString()
   @MinLength(6)
   password!: string;
 }

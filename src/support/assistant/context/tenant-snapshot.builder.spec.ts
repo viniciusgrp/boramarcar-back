@@ -18,8 +18,8 @@ const setup: InitialSetupStatus = {
   hasSharedBookingLink: false,
   hasCustomerAccountPolicy: true,
   hasReviewsEnabled: false,
-  hasStripeConnect: false,
-  requiresStripeConnect: false,
+  hasAsaasAccount: false,
+  requiresAsaasAccount: false,
   hasActiveSubscription: true,
   hasExtraProfessional: false,
   hasReviewedBusinessHours: false,
@@ -50,7 +50,7 @@ describe('tenant-snapshot.builder', () => {
     expect(snapshot.tenantName).toBe('Barbearia Z');
     expect(snapshot.planTier).toBe('PRO');
     expect(snapshot.onboarding.hasProfessional).toBe(true);
-    expect(JSON.stringify(snapshot)).not.toContain('stripe_customer');
+    expect(JSON.stringify(snapshot)).not.toContain('asaas_customer');
     expect(JSON.stringify(snapshot)).not.toContain('contact_email');
   });
 

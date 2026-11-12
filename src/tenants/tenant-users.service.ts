@@ -36,6 +36,7 @@ import {
   normalizeTenantUserPreferences,
 } from './utils/tenant-user-preferences.util';
 import { shouldRevokePanelMembershipOnProfessionalArchive } from './utils/inactive-professional-access.util';
+import { buildTeamInviteAcceptUrl } from './utils/team-invite-url.util';
 
 interface TenantUserRow extends TenantUser {}
 
@@ -51,6 +52,7 @@ interface TenantUserInviteListRow {
   email: string;
   role: UserRole;
   professional_id: string | null;
+  token: string;
   expires_at: string;
   created_at: string;
   professionals:
@@ -178,7 +180,7 @@ export class TenantUsersService {
       .getClient()
       .from('tenant_user_invites')
       .select(
-        'id, email, role, professional_id, expires_at, created_at, professionals(name)',
+        'id, email, role, professional_id, token, expires_at, created_at, professionals(name)',
       )
       .eq('tenant_id', tenantId)
       .is('accepted_at', null)
@@ -206,6 +208,10 @@ export class TenantUsersService {
       expiresAt: row.expires_at,
       createdAt: row.created_at,
       isExpired: new Date(row.expires_at).getTime() < now,
+      acceptUrl: buildTeamInviteAcceptUrl(
+        this.resolveFrontendOrigin(),
+        row.token,
+      ),
     }));
   }
 
@@ -272,7 +278,10 @@ export class TenantUsersService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const inviteUrl = `${this.resolveFrontendOrigin()}/admin/login?invite=${encodeURIComponent(token)}`;
+    const inviteUrl = buildTeamInviteAcceptUrl(
+      this.resolveFrontendOrigin(),
+      token,
+    );
 
     await this.mailService.sendTeamInvite({
       recipientEmail: email,
@@ -314,7 +323,10 @@ export class TenantUsersService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const inviteUrl = `${this.resolveFrontendOrigin()}/admin/login?invite=${encodeURIComponent(token)}`;
+    const inviteUrl = buildTeamInviteAcceptUrl(
+      this.resolveFrontendOrigin(),
+      token,
+    );
 
     await this.mailService.sendTeamInvite({
       recipientEmail: invite.email,
@@ -365,6 +377,7 @@ export class TenantUsersService {
       email: invite.email,
       role: normalizeUserRole(invite.role),
       tenantName: tenant?.name?.trim() || 'Estabelecimento',
+      invitedByName: await this.resolveInviterDisplayName(invite.invited_by_user_id),
       expiresAt: invite.expires_at,
     };
   }
@@ -374,7 +387,12 @@ export class TenantUsersService {
   ): Promise<{ email: string }> {
     const invite = await this.findInviteByToken(dto.token?.trim() || '');
     const email = invite.email.trim().toLowerCase();
+    const fullName = dto.fullName?.trim() ?? '';
     const password = dto.password ?? '';
+
+    if (!fullName) {
+      throw new BadRequestException('Informe seu nome.');
+    }
 
     if (password.length < 8) {
       throw new BadRequestException(
@@ -404,6 +422,7 @@ export class TenantUsersService {
         email,
         password,
         email_confirm: true,
+        user_metadata: { full_name: fullName },
       });
 
     if (authError || !authData.user) {
@@ -901,6 +920,55 @@ export class TenantUsersService {
     return relation.name?.trim() || 'outro estabelecimento';
   }
 
+  private notifyInviterInviteAccepted(
+    invite: TenantUserInvite,
+    memberUserId: string,
+  ): void {
+    void (async () => {
+      const { data: tenant } = await this.supabaseService
+        .getClient()
+        .from('tenants')
+        .select('name')
+        .eq('id', invite.tenant_id)
+        .maybeSingle();
+
+      const inviterEmail = await this.resolveUserEmail(invite.invited_by_user_id);
+      if (!inviterEmail.includes('@')) {
+        return;
+      }
+
+      const memberEmail = await this.resolveUserEmail(memberUserId);
+
+      await this.mailService.sendTeamInviteAccepted({
+        recipientEmail: inviterEmail,
+        tenantName: tenant?.name?.trim() || 'Estabelecimento',
+        memberEmail,
+        roleLabel: USER_ROLE_LABELS[normalizeUserRole(invite.role)],
+      });
+    })().catch(() => undefined);
+  }
+
+  private async resolveInviterDisplayName(userId: string): Promise<string> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(userId);
+
+    if (error || !data.user) {
+      return 'Alguém da equipe';
+    }
+
+    const fullName =
+      typeof data.user.user_metadata?.full_name === 'string'
+        ? data.user.user_metadata.full_name.trim()
+        : '';
+
+    if (fullName) {
+      return fullName;
+    }
+
+    return data.user.email?.trim() || 'Alguém da equipe';
+  }
+
   private async resolveUserEmail(userId: string): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -941,7 +1009,9 @@ export class TenantUsersService {
       })
       .eq('id', invite.id);
 
-    return mapTenantUserRow(data as TenantUserRow);
+    const membership = mapTenantUserRow(data as TenantUserRow);
+    this.notifyInviterInviteAccepted(invite, userId);
+    return membership;
   }
 
   private async findPendingInviteByIdForTenant(
