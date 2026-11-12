@@ -56,7 +56,13 @@ describe('BillingService deposit lifecycle', () => {
         billingTypes: ['PIX', 'CREDIT_CARD'],
         minutesToExpire: 30,
         externalReference: 'deposit:appt-1',
-        splits: [{ walletId: 'wal_1', percentualValue: 95 }],
+        splits: [{ walletId: 'wal_1', percentageValue: 95 }],
+        items: [
+          expect.objectContaining({
+            imageBase64: expect.any(String),
+            value: 50,
+          }),
+        ],
       }),
     );
   });

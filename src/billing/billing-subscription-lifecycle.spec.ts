@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { AsaasHttpError } from '../asaas/asaas-http.error';
 import type { ConfigService } from '@nestjs/config';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -249,7 +250,13 @@ describe('BillingService SaaS billing', () => {
   it('reuses the pending trial invoice instead of creating another subscription', async () => {
     const createSubscription = jest.fn();
     const listPayments = jest.fn().mockResolvedValue({
-      data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/pending' }],
+      data: [
+        {
+          id: 'pay_1',
+          status: 'PENDING',
+          invoiceUrl: 'https://asaas.com/i/pending',
+        },
+      ],
     });
     const { service } = buildService(
       {
@@ -276,6 +283,67 @@ describe('BillingService SaaS billing', () => {
 
     expect(createSubscription).not.toHaveBeenCalled();
     expect(result).toEqual({ url: 'https://asaas.com/i/pending' });
+  });
+
+  it('returns the Asaas message when resuming a pending subscription fails', async () => {
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_pending',
+            subscription_status: 'INACTIVE',
+            plan_tier: 'SOLO',
+          }),
+        ),
+      },
+      {},
+      {
+        updateSubscription: jest
+          .fn()
+          .mockRejectedValue(new AsaasHttpError(400, null, 'Cobrança já paga')),
+      },
+    );
+
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'PRO',
+      }),
+    ).rejects.toMatchObject({
+      message: 'Cobrança já paga',
+    });
+  });
+
+  it('does not replace the document of an existing Asaas customer', async () => {
+    const updateCustomer = jest.fn();
+    const asaasClient = {
+      updateCustomer,
+      createCustomer: jest.fn(),
+      createSubscription: jest.fn().mockResolvedValue({
+        id: 'sub_asaas',
+        customer: 'cus_1',
+      }),
+      listPayments: jest.fn().mockResolvedValue({
+        data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/1' }],
+      }),
+    };
+    const { service } = buildService({}, {}, asaasClient);
+
+    await service.createCheckoutSession({
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      ownerEmail: 'owner@example.com',
+      planTier: 'SOLO',
+      cpfCnpj: '12345678901',
+    });
+
+    expect(updateCustomer).not.toHaveBeenCalled();
+    expect(asaasClient.createCustomer).not.toHaveBeenCalled();
+    expect(asaasClient.createSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_1' }),
+    );
   });
 
   it('allows sandbox checkout when APP_ENV is not production', async () => {
@@ -313,6 +381,114 @@ describe('BillingService SaaS billing', () => {
         cpfCnpj: '12345678901',
       }),
     ).resolves.toEqual({ url: 'https://sandbox.asaas.com/i/1' });
+  });
+
+  it('ignores a late payment for a canceled subscription', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          subscription_status: 'CANCELED',
+          asaas_subscription_id: null,
+        }),
+      ),
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_late',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_old',
+        customer: 'cus_1',
+        subscription: 'sub_old',
+        value: 69.9,
+        externalReference: 'plan:tenant-1:PRO',
+      },
+    });
+
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+    expect(affiliatesService.accruePaidPlanInvoice).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel the current plan when an older subscription is deleted', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const findByAsaasCustomerId = jest.fn();
+    const { service } = buildService({
+      findByAsaasSubscriptionId: jest.fn().mockResolvedValue(null),
+      findByAsaasCustomerId,
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_del',
+      event: 'SUBSCRIPTION_DELETED',
+      subscription: { id: 'sub_old', customer: 'cus_1', value: 34.9 },
+    });
+
+    expect(findByAsaasCustomerId).not.toHaveBeenCalled();
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+  });
+
+  it('refuses to open an invoice that is already paid', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_1',
+            asaas_open_invoice_url: 'https://asaas.com/i/paid',
+            subscription_status: 'ACTIVE',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      {
+        listPayments: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'pay_paid',
+              status: 'RECEIVED',
+              invoiceUrl: 'https://asaas.com/i/paid',
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(service.getOpenInvoiceUrl('tenant-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ asaasOpenInvoiceUrl: null }),
+    );
+  });
+
+  it('turns the Support AI add-on off when its payment is refunded', async () => {
+    const updateSupportAiEntitlement = jest.fn().mockResolvedValue(buildTenant());
+    const { service } = buildService({
+      updateSupportAiEntitlement,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_ai',
+      event: 'PAYMENT_REFUNDED',
+      payment: {
+        id: 'pay_ai',
+        customer: 'cus_1',
+        externalReference: 'support-ai:tenant-1',
+      },
+    });
+
+    expect(updateSupportAiEntitlement).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        supportAiEnabled: false,
+        supportAiStatus: 'canceled',
+      }),
+    );
   });
 
   it('blocks checkout when APP_ENV is not production', async () => {

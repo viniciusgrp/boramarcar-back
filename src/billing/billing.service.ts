@@ -84,6 +84,24 @@ export interface CreateDepositCheckoutSessionParams {
 }
 
 const PAID_PAYMENT_STATUSES = new Set(['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH']);
+const OPEN_INVOICE_STATUSES = new Set(['PENDING', 'OVERDUE']);
+
+const CHECKOUT_ITEM_IMAGE_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+const SUBACCOUNT_WEBHOOK_EVENTS = [
+  'PAYMENT_CONFIRMED',
+  'PAYMENT_RECEIVED',
+  'PAYMENT_OVERDUE',
+  'PAYMENT_DELETED',
+  'PAYMENT_REFUNDED',
+  'SUBSCRIPTION_INACTIVATED',
+  'SUBSCRIPTION_DELETED',
+  'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+  'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
+  'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+  'ACCOUNT_STATUS_DOCUMENT_REJECTED',
+];
 
 @Injectable()
 export class BillingService {
@@ -269,6 +287,27 @@ export class BillingService {
       return;
     }
 
+    const paymentSubscriptionId = payment.subscription?.trim() || null;
+    const currentSubscriptionId = tenant.asaas_subscription_id?.trim() || null;
+
+    if (tenant.subscription_status === 'CANCELED') {
+      this.logger.warn(
+        `Ignoring late plan payment ${payment.id} for canceled tenant ${tenant.id}`,
+      );
+      return;
+    }
+
+    if (
+      currentSubscriptionId &&
+      paymentSubscriptionId &&
+      paymentSubscriptionId !== currentSubscriptionId
+    ) {
+      this.logger.warn(
+        `Ignoring plan payment ${payment.id} for subscription ${paymentSubscriptionId}; tenant ${tenant.id} is on ${currentSubscriptionId}`,
+      );
+      return;
+    }
+
     const planRef = parsePlanExternalReference(payment.externalReference);
     const planTier = planRef?.planTier ?? tenant.plan_tier;
     const subscriptionExpiresAt = await this.resolvePeriodEndFromPayment(payment);
@@ -278,7 +317,7 @@ export class BillingService {
       asaasCustomerId: payment.customer ?? tenant.asaas_customer_id,
       asaasSubscriptionId: payment.subscription ?? tenant.asaas_subscription_id,
       asaasPendingPaymentId: null,
-      asaasOpenInvoiceUrl: payment.invoiceUrl ?? null,
+      asaasOpenInvoiceUrl: null,
       subscriptionStatus: 'ACTIVE',
       subscriptionExpiresAt,
       planTier,
@@ -319,11 +358,20 @@ export class BillingService {
       return;
     }
 
-    if (type === 'PAYMENT_REFUNDED' || type === 'PAYMENT_OVERDUE') {
+    if (type === 'PAYMENT_REFUNDED') {
       await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
-        supportAiEnabled: type !== 'PAYMENT_OVERDUE',
+        supportAiEnabled: false,
         supportAiAsaasSubscriptionId: tenant.support_ai_asaas_subscription_id,
-        supportAiStatus: type === 'PAYMENT_OVERDUE' ? 'past_due' : 'canceled',
+        supportAiStatus: 'canceled',
+      });
+      return;
+    }
+
+    if (type === 'PAYMENT_OVERDUE') {
+      await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+        supportAiEnabled: false,
+        supportAiAsaasSubscriptionId: tenant.support_ai_asaas_subscription_id,
+        supportAiStatus: 'past_due',
       });
     }
   }
@@ -426,11 +474,14 @@ export class BillingService {
       return;
     }
 
-    const existing =
-      (await this.tenantsService.findByAsaasSubscriptionId(subscription.id)) ??
-      (await this.tenantsService.findByAsaasCustomerId(subscription.customer));
+    const existing = await this.tenantsService.findByAsaasSubscriptionId(
+      subscription.id,
+    );
 
-    if (!existing) {
+    if (!existing || existing.asaas_subscription_id !== subscription.id) {
+      this.logger.warn(
+        `Ignoring ${subscription.id} cancellation because it is not the current subscription`,
+      );
       return;
     }
 
@@ -492,6 +543,16 @@ export class BillingService {
   private async resolveTenantFromPayment(
     payment: AsaasPayment,
   ): Promise<Tenant | null> {
+    if (isSupportAiExternalReference(payment.externalReference)) {
+      const tenantId = payment.externalReference
+        ?.slice('support-ai:'.length)
+        .trim();
+
+      if (tenantId) {
+        return this.tenantsService.findById(tenantId);
+      }
+    }
+
     const planRef = parsePlanExternalReference(payment.externalReference);
 
     if (planRef?.tenantId) {
@@ -566,7 +627,14 @@ export class BillingService {
     const planTier = normalizePlanTier(params.planTier);
 
     if (tenantHasPendingAsaasSubscription(tenant)) {
-      return this.resumePendingSubscription(tenant, planTier);
+      try {
+        return await this.resumePendingSubscription(tenant, planTier);
+      } catch (error) {
+        this.rethrowAsaasError(
+          error,
+          'Não foi possível abrir a fatura da assinatura pendente.',
+        );
+      }
     }
 
     const ownerEmail = params.ownerEmail.trim();
@@ -766,14 +834,9 @@ export class BillingService {
   }
 
   async getOpenInvoiceUrl(tenantId: string): Promise<CheckoutSessionResponse> {
-    const tenant = await this.requireTenant(tenantId);
-    const existing = tenant.asaas_open_invoice_url?.trim();
-
-    if (existing) {
-      return { url: existing };
-    }
-
     this.ensureAsaasOutbound('payments.list');
+
+    const tenant = await this.requireTenant(tenantId);
 
     if (!tenant.asaas_subscription_id) {
       throw new BadRequestException(
@@ -781,11 +844,15 @@ export class BillingService {
       );
     }
 
-    const payment = await this.findLatestSubscriptionPayment(
+    const payment = await this.findOpenSubscriptionPayment(
       tenant.asaas_subscription_id,
     );
 
     if (!payment?.invoiceUrl) {
+      await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+        subscriptionStatus: tenant.subscription_status,
+        asaasOpenInvoiceUrl: null,
+      });
       throw new BadRequestException(
         'Nenhuma fatura aberta encontrada para esta assinatura.',
       );
@@ -794,6 +861,7 @@ export class BillingService {
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
       subscriptionStatus: tenant.subscription_status,
       asaasOpenInvoiceUrl: payment.invoiceUrl,
+      asaasPendingPaymentId: payment.id,
     });
 
     return { url: payment.invoiceUrl };
@@ -857,7 +925,7 @@ export class BillingService {
         asaasCustomerId: subscription.customer,
         asaasSubscriptionId: subscription.id,
         asaasPendingPaymentId: null,
-        asaasOpenInvoiceUrl: payment?.invoiceUrl ?? tenant.asaas_open_invoice_url,
+        asaasOpenInvoiceUrl: null,
         subscriptionStatus: 'ACTIVE',
         subscriptionExpiresAt: this.nextDueDateToIso(subscription.nextDueDate),
         planTier,
@@ -915,9 +983,9 @@ export class BillingService {
       });
 
       return this.tenantsService.updateSupportAiEntitlement(tenant.id, {
-        supportAiEnabled: true,
+        supportAiEnabled: false,
         supportAiAsaasSubscriptionId: subscription.id,
-        supportAiStatus: 'active',
+        supportAiStatus: 'inactive',
       });
     } catch (error) {
       this.rethrowAsaasError(
@@ -969,11 +1037,12 @@ export class BillingService {
             description: 'Pagamento antecipado para confirmar agendamento',
             quantity: 1,
             value: params.depositAmountBrl,
+            imageBase64: CHECKOUT_ITEM_IMAGE_BASE64,
           },
         ],
         splits:
           establishmentPercent > 0
-            ? [{ walletId, percentualValue: establishmentPercent }]
+            ? [{ walletId, percentageValue: establishmentPercent }]
             : undefined,
         externalReference: buildDepositExternalReference(params.appointmentId),
       });
@@ -1036,6 +1105,7 @@ export class BillingService {
         ...payload,
         cpfCnpj: payload.cpfCnpj.replace(/\D/g, ''),
         postalCode: payload.postalCode.replace(/\D/g, ''),
+        webhooks: [this.buildSubaccountWebhook(payload.email)],
       });
 
       if (!account.walletId) {
@@ -1079,12 +1149,21 @@ export class BillingService {
 
     try {
       const account = await this.asaasClient.getAccount(tenant.asaas_account_id);
-      const approved = account.accountStatus?.general === 'APPROVED';
+      const general = account.accountStatus?.general?.trim();
+
+      if (!general) {
+        this.logger.warn(
+          `Asaas account ${tenant.asaas_account_id} returned no general status. Local charges flag was kept.`,
+        );
+        return tenant;
+      }
 
       return this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-        asaasChargesEnabled: approved,
-        asaasDetailsSubmitted: Boolean(account.accountStatus?.documentation),
-        asaasAccountStatus: account.accountStatus?.general ?? tenant.asaas_account_status,
+        asaasChargesEnabled: general === 'APPROVED',
+        asaasDetailsSubmitted:
+          account.accountStatus?.documentation === 'APPROVED' ||
+          general === 'APPROVED',
+        asaasAccountStatus: general,
       });
     } catch (error) {
       this.logger.warn(
@@ -1127,6 +1206,12 @@ export class BillingService {
         continue;
       }
 
+      const stillCovered = await this.asaasStillCoversSubscription(tenant, now);
+
+      if (stillCovered) {
+        continue;
+      }
+
       await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
         subscriptionStatus: 'PAST_DUE',
       });
@@ -1157,9 +1242,8 @@ export class BillingService {
       });
     }
 
-    const pendingPayment = await this.findLatestSubscriptionPayment(subscriptionId);
-    const invoiceUrl =
-      pendingPayment?.invoiceUrl?.trim() || tenant.asaas_open_invoice_url?.trim();
+    const pendingPayment = await this.findOpenSubscriptionPayment(subscriptionId);
+    const invoiceUrl = pendingPayment?.invoiceUrl?.trim();
 
     if (!invoiceUrl) {
       throw new BadRequestException(
@@ -1184,12 +1268,6 @@ export class BillingService {
     const existingId = tenant.asaas_customer_id?.trim();
 
     if (existingId) {
-      if (params.cpfCnpj?.trim()) {
-        await this.asaasClient.updateCustomer(existingId, {
-          cpfCnpj: normalizeAsaasCpfCnpj(params.cpfCnpj),
-        });
-      }
-
       return existingId;
     }
 
@@ -1203,6 +1281,88 @@ export class BillingService {
 
     await this.tenantsService.updateAsaasCustomerId(tenant.id, customer.id);
     return customer.id;
+  }
+
+  private buildSubaccountWebhook(email: string) {
+    const origin = this.getRequiredUrl('PUBLIC_API_ORIGIN').replace(/\/$/, '');
+    const authToken = this.configService.get<string>('ASAAS_WEBHOOK_TOKEN')?.trim();
+
+    if (!authToken) {
+      throw new InternalServerErrorException('ASAAS_WEBHOOK_TOKEN is not configured');
+    }
+
+    return {
+      name: 'Horário Certo',
+      url: `${origin}/v1/payments/asaas/webhook`,
+      email,
+      enabled: true,
+      interrupted: false as const,
+      apiVersion: 3 as const,
+      authToken,
+      sendType: 'SEQUENTIALLY' as const,
+      events: SUBACCOUNT_WEBHOOK_EVENTS,
+    };
+  }
+
+  private async asaasStillCoversSubscription(
+    tenant: Tenant,
+    now: Date,
+  ): Promise<boolean> {
+    if (!tenant.asaas_subscription_id || !this.isAsaasOutboundEnabled()) {
+      return true;
+    }
+
+    try {
+      const subscription = await this.asaasClient.getSubscription(
+        tenant.asaas_subscription_id,
+      );
+      const asaasExpiresAt = this.nextDueDateToIso(subscription.nextDueDate);
+
+      if (
+        subscription.status === 'ACTIVE' &&
+        asaasExpiresAt &&
+        !isPaidSubscriptionGraceExpired(
+          { ...tenant, subscription_expires_at: asaasExpiresAt },
+          now,
+        )
+      ) {
+        await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+          subscriptionStatus: 'ACTIVE',
+          subscriptionExpiresAt: asaasExpiresAt,
+        });
+        return true;
+      }
+
+      const openPayment = await this.findOpenSubscriptionPayment(
+        tenant.asaas_subscription_id,
+      );
+
+      return Boolean(openPayment);
+    } catch (error) {
+      this.logger.warn(
+        `Skipped PAST_DUE for tenant ${tenant.id}: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+      return true;
+    }
+  }
+
+  private async findOpenSubscriptionPayment(
+    subscriptionId: string,
+  ): Promise<AsaasPayment | null> {
+    const listed = await this.asaasClient.listPayments({
+      subscription: subscriptionId,
+      limit: 10,
+    });
+
+    return (
+      listed.data?.find(
+        (payment) =>
+          Boolean(payment.invoiceUrl) &&
+          OPEN_INVOICE_STATUSES.has(payment.status ?? ''),
+      ) ?? null
+    );
   }
 
   private async findLatestSubscriptionPayment(

@@ -32,17 +32,6 @@ export class AsaasClient {
     return this.request<AsaasCustomer>('POST', '/customers', payload);
   }
 
-  async updateCustomer(
-    customerId: string,
-    payload: { cpfCnpj: string },
-  ): Promise<AsaasCustomer> {
-    return this.request<AsaasCustomer>(
-      'PUT',
-      `/customers/${encodeURIComponent(customerId)}`,
-      payload,
-    );
-  }
-
   async createSubscription(payload: {
     customer: string;
     billingType: 'UNDEFINED';
@@ -135,8 +124,9 @@ export class AsaasClient {
       description?: string;
       quantity: number;
       value: number;
+      imageBase64: string;
     }>;
-    splits?: Array<{ walletId: string; percentualValue: number }>;
+    splits?: Array<{ walletId: string; percentageValue: number }>;
     externalReference: string;
     customer?: string;
   }): Promise<AsaasCheckout> {
@@ -189,8 +179,16 @@ export class AsaasClient {
           access_token: this.getApiKey(),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
       });
     } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        this.logger.error(`Asaas ${method} ${path} timed out`);
+        throw new InternalServerErrorException(
+          'O Asaas não respondeu a tempo. Tente novamente.',
+        );
+      }
+
       this.logger.error(
         `Asaas ${method} ${path} network error: ${
           error instanceof Error ? error.message : 'unknown'

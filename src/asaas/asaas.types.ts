@@ -101,6 +101,18 @@ export interface AsaasWebhookEvent {
   account?: AsaasAccount & { id?: string };
 }
 
+export interface AsaasWebhookConfig {
+  name: string;
+  url: string;
+  email: string;
+  enabled: boolean;
+  interrupted: boolean;
+  apiVersion: 3;
+  authToken: string;
+  sendType: 'SEQUENTIALLY';
+  events: string[];
+}
+
 export interface CreateAsaasAccountPayload {
   name: string;
   email: string;
@@ -113,4 +125,5 @@ export interface CreateAsaasAccountPayload {
   complement?: string;
   province: string;
   postalCode: string;
+  webhooks?: AsaasWebhookConfig[];
 }
