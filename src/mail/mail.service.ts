@@ -193,15 +193,29 @@ export class MailService {
     code: string;
     verifyUrl: string;
   }): Promise<void> {
-    const ownerName = this.escapeHtml(params.ownerName.trim() || 'olá');
+    const trimmedName = params.ownerName.trim();
+    const greetingHtml = trimmedName
+      ? `Olá, ${this.escapeHtml(trimmedName)}!`
+      : 'Olá!';
+    const greetingText = trimmedName ? `Olá, ${trimmedName}!` : 'Olá!';
     const code = this.escapeHtml(params.code);
     const verifyUrl = this.escapeHtml(params.verifyUrl);
     const email = this.escapeHtml(params.recipientEmail);
+    const bodyAfterGreeting =
+      'Use o código abaixo para ativar o estabelecimento cadastrado com';
 
     await this.sendMail({
       to: params.recipientEmail,
       subject: `Confirme seu e-mail no ${BRAND_NAME}`,
       failIfUnconfigured: true,
+      text: [
+        `${greetingText} ${bodyAfterGreeting} ${params.recipientEmail}. O código expira em 1 hora.`,
+        '',
+        params.code,
+        '',
+        'Ou abra o link abaixo para confirmar automaticamente e entrar no painel:',
+        params.verifyUrl,
+      ].join('\n'),
       html: `
         <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">
           <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af;">
@@ -209,7 +223,7 @@ export class MailService {
           </p>
           <h1 style="font-size: 20px; margin: 0 0 12px;">Confirme seu e-mail</h1>
           <p style="margin: 0 0 16px; color: #4b5563;">
-            ${ownerName}, use o código abaixo para ativar o estabelecimento cadastrado com
+            ${greetingHtml} ${bodyAfterGreeting}
             <strong>${email}</strong>. O código expira em 1 hora.
           </p>
           <p style="margin: 0 0 24px; font-size: 32px; font-weight: 700; letter-spacing: 0.24em; color: #111827;">
