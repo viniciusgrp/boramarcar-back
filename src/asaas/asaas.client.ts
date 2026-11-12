@@ -24,12 +24,23 @@ export class AsaasClient {
   async createCustomer(payload: {
     name: string;
     email: string;
-    cpfCnpj?: string;
+    cpfCnpj: string;
     phone?: string;
     mobilePhone?: string;
     externalReference?: string;
   }): Promise<AsaasCustomer> {
     return this.request<AsaasCustomer>('POST', '/customers', payload);
+  }
+
+  async updateCustomer(
+    customerId: string,
+    payload: { cpfCnpj: string },
+  ): Promise<AsaasCustomer> {
+    return this.request<AsaasCustomer>(
+      'PUT',
+      `/customers/${encodeURIComponent(customerId)}`,
+      payload,
+    );
   }
 
   async createSubscription(payload: {

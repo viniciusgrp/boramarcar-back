@@ -56,6 +56,7 @@ function buildService(
       findByAsaasSubscriptionId: jest.fn().mockResolvedValue(null),
       findByAsaasCustomerId: jest.fn().mockResolvedValue(null),
       updateSubscriptionByTenantId: jest.fn(),
+      updateAsaasCustomerId: jest.fn(),
       ...tenants,
     } as TenantsService,
     { getClient: () => ({ from }) } as never,
@@ -89,9 +90,10 @@ describe('BillingService SaaS billing', () => {
   it('creates a subscription with UNDEFINED billing and stores the pending payment', async () => {
     const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
     const asaasClient = {
+      createCustomer: jest.fn().mockResolvedValue({ id: 'cus_new' }),
       createSubscription: jest.fn().mockResolvedValue({
         id: 'sub_asaas',
-        customer: 'cus_1',
+        customer: 'cus_new',
       }),
       listPayments: jest.fn().mockResolvedValue({
         data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/1' }],
@@ -100,9 +102,13 @@ describe('BillingService SaaS billing', () => {
     const { service } = buildService(
       {
         findById: jest.fn().mockResolvedValue(
-          buildTenant({ trial_ends_at: '2026-12-01T00:00:00.000Z' }),
+          buildTenant({
+            trial_ends_at: '2026-12-01T00:00:00.000Z',
+            asaas_customer_id: null,
+          }),
         ),
         updateSubscriptionByTenantId,
+        updateAsaasCustomerId: jest.fn(),
       },
       {},
       asaasClient,
@@ -113,8 +119,12 @@ describe('BillingService SaaS billing', () => {
       tenantName: 'Studio',
       ownerEmail: 'owner@example.com',
       planTier: 'PRO',
+      cpfCnpj: '123.456.789-01',
     });
 
+    expect(asaasClient.createCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ cpfCnpj: '12345678901' }),
+    );
     expect(asaasClient.createSubscription).toHaveBeenCalledWith(
       expect.objectContaining({
         billingType: 'UNDEFINED',
@@ -234,6 +244,75 @@ describe('BillingService SaaS billing', () => {
       'pay_1',
       'payment_refunded',
     );
+  });
+
+  it('reuses the pending trial invoice instead of creating another subscription', async () => {
+    const createSubscription = jest.fn();
+    const listPayments = jest.fn().mockResolvedValue({
+      data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/pending' }],
+    });
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_pending',
+            asaas_open_invoice_url: 'https://asaas.com/i/pending',
+            subscription_status: 'INACTIVE',
+            plan_tier: 'PRO',
+          }),
+        ),
+        updateSubscriptionByTenantId: jest.fn().mockResolvedValue(buildTenant()),
+      },
+      {},
+      { createSubscription, listPayments },
+    );
+
+    const result = await service.createCheckoutSession({
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      ownerEmail: 'owner@example.com',
+      planTier: 'PRO',
+    });
+
+    expect(createSubscription).not.toHaveBeenCalled();
+    expect(result).toEqual({ url: 'https://asaas.com/i/pending' });
+  });
+
+  it('allows sandbox checkout when APP_ENV is not production', async () => {
+    const asaasClient = {
+      createCustomer: jest.fn().mockResolvedValue({ id: 'cus_new' }),
+      createSubscription: jest.fn().mockResolvedValue({
+        id: 'sub_asaas',
+        customer: 'cus_new',
+      }),
+      listPayments: jest.fn().mockResolvedValue({
+        data: [{ id: 'pay_1', invoiceUrl: 'https://sandbox.asaas.com/i/1' }],
+      }),
+    };
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({ asaas_customer_id: null }),
+        ),
+        updateSubscriptionByTenantId: jest.fn().mockResolvedValue(buildTenant()),
+        updateAsaasCustomerId: jest.fn(),
+      },
+      {
+        APP_ENV: 'hml',
+        ASAAS_API_URL: 'https://api-sandbox.asaas.com/v3',
+      },
+      asaasClient,
+    );
+
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'SOLO',
+        cpfCnpj: '12345678901',
+      }),
+    ).resolves.toEqual({ url: 'https://sandbox.asaas.com/i/1' });
   });
 
   it('blocks checkout when APP_ENV is not production', async () => {

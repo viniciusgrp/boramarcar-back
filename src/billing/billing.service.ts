@@ -33,7 +33,11 @@ import { CheckoutSessionResponse } from './entities/checkout-session-response.en
 import type { AsaasAccountStatusResponse } from './entities/asaas-account-status.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
-import { tenantHasManageableSubscription } from './utils/tenant-billing-access.util';
+import { normalizeAsaasCpfCnpj } from './utils/asaas-document.util';
+import {
+  tenantHasManageableSubscription,
+  tenantHasPendingAsaasSubscription,
+} from './utils/tenant-billing-access.util';
 import {
   isComplimentaryAccessActive,
   parseUtcInstant,
@@ -64,6 +68,7 @@ export interface CreateCheckoutSessionParams {
   tenantName: string;
   ownerEmail: string;
   planTier: PlanTier;
+  cpfCnpj?: string | null;
 }
 
 export interface CreateDepositCheckoutSessionParams {
@@ -94,8 +99,21 @@ export class BillingService {
     private readonly asaasClient: AsaasClient,
   ) {}
 
+  private isAsaasSandboxUrl(): boolean {
+    const url = this.configService.get<string>('ASAAS_API_URL')?.trim() ?? '';
+
+    try {
+      return new URL(url).hostname === 'api-sandbox.asaas.com';
+    } catch {
+      return false;
+    }
+  }
+
   private isAsaasOutboundEnabled(): boolean {
-    return isProductionAppEnv(this.configService.get<string>('APP_ENV'));
+    return (
+      isProductionAppEnv(this.configService.get<string>('APP_ENV')) ||
+      this.isAsaasSandboxUrl()
+    );
   }
 
   private ensureAsaasOutbound(action: string): void {
@@ -104,7 +122,7 @@ export class BillingService {
     }
 
     this.logger.warn(
-      `Skipped Asaas "${action}" because APP_ENV is not production.`,
+      `Skipped Asaas "${action}" because APP_ENV is not production and ASAAS_API_URL is not the sandbox.`,
     );
     throw new BadRequestException(
       'Asaas não está disponível neste ambiente.',
@@ -546,6 +564,11 @@ export class BillingService {
     }
 
     const planTier = normalizePlanTier(params.planTier);
+
+    if (tenantHasPendingAsaasSubscription(tenant)) {
+      return this.resumePendingSubscription(tenant, planTier);
+    }
+
     const ownerEmail = params.ownerEmail.trim();
 
     if (!ownerEmail) {
@@ -557,6 +580,7 @@ export class BillingService {
     const customerId = await this.ensureAsaasCustomer(tenant, {
       email: ownerEmail,
       name: params.tenantName,
+      cpfCnpj: params.cpfCnpj,
     });
 
     const trialEndsAt = parseUtcInstant(tenant.trial_ends_at);
@@ -1110,17 +1134,70 @@ export class BillingService {
     }
   }
 
-  private async ensureAsaasCustomer(
+  private async resumePendingSubscription(
     tenant: Tenant,
-    params: { email: string; name: string },
-  ): Promise<string> {
-    if (tenant.asaas_customer_id?.trim()) {
-      return tenant.asaas_customer_id;
+    planTier: PlanTier,
+  ): Promise<CheckoutSessionResponse> {
+    const subscriptionId = tenant.asaas_subscription_id?.trim();
+
+    if (!subscriptionId) {
+      throw new BadRequestException(
+        'Não encontramos a assinatura pendente deste estabelecimento.',
+      );
     }
 
+    if (normalizePlanTier(tenant.plan_tier) !== planTier) {
+      const value = resolvePlanValueBrl(this.configService, planTier);
+
+      await this.asaasClient.updateSubscription(subscriptionId, {
+        value,
+        description: `Horário Certo ${planTier}`,
+        externalReference: buildPlanExternalReference(tenant.id, planTier),
+        updatePendingPayments: true,
+      });
+    }
+
+    const pendingPayment = await this.findLatestSubscriptionPayment(subscriptionId);
+    const invoiceUrl =
+      pendingPayment?.invoiceUrl?.trim() || tenant.asaas_open_invoice_url?.trim();
+
+    if (!invoiceUrl) {
+      throw new BadRequestException(
+        'Não encontramos a fatura da assinatura já criada. Atualize o status e tente de novo.',
+      );
+    }
+
+    await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      planTier,
+      asaasPendingPaymentId: pendingPayment?.id ?? tenant.asaas_pending_payment_id,
+      asaasOpenInvoiceUrl: invoiceUrl,
+    });
+
+    return { url: invoiceUrl };
+  }
+
+  private async ensureAsaasCustomer(
+    tenant: Tenant,
+    params: { email: string; name: string; cpfCnpj?: string | null },
+  ): Promise<string> {
+    const existingId = tenant.asaas_customer_id?.trim();
+
+    if (existingId) {
+      if (params.cpfCnpj?.trim()) {
+        await this.asaasClient.updateCustomer(existingId, {
+          cpfCnpj: normalizeAsaasCpfCnpj(params.cpfCnpj),
+        });
+      }
+
+      return existingId;
+    }
+
+    const cpfCnpj = normalizeAsaasCpfCnpj(params.cpfCnpj);
     const customer = await this.asaasClient.createCustomer({
       email: params.email,
       name: params.name,
+      cpfCnpj,
       externalReference: tenant.id,
     });
 

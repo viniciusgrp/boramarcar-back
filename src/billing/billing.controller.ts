@@ -72,6 +72,7 @@ export class BillingController {
       tenantName: tenant.name,
       ownerEmail: user.email,
       planTier: normalizePlanTier(dto.planTier),
+      cpfCnpj: dto.cpfCnpj,
     });
   }
 
