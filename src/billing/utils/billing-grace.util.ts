@@ -106,6 +106,24 @@ export function addCalendarMonths(
   return date;
 }
 
+export function laterIsoInstant(
+  current: string | null | undefined,
+  next: string | null | undefined,
+): string | null {
+  const currentValue = current?.trim() || null;
+  const nextValue = next?.trim() || null;
+
+  if (!nextValue) {
+    return currentValue;
+  }
+
+  if (!currentValue || nextValue > currentValue) {
+    return nextValue;
+  }
+
+  return currentValue;
+}
+
 export function periodEndFromPaidChargeDate(
   value: string | null | undefined,
 ): string | null {

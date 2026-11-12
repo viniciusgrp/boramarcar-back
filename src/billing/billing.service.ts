@@ -46,6 +46,7 @@ import { isProductionAppEnv } from '../common/app-env.util';
 import { resolveTenantDepositApplicationFeePercent } from './utils/deposit-application-fee.util';
 import {
   isPaidSubscriptionGraceExpired,
+  laterIsoInstant,
   periodEndFromPaidChargeDate,
   toAsaasDate,
 } from './utils/billing-grace.util';
@@ -309,7 +310,10 @@ export class BillingService {
 
     const planRef = parsePlanExternalReference(payment.externalReference);
     const planTier = planRef?.planTier ?? tenant.plan_tier;
-    const subscriptionExpiresAt = this.periodEndFromPaidCharge(payment);
+    const subscriptionExpiresAt = laterIsoInstant(
+      tenant.subscription_expires_at,
+      this.periodEndFromPaidCharge(payment),
+    );
     const trialTransition = resolveSubscriptionTrialTransition(tenant, 'ACTIVE');
 
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
@@ -995,9 +999,11 @@ export class BillingService {
         asaasPendingPaymentId: null,
         asaasOpenInvoiceUrl: null,
         subscriptionStatus: 'ACTIVE',
-        subscriptionExpiresAt:
+        subscriptionExpiresAt: laterIsoInstant(
+          tenant.subscription_expires_at,
           (payment ? this.periodEndFromPaidCharge(payment) : null) ??
-          this.nextDueDateToIso(subscription.nextDueDate),
+            this.nextDueDateToIso(subscription.nextDueDate),
+        ),
         planTier,
         ...trialTransition,
       },

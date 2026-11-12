@@ -269,6 +269,40 @@ describe('BillingService SaaS billing', () => {
     );
   });
 
+  it('does not move the expiry backward when an older charge is paid late', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const { service } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          subscription_status: 'ACTIVE',
+          asaas_subscription_id: 'sub_1',
+          subscription_expires_at: '2026-12-01T00:00:00.000Z',
+        }),
+      ),
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_late_old',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_old',
+        customer: 'cus_1',
+        subscription: 'sub_1',
+        value: 34.9,
+        dueDate: '2026-10-01',
+        externalReference: 'plan:tenant-1:SOLO',
+      },
+    });
+
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionExpiresAt: '2026-12-01T00:00:00.000Z',
+      }),
+    );
+  });
+
   it('reverses affiliate commission on PAYMENT_REFUNDED', async () => {
     const { service, affiliatesService } = buildService();
 
