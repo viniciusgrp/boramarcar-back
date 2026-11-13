@@ -80,12 +80,18 @@ export class CustomersService {
       );
     }
 
+    if (tenant.require_customer_email_confirmation) {
+      throw new BadRequestException(
+        'Este estabelecimento pede a confirmação do e-mail. Conclua o cadastro pelo fluxo de confirmação.',
+      );
+    }
+
     const { data: authData, error: authError } = await this.supabaseService
       .getClient()
       .auth.admin.createUser({
         email: normalizedEmail,
         password,
-        email_confirm: false,
+        email_confirm: true,
       });
 
     if (authError || !authData.user) {
