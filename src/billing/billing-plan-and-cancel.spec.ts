@@ -438,7 +438,14 @@ describe('BillingService plan changes and period-end cancel', () => {
       }),
     );
     expect(scheduled.applied).toBe(false);
+    expect(scheduled.direction).toBe('downgrade');
     expect(scheduled.chargeAmountBrl).toBe(0);
+    expect(scheduled.effectiveAt).toBe('2026-12-27T03:00:00.000Z');
+    expect(scheduled.tenant.plan_tier).toBe('PRO');
+    expect(scheduled.tenant.pending_plan_tier).toBe('SOLO');
+    expect(scheduled.tenant.pending_plan_effective_at).toBe(
+      '2026-12-27T03:00:00.000Z',
+    );
 
     updateSubscriptionByTenantId.mockClear();
     const downgraded = buildTenant({
@@ -472,6 +479,33 @@ describe('BillingService plan changes and period-end cancel', () => {
         subscriptionStatus: 'ACTIVE',
       }),
     );
+  });
+
+  it('exposes the pending Solo plan and the date it takes effect', async () => {
+    const { service } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          plan_tier: 'PRO',
+          pending_plan_tier: 'SOLO',
+          pending_plan_payment_id: null,
+          pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+        }),
+      ),
+    });
+
+    const status = await service.getBillingStatus('tenant-1');
+
+    expect(status.planTier).toBe('PRO');
+    expect(status.pendingPlanTier).toBe('SOLO');
+    expect(status.pendingPlanPaymentId).toBeNull();
+    expect(status.pendingPlanEffectiveAt).toBe('2026-12-27T03:00:00.000Z');
+    expect(status.retentionOffer).toEqual({
+      targetPlanTier: 'SOLO',
+      monthlyValueBrl: 34.9,
+      available: false,
+      alreadyScheduled: true,
+      effectiveAt: '2026-12-27T03:00:00.000Z',
+    });
   });
 
   it('offers Solo only while a higher paid plan can still be downgraded', async () => {
