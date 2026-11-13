@@ -30,7 +30,10 @@ import {
 } from './utils/slug.util';
 import { normalizeFirstVisitAt } from './utils/normalize-first-visit-at.util';
 import { normalizePlanTier } from './utils/plan-tier.util';
-import { buildTrialPeriod, TRIAL_DEFAULT_PLAN_TIER } from './utils/trial-period.util';
+import {
+  buildTrialPeriod,
+  TRIAL_DEFAULT_PLAN_TIER,
+} from './utils/trial-period.util';
 import { normalizeCalendarCardPreferences } from './utils/calendar-card-preferences.util';
 import {
   canCustomizeAdminThemeColors,
@@ -222,7 +225,9 @@ function mapTenantRow(row: Tenant): Tenant {
       row.admin_secondary_color_dark,
       DEFAULT_ADMIN_SECONDARY_COLOR_DARK,
     ),
-    background_pattern_id: normalizeBackgroundPatternId(row.background_pattern_id),
+    background_pattern_id: normalizeBackgroundPatternId(
+      row.background_pattern_id,
+    ),
     background_pattern_color: normalizeBackgroundPatternColor(
       row.background_pattern_color,
     ),
@@ -402,10 +407,7 @@ export class TenantsService {
     return data ? mapTenantRow(data as Tenant) : null;
   }
 
-  async updateForOwner(
-    ownerId: string,
-    dto: UpdateTenantDto,
-  ): Promise<Tenant> {
+  async updateForOwner(ownerId: string, dto: UpdateTenantDto): Promise<Tenant> {
     const accessContext = await this.findAccessContextByUserId(ownerId);
 
     if (!accessContext) {
@@ -458,7 +460,8 @@ export class TenantsService {
           dto.backgroundPatternColor ?? tenant.background_pattern_color,
         ),
         background_pattern_icon_count: normalizeBackgroundPatternIconCount(
-          dto.backgroundPatternIconCount ?? tenant.background_pattern_icon_count,
+          dto.backgroundPatternIconCount ??
+            tenant.background_pattern_icon_count,
         ),
         contact_phone: this.normalizeContactPhone(dto.contactPhone),
         logo_url: this.normalizeOptionalText(dto.logoUrl),
@@ -475,7 +478,9 @@ export class TenantsService {
         address_street: this.normalizeOptionalText(dto.addressStreet),
         address_number: this.normalizeOptionalText(dto.addressNumber),
         address_complement: this.normalizeOptionalText(dto.addressComplement),
-        address_neighborhood: this.normalizeOptionalText(dto.addressNeighborhood),
+        address_neighborhood: this.normalizeOptionalText(
+          dto.addressNeighborhood,
+        ),
         address_city: this.normalizeOptionalText(dto.addressCity),
         address_state: this.normalizeState(dto.addressState),
         require_customer_email_confirmation:
@@ -734,9 +739,7 @@ export class TenantsService {
     }
 
     if (!data) {
-      throw new NotFoundException(
-        `Tenant with id "${tenantId}" was not found`,
-      );
+      throw new NotFoundException(`Tenant with id "${tenantId}" was not found`);
     }
 
     return mapTenantRow(data as Tenant);
@@ -849,11 +852,12 @@ export class TenantsService {
 
     const ownerId = authData.user.id;
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
-    const attribution = await this.affiliatesService.resolveAttributionForSignup({
-      affiliateCode: dto.affiliate_code,
-      signupEmail: email,
-      signupUserId: ownerId,
-    });
+    const attribution =
+      await this.affiliatesService.resolveAttributionForSignup({
+        affiliateCode: dto.affiliate_code,
+        signupEmail: email,
+        signupUserId: ownerId,
+      });
 
     const trackingData = this.normalizeTrackingData(dto);
 
@@ -908,10 +912,6 @@ export class TenantsService {
       ownerEmail: email,
     }).catch(() => undefined);
 
-    void this.sendTrialWelcomeEmail(tenantData.id as string, email).catch(
-      () => undefined,
-    );
-
     void this.sendMetaCompleteRegistrationEvent({
       email,
       userId: ownerId,
@@ -924,6 +924,19 @@ export class TenantsService {
       this.logger.log(
         'Skipping establishment email verification outside production.',
       );
+      try {
+        await this.sendTrialWelcomeEmail(
+          tenantData.id as string,
+          email,
+          ownerId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to queue trial welcome after register: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
 
       return {
         tenant: mapTenantRow(tenantData as Tenant),
@@ -981,10 +994,11 @@ export class TenantsService {
     }
 
     const { trialStartsAt, trialEndsAt } = buildTrialPeriod(new Date());
-    const attribution = await this.affiliatesService.resolveAttributionForSignup({
-      affiliateCode: dto.affiliate_code,
-      signupUserId: userId,
-    });
+    const attribution =
+      await this.affiliatesService.resolveAttributionForSignup({
+        affiliateCode: dto.affiliate_code,
+        signupUserId: userId,
+      });
 
     const trackingData = this.normalizeTrackingData(dto);
 
@@ -1031,11 +1045,9 @@ export class TenantsService {
       ownerName,
     );
 
-    await this.supabaseService
-      .getClient()
-      .auth.admin.updateUserById(userId, {
-        user_metadata: { full_name: ownerName },
-      });
+    await this.supabaseService.getClient().auth.admin.updateUserById(userId, {
+      user_metadata: { full_name: ownerName },
+    });
 
     void this.notifyNewTenantSignup({
       name: tenantData.name as string,
@@ -1043,11 +1055,7 @@ export class TenantsService {
       ownerUserId: userId,
     }).catch(() => undefined);
 
-    void this.sendTrialWelcomeEmail(
-      tenantData.id as string,
-      undefined,
-      userId,
-    ).catch(() => undefined);
+    this.queueTrialWelcomeEmail(tenantData.id as string, undefined, userId);
 
     const { data: authUser } = await this.supabaseService
       .getClient()
@@ -1233,7 +1241,8 @@ export class TenantsService {
       return { email: newEmail, otpType };
     }
 
-    const pendingUser = await this.getPendingEstablishmentAuthUser(currentEmail);
+    const pendingUser =
+      await this.getPendingEstablishmentAuthUser(currentEmail);
     const ownerName =
       typeof pendingUser.user_metadata?.full_name === 'string'
         ? pendingUser.user_metadata.full_name
@@ -1305,19 +1314,35 @@ export class TenantsService {
       expectedHash === hashEstablishmentOtp(user.id, code);
 
     if (expired || !matches) {
-      await this.supabaseService.getClient().auth.admin.updateUserById(user.id, {
-        user_metadata: {
-          ...metadata,
-          [ESTABLISHMENT_OTP_ATTEMPTS_KEY]: attempts + 1,
-        },
-      });
+      await this.supabaseService
+        .getClient()
+        .auth.admin.updateUserById(user.id, {
+          user_metadata: {
+            ...metadata,
+            [ESTABLISHMENT_OTP_ATTEMPTS_KEY]: attempts + 1,
+          },
+        });
       throw new BadRequestException(ESTABLISHMENT_OTP_INVALID_MESSAGE);
     }
 
-    await this.supabaseService.getClient().auth.admin.updateUserById(user.id, {
-      email_confirm: true,
-      user_metadata: this.withoutOtpMetadata(metadata),
-    });
+    const { error: confirmError } = await this.supabaseService
+      .getClient()
+      .auth.admin.updateUserById(user.id, {
+        email_confirm: true,
+        user_metadata: this.withoutOtpMetadata(metadata),
+      });
+
+    if (!confirmError) {
+      try {
+        await this.sendTrialWelcomeForOwnerUser(user.id, email);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to queue trial welcome after code verification: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     const frontendUrl = this.resolveFrontendUrl();
     const { data, error } = await this.supabaseService
@@ -1388,7 +1413,9 @@ export class TenantsService {
     }
 
     if (user.email_confirmed_at) {
-      throw new ConflictException(ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE);
+      throw new ConflictException(
+        ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
+      );
     }
 
     if (!requiresEstablishmentEmailVerification(user)) {
@@ -1429,7 +1456,9 @@ export class TenantsService {
     }
 
     if (user.email_confirmed_at) {
-      throw new ConflictException(ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE);
+      throw new ConflictException(
+        ESTABLISHMENT_EMAIL_ALREADY_CONFIRMED_MESSAGE,
+      );
     }
 
     if (
@@ -1491,6 +1520,56 @@ export class TenantsService {
     }
 
     return otpType;
+  }
+
+  scheduleTrialWelcomeForConfirmedOwner(params: {
+    tenantId: string;
+    role: string;
+    ownerUserId: string;
+    ownerEmail?: string | null;
+    emailConfirmedAt?: string | null;
+  }): void {
+    if (params.role !== 'OWNER' || !params.emailConfirmedAt) {
+      return;
+    }
+
+    this.queueTrialWelcomeEmail(
+      params.tenantId,
+      params.ownerEmail ?? undefined,
+      params.ownerUserId,
+    );
+  }
+
+  private queueTrialWelcomeEmail(
+    tenantId: string,
+    ownerEmail?: string,
+    ownerUserId?: string,
+  ): void {
+    void this.sendTrialWelcomeEmail(tenantId, ownerEmail, ownerUserId).catch(
+      (error) => {
+        this.logger.warn(
+          `Failed to queue trial welcome for tenant ${tenantId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      },
+    );
+  }
+
+  private async sendTrialWelcomeForOwnerUser(
+    ownerUserId: string,
+    email: string,
+  ): Promise<void> {
+    const tenant = await this.findByOwnerId(ownerUserId);
+
+    if (!tenant) {
+      this.logger.warn(
+        `Skipped trial welcome because no tenant was found for owner ${ownerUserId}.`,
+      );
+      return;
+    }
+
+    await this.sendTrialWelcomeEmail(tenant.id, email, ownerUserId);
   }
 
   private async sendTrialWelcomeEmail(

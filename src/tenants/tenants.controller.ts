@@ -147,6 +147,14 @@ export class TenantsController {
       );
     }
 
+    this.tenantsService.scheduleTrialWelcomeForConfirmedOwner({
+      tenantId: response.tenant.id,
+      role: response.membership.role,
+      ownerUserId: user.id,
+      ownerEmail: user.email,
+      emailConfirmedAt: user.email_confirmed_at,
+    });
+
     return response;
   }
 
@@ -234,9 +242,7 @@ export class TenantsController {
     const tenant = await this.tenantsService.findBySlug(slug);
 
     if (!tenant) {
-      throw new NotFoundException(
-        `Tenant with slug "${slug}" was not found`,
-      );
+      throw new NotFoundException(`Tenant with slug "${slug}" was not found`);
     }
 
     return toPublicTenant(tenant);
