@@ -383,6 +383,9 @@ export class PlatformService {
       subscription_status: 'INACTIVE',
       trial_ends_at: untilValue,
       comp_until: untilValue,
+      asaas_subscription_id: null,
+      asaas_pending_payment_id: null,
+      asaas_open_invoice_url: null,
     });
 
     await this.cancelAsaasSubscription(tenant.asaas_subscription_id);

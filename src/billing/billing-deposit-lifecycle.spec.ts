@@ -161,6 +161,31 @@ describe('BillingService deposit lifecycle', () => {
     expect(markDepositRefunded).toHaveBeenCalledWith('appt-1');
   });
 
+  it('releases a pending deposit hold when the charge is deleted', async () => {
+    const releasePendingDepositHold = jest.fn();
+    const updateSubscriptionByTenantId = jest.fn();
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { updateSubscriptionByTenantId } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { releasePendingDepositHold } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_dep_del',
+      event: 'PAYMENT_DELETED',
+      payment: {
+        id: 'pay_dep',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
+    expect(releasePendingDepositHold).toHaveBeenCalledWith('appt-1');
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+  });
+
   it('confirms a deposit when the checkout is paid', async () => {
     const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
       outcome: 'confirmed',

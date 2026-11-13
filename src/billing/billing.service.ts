@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+import { APP_TIME_ZONE } from '../common/app-time-zone';
 import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { normalizePlanTier } from '../tenants/utils/plan-tier.util';
@@ -46,11 +47,18 @@ import { isProductionAppEnv } from '../common/app-env.util';
 import { buildDepositCheckoutItemCopy } from './utils/asaas-checkout-item.util';
 import { resolveTenantDepositApplicationFeePercent } from './utils/deposit-application-fee.util';
 import {
+  asaasDateToIso,
+  isIsoInstantAfter,
   isPaidSubscriptionGraceExpired,
   laterIsoInstant,
   periodEndFromPaidChargeDate,
   toAsaasDate,
 } from './utils/billing-grace.util';
+import {
+  isAsaasSubscriptionCurrentlyActive,
+  isCourtesyPlan,
+  paymentBelongsToCurrentAsaasSubscription,
+} from './utils/plan-payment-activation.util';
 import {
   resolvePlanTierFromValue,
   resolvePlanValueBrl,
@@ -280,6 +288,11 @@ export class BillingService {
 
     if (type === 'PAYMENT_REFUNDED') {
       await this.affiliatesService.reverseInvoice(payment.id, 'payment_refunded');
+      return;
+    }
+
+    if (type === 'PAYMENT_DELETED') {
+      await this.handlePlanPaymentDeleted(payment);
     }
   }
 
@@ -311,6 +324,16 @@ export class BillingService {
       this.logger.warn(
         `Ignoring plan payment ${payment.id} for subscription ${paymentSubscriptionId}; tenant ${tenant.id} is on ${currentSubscriptionId}`,
       );
+      return;
+    }
+
+    if (
+      await this.shouldIgnoreComplimentaryReactivation(
+        tenant,
+        paymentSubscriptionId,
+        payment.id,
+      )
+    ) {
       return;
     }
 
@@ -382,6 +405,13 @@ export class BillingService {
         supportAiAsaasSubscriptionId: tenant.support_ai_asaas_subscription_id,
         supportAiStatus: 'past_due',
       });
+      return;
+    }
+
+    if (type === 'PAYMENT_DELETED') {
+      this.logger.log(
+        `Support AI payment deleted: tenant=${tenant.id} payment=${payment.id}. Entitlement was not changed.`,
+      );
     }
   }
 
@@ -661,12 +691,102 @@ export class BillingService {
   }
 
   private nextDueDateToIso(value: string | null | undefined): string | null {
-    if (!value?.trim()) {
-      return null;
+    return asaasDateToIso(value);
+  }
+
+  /**
+   * Courtesy plans live in comp_until and are stored as INACTIVE by an admin.
+   * A late charge must not turn that tenant ACTIVE unless it belongs to the
+   * Asaas subscription currently on the tenant and that subscription is active.
+   * Trial signups are INACTIVE with no comp_until and still activate.
+   */
+  private async shouldIgnoreComplimentaryReactivation(
+    tenant: Tenant,
+    paymentSubscriptionId: string | null,
+    paymentId: string,
+  ): Promise<boolean> {
+    if (tenant.subscription_status !== 'INACTIVE' || !isCourtesyPlan(tenant)) {
+      return false;
     }
 
-    const parsed = parseUtcInstant(`${value.trim()}T00:00:00.000Z`);
-    return parsed?.toISOString() ?? null;
+    const belongs = paymentBelongsToCurrentAsaasSubscription(
+      tenant,
+      paymentSubscriptionId,
+    );
+
+    if (!belongs || !paymentSubscriptionId) {
+      this.logger.warn(
+        `Ignoring plan payment ${paymentId} for complimentary tenant ${tenant.id}. The charge is not the current Asaas subscription, so the inactive plan stays as set.`,
+      );
+      return true;
+    }
+
+    const active = await this.isAsaasSubscriptionActive(paymentSubscriptionId);
+
+    if (!active) {
+      this.logger.warn(
+        `Ignoring plan payment ${paymentId} for complimentary tenant ${tenant.id}. Asaas subscription ${paymentSubscriptionId} is not active, so the inactive plan stays as set.`,
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  private async isAsaasSubscriptionActive(
+    subscriptionId: string,
+  ): Promise<boolean> {
+    if (!this.isAsaasOutboundEnabled()) {
+      this.logger.warn(
+        `Cannot confirm Asaas subscription ${subscriptionId} is active because outbound Asaas is disabled.`,
+      );
+      return false;
+    }
+
+    try {
+      const subscription =
+        await this.asaasClient.getSubscription(subscriptionId);
+      return isAsaasSubscriptionCurrentlyActive(subscription);
+    } catch (error) {
+      if (
+        error instanceof AsaasHttpError &&
+        (error.statusCode === 404 || error.statusCode === 400)
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private async handlePlanPaymentDeleted(payment: AsaasPayment): Promise<void> {
+    const tenant = await this.resolveTenantFromPayment(payment);
+
+    this.logger.log(
+      `Plan payment deleted: payment=${payment.id} tenant=${tenant?.id ?? 'none'}. Subscription status was not changed.`,
+    );
+
+    await this.affiliatesService.reverseInvoice(payment.id, 'payment_deleted');
+
+    if (!tenant) {
+      return;
+    }
+
+    const pendingId = tenant.asaas_pending_payment_id?.trim() || '';
+    const openUrl = tenant.asaas_open_invoice_url?.trim() || '';
+    const paymentUrl = payment.invoiceUrl?.trim() || '';
+    const clearsPending = Boolean(pendingId && pendingId === payment.id);
+    const clearsUrl = Boolean(openUrl && paymentUrl && openUrl === paymentUrl);
+
+    if (!clearsPending && !clearsUrl) {
+      return;
+    }
+
+    await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      ...(clearsPending ? { asaasPendingPaymentId: null } : {}),
+      asaasOpenInvoiceUrl: null,
+    });
   }
 
   async createCheckoutSession(
@@ -1300,7 +1420,7 @@ export class BillingService {
     return { url: 'https://www.asaas.com/' };
   }
 
-  @Cron('15 8 * * *')
+  @Cron('15 8 * * *', { timeZone: APP_TIME_ZONE })
   async markPastDueAfterGrace(): Promise<void> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -1480,7 +1600,7 @@ export class BillingService {
   ): Promise<void> {
     if (
       !subscriptionExpiresAt ||
-      subscriptionExpiresAt <= (tenant.subscription_expires_at ?? '')
+      !isIsoInstantAfter(subscriptionExpiresAt, tenant.subscription_expires_at)
     ) {
       return;
     }

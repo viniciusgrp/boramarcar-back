@@ -2,8 +2,13 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  resolveAsaasApiBaseUrl,
+  type AsaasApiUrlWarnings,
+} from './asaas-api-url.util';
 import { AsaasHttpError, extractAsaasErrorMessage } from './asaas-http.error';
 import type {
   AsaasAccount,
@@ -17,10 +22,18 @@ import type {
 } from './asaas.types';
 
 @Injectable()
-export class AsaasClient {
+export class AsaasClient implements OnModuleInit {
   private readonly logger = new Logger(AsaasClient.name);
+  private readonly apiUrlWarnings: AsaasApiUrlWarnings = {
+    missingUrl: false,
+    sandboxInProduction: false,
+  };
 
   constructor(private readonly configService: ConfigService) {}
+
+  onModuleInit(): void {
+    this.getBaseUrl();
+  }
 
   async createCustomer(payload: {
     name: string;
@@ -159,10 +172,13 @@ export class AsaasClient {
   }
 
   private getBaseUrl(): string {
-    const configured = this.configService.get<string>('ASAAS_API_URL')?.trim();
-    const base = configured || 'https://api-sandbox.asaas.com/v3';
-
-    return base.replace(/\/$/, '');
+    return resolveAsaasApiBaseUrl({
+      configured: this.configService.get<string>('ASAAS_API_URL'),
+      nodeEnv: process.env.NODE_ENV,
+      appEnv: this.configService.get<string>('APP_ENV'),
+      warnings: this.apiUrlWarnings,
+      warn: (message) => this.logger.warn(message),
+    });
   }
 
   private getApiKey(): string {
