@@ -43,6 +43,7 @@ import {
   parseUtcInstant,
 } from '../tenants/utils/tenant-access.util';
 import { isProductionAppEnv } from '../common/app-env.util';
+import { buildDepositCheckoutItemCopy } from './utils/asaas-checkout-item.util';
 import { resolveTenantDepositApplicationFeePercent } from './utils/deposit-application-fee.util';
 import {
   isPaidSubscriptionGraceExpired,
@@ -1100,6 +1101,7 @@ export class BillingService {
       0,
       Math.round((100 - applicationFeePercent) * 100) / 100,
     );
+    const checkoutItem = buildDepositCheckoutItemCopy(params.tenantName);
 
     try {
       const checkout = await this.asaasClient.createCheckout({
@@ -1109,8 +1111,8 @@ export class BillingService {
         callback: { successUrl, cancelUrl },
         items: [
           {
-            name: `Sinal: ${params.tenantName}`,
-            description: 'Pagamento antecipado para confirmar agendamento',
+            name: checkoutItem.name,
+            description: checkoutItem.description,
             quantity: 1,
             value: params.depositAmountBrl,
             imageBase64: CHECKOUT_ITEM_IMAGE_BASE64,
