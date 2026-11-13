@@ -73,6 +73,7 @@ function buildService() {
   };
   const billingService = {
     createDepositCheckoutSession: jest.fn(),
+    cancelAbandonedDepositCharges: jest.fn().mockResolvedValue(undefined),
   };
   const loyaltyService = {
     findOrCreateCustomerForAppointment: jest.fn(),
@@ -1078,10 +1079,19 @@ describe('AppointmentsService', () => {
 
   describe('crons and deposit delegates', () => {
     it('delegates abandoned hold expiration', async () => {
-      const { service, depositPaymentService } = buildService();
-      depositPaymentService.expireAbandonedDepositHolds.mockResolvedValue(3);
+      const { service, depositPaymentService, billingService } = buildService();
+      depositPaymentService.expireAbandonedDepositHolds.mockResolvedValue([
+        'appt-1',
+        'appt-2',
+        'appt-3',
+      ]);
 
       await expect(service.expireAbandonedDepositHolds()).resolves.toBe(3);
+      expect(billingService.cancelAbandonedDepositCharges).toHaveBeenCalledWith([
+        { appointmentId: 'appt-1' },
+        { appointmentId: 'appt-2' },
+        { appointmentId: 'appt-3' },
+      ]);
     });
 
     it('sends reminders only for confirmed appointments with email', async () => {

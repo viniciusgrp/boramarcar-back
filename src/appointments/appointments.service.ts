@@ -31,7 +31,16 @@ import { ConfigService } from '@nestjs/config';
 import { DEFAULT_CALENDAR_CARD_PREFERENCES } from '../tenants/entities/calendar-card-preferences.type';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { buildAppointmentCommissionServiceLines } from './utils/appointment-commission.util';
-import { buildAppointmentLoyaltyServiceLines } from './utils/appointment-loyalty.util';
+import {
+  applyCouponDiscountToLoyaltyPrices,
+  buildAppointmentLoyaltyServiceLines,
+} from './utils/appointment-loyalty.util';
+import { assertAppointmentStartHasPassed } from './utils/appointment-completion.util';
+import {
+  resolveAppointmentPaymentView,
+  resolveInitialPaymentStatus,
+} from './utils/appointment-payment.util';
+import type { AppointmentPaymentMethod } from './entities/payment-status.type';
 import { mapAppointmentCouponFields } from './utils/appointment-coupon.util';
 import { BusinessHoursService } from '../business-hours/business-hours.service';
 import { ProfessionalHoursService } from '../professional-hours/professional-hours.service';
@@ -40,6 +49,7 @@ import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/p
 import { ProfessionalsService } from '../professionals/professionals.service';
 import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
 import {
+  buildWallClockDateTime,
   formatWallClockDate,
   getWallClockNow,
   isSameWallClockDay,
@@ -157,6 +167,7 @@ const ADMIN_APPOINTMENT_SELECT = `
   coupon_id,
   coupon_discount_amount,
   deposit_paid,
+  deposit_amount,
   payment_status,
   cancellation_requested_at,
   professionals ( name ),
@@ -606,9 +617,9 @@ export class AppointmentsService {
       isPaidWithPoints,
       bookingAcceptanceType: effectiveBookingAcceptance,
     });
-    const paymentStatus: PaymentStatus = requiresDepositPayment
-      ? 'PENDING'
-      : 'PAID';
+    const paymentStatus: PaymentStatus = resolveInitialPaymentStatus(
+      requiresDepositPayment,
+    );
 
     const loyaltyFeedback =
       await this.loyaltyService.buildBookingLoyaltyFeedback(
@@ -641,6 +652,9 @@ export class AppointmentsService {
         end_time: wallClockToStorageIso(endTime),
         status: appointmentStatus,
         deposit_paid: isPaidWithPoints,
+        deposit_amount: requiresDepositPayment
+          ? booking.totalDepositAmount
+          : null,
         payment_status: paymentStatus,
         booking_source: 'PUBLIC',
         total_duration_minutes: booking.totalDurationMinutes,
@@ -736,7 +750,7 @@ export class AppointmentsService {
     let checkoutUrl: string;
 
     try {
-      checkoutUrl = await this.billingService.createDepositCheckoutSession({
+      const checkout = await this.billingService.createDepositCheckoutSession({
         appointmentId: appointment.id,
         tenantId: tenant.id,
         tenantName: tenant.name,
@@ -747,6 +761,22 @@ export class AppointmentsService {
         customerPhone: customer.phone,
         customerEmail: customer.email,
       });
+      checkoutUrl = checkout.url;
+
+      if (checkout.checkoutId) {
+        const { error: checkoutIdError } = await this.supabaseService
+          .getClient()
+          .from('appointments')
+          .update({ asaas_checkout_id: checkout.checkoutId })
+          .eq('id', appointment.id)
+          .eq('tenant_id', tenant.id);
+
+        if (checkoutIdError) {
+          this.logger.warn(
+            `Could not store the Asaas checkout id for appointment ${appointment.id}: ${checkoutIdError.message}`,
+          );
+        }
+      }
     } catch (checkoutError: unknown) {
       await this.depositPaymentService.releasePendingDepositHold(appointment.id);
       this.logger.error(
@@ -773,9 +803,14 @@ export class AppointmentsService {
     };
   }
 
-  async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
-    const result =
-      await this.depositPaymentService.confirmDepositPayment(appointmentId);
+  async confirmDepositPayment(
+    appointmentId: string,
+    asaasPaymentId?: string | null,
+  ): Promise<Appointment | null> {
+    const result = await this.depositPaymentService.confirmDepositPayment(
+      appointmentId,
+      asaasPaymentId,
+    );
 
     if (result.outcome !== 'confirmed' || !result.appointment) {
       return result.appointment;
@@ -802,9 +837,14 @@ export class AppointmentsService {
     return appointment;
   }
 
-  async confirmDepositPaymentDetailed(appointmentId: string) {
-    const result =
-      await this.depositPaymentService.confirmDepositPayment(appointmentId);
+  async confirmDepositPaymentDetailed(
+    appointmentId: string,
+    asaasPaymentId?: string | null,
+  ) {
+    const result = await this.depositPaymentService.confirmDepositPayment(
+      appointmentId,
+      asaasPaymentId,
+    );
 
     if (result.outcome === 'confirmed' && result.appointment) {
       const appointment = this.mapAppointmentRow(result.appointment);
@@ -832,17 +872,35 @@ export class AppointmentsService {
   }
 
   async releasePendingDepositHold(appointmentId: string): Promise<boolean> {
-    return this.depositPaymentService.releasePendingDepositHold(appointmentId);
+    const released =
+      await this.depositPaymentService.releasePendingDepositHold(appointmentId);
+
+    if (released) {
+      await this.billingService.cancelAbandonedDepositCharges([
+        { appointmentId },
+      ]);
+    }
+
+    return released;
   }
 
   async releasePendingDepositHoldWithAccessToken(
     appointmentId: string,
     accessToken: string,
   ): Promise<boolean> {
-    return this.depositPaymentService.releasePendingDepositHoldWithAccessToken(
-      appointmentId,
-      accessToken,
-    );
+    const released =
+      await this.depositPaymentService.releasePendingDepositHoldWithAccessToken(
+        appointmentId,
+        accessToken,
+      );
+
+    if (released) {
+      await this.billingService.cancelAbandonedDepositCharges([
+        { appointmentId },
+      ]);
+    }
+
+    return released;
   }
 
   async markDepositRefunded(appointmentId: string): Promise<Appointment | null> {
@@ -962,7 +1020,8 @@ export class AppointmentsService {
         end_time: wallClockToStorageIso(endTime),
         status: 'CONFIRMED',
         deposit_paid: false,
-        payment_status: 'PAID',
+        deposit_amount: null,
+        payment_status: 'NOT_REQUIRED',
         booking_source: 'INTERNAL',
         total_duration_minutes: durationMinutes,
         total_price: booking.totalPrice,
@@ -1024,7 +1083,7 @@ export class AppointmentsService {
 
     if (!canEditAppointmentDuration(existing.status)) {
       throw new BadRequestException(
-        'Não é possível alterar a duração de um agendamento concluído, cancelado ou com falta.',
+        'Não é possível alterar a duração de um agendamento concluído, cancelado ou em que o cliente não compareceu.',
       );
     }
 
@@ -1712,6 +1771,11 @@ export class AppointmentsService {
     status: UpdateAppointmentStatusDto['status'],
     scopedProfessionalId?: string,
     loyaltyRewardId?: string | null,
+    payment?: {
+      paymentMethod?: AppointmentPaymentMethod | null;
+      paymentAmount?: number | null;
+      cashRegisterId?: string | null;
+    },
   ): Promise<AdminAppointment> {
     if (!APPOINTMENT_STATUSES.includes(status)) {
       throw new BadRequestException('Invalid appointment status');
@@ -1741,7 +1805,10 @@ export class AppointmentsService {
         guest_access_token,
         loyalty_reward_id,
         deposit_paid,
+        deposit_amount,
         payment_status,
+        coupon_discount_amount,
+        start_time,
         commission_amount,
         services!service_id ( custom_commission_rate, price, loyalty_points_earned ),
         appointment_services (
@@ -1855,7 +1922,9 @@ export class AppointmentsService {
       updatePayload.loyalty_reward_id = trimmedLoyaltyRewardId;
       updatePayload.total_price = 0;
       updatePayload.deposit_paid = true;
-      updatePayload.payment_status = 'PAID';
+      if (existing.payment_status !== 'PAID') {
+        updatePayload.payment_status = 'NOT_REQUIRED';
+      }
       appliedLoyaltyRewardId = trimmedLoyaltyRewardId;
     }
 
@@ -1910,6 +1979,72 @@ export class AppointmentsService {
       });
     }
 
+    if (isCompletingAppointment) {
+      const startTime =
+        typeof existing.start_time === 'string' ? existing.start_time : '';
+      assertAppointmentStartHasPassed(startTime);
+
+      const completionTenant = await this.tenantsService.findById(tenantId);
+
+      if (!completionTenant) {
+        throw new NotFoundException('Estabelecimento não encontrado.');
+      }
+
+      const chargedTotal = Number(
+        appliedLoyaltyRewardId
+          ? 0
+          : (updatePayload.total_price ?? existing.total_price ?? 0),
+      );
+      const paymentView = resolveAppointmentPaymentView({
+        status: existing.status,
+        totalPrice: chargedTotal,
+        depositAmount:
+          existing.deposit_amount === null ||
+          existing.deposit_amount === undefined
+            ? null
+            : Number(existing.deposit_amount),
+        depositPaid: Boolean(existing.deposit_paid),
+        paymentStatus:
+          typeof existing.payment_status === 'string'
+            ? existing.payment_status
+            : null,
+      });
+      const requestedAmount = payment?.paymentAmount;
+      const amountToRecord =
+        requestedAmount === null || requestedAmount === undefined
+          ? paymentView.balanceDue
+          : Math.round(Number(requestedAmount) * 100) / 100;
+
+      if (!Number.isFinite(amountToRecord) || amountToRecord < 0) {
+        throw new BadRequestException('Informe um valor recebido válido.');
+      }
+
+      if (amountToRecord > 0) {
+        if (!payment?.paymentMethod) {
+          throw new BadRequestException(
+            'Escolha a forma de pagamento para concluir o atendimento.',
+          );
+        }
+
+        const cashRegisterId =
+          await this.financeService.requireOpenCashRegisterId(
+            tenantId,
+            payment.cashRegisterId,
+          );
+
+        await this.financeService.recordCompletedAppointmentCashFlow({
+          tenantId,
+          appointmentId,
+          professionalId: existing.professional_id,
+          totalPrice: amountToRecord,
+          commissionAmount: Number(updatePayload.commission_amount ?? 0),
+          enablePayoutControl: completionTenant.enable_payout_control,
+          cashRegisterId,
+          paymentMethod: payment.paymentMethod,
+        });
+      }
+    }
+
     const { error: updateError } = await this.supabaseService
       .getClient()
       .from('appointments')
@@ -1958,19 +2093,6 @@ export class AppointmentsService {
         throw new NotFoundException('Estabelecimento não encontrado.');
       }
 
-      await this.financeService.recordCompletedAppointmentCashFlow({
-        tenantId,
-        appointmentId,
-        professionalId: existing.professional_id,
-        totalPrice: Number(
-          appliedLoyaltyRewardId
-            ? 0
-            : (updatePayload.total_price ?? existing.total_price ?? 0),
-        ),
-        commissionAmount: Number(updatePayload.commission_amount ?? 0),
-        enablePayoutControl: tenant.enable_payout_control,
-      });
-
       if (tenant.reviews_enabled) {
         let customerEmail: string | null = null;
 
@@ -1988,9 +2110,7 @@ export class AppointmentsService {
 
         const serviceName =
           this.extractReminderServiceName(
-            existing as unknown as Parameters<
-              typeof this.extractReminderServiceName
-            >[0],
+            existing as unknown as ReminderAppointmentRow,
           ) || 'seu atendimento';
 
         this.dispatchReviewInviteEmail({
@@ -2007,8 +2127,11 @@ export class AppointmentsService {
     }
 
     if (isCompletingAppointment && !appliedLoyaltyRewardId) {
-      const loyaltyServiceLines = buildAppointmentLoyaltyServiceLines(
-        existing as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
+      const loyaltyServiceLines = applyCouponDiscountToLoyaltyPrices(
+        buildAppointmentLoyaltyServiceLines(
+          existing as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
+        ),
+        Number(existing.coupon_discount_amount ?? 0),
       );
 
       await this.loyaltyService.awardPointsForCompletedAppointment({
@@ -2030,6 +2153,13 @@ export class AppointmentsService {
           },
         );
       }
+    }
+
+    if (isRevertingCompletion) {
+      await this.financeService.reverseCompletedAppointmentCashFlow({
+        tenantId,
+        appointmentId,
+      });
     }
 
     if (isRevertingCompletion && !existing.loyalty_reward_id) {
@@ -2659,7 +2789,7 @@ export class AppointmentsService {
 
     const isPaidWithPoints = Boolean(row.loyalty_reward_id);
     const depositAlreadyPaid =
-      row.payment_status === 'PAID' || Boolean(row.deposit_paid);
+      Boolean(row.deposit_paid) && row.payment_status === 'PAID';
 
     const wouldRequireDeposit =
       !isPaidWithPoints &&
@@ -3240,6 +3370,16 @@ export class AppointmentsService {
   ): AdminAppointment {
     const lineItems = this.extractAppointmentLineItems(row);
     const couponFields = mapAppointmentCouponFields(row);
+    const payment = resolveAppointmentPaymentView({
+      status: row.status,
+      totalPrice: lineItems.servicePrice,
+      depositAmount:
+        row.deposit_amount === null || row.deposit_amount === undefined
+          ? null
+          : Number(row.deposit_amount),
+      depositPaid: row.deposit_paid,
+      paymentStatus: row.payment_status,
+    });
 
     return {
       id: row.id,
@@ -3255,6 +3395,13 @@ export class AppointmentsService {
       serviceName: lineItems.serviceName,
       durationMinutes: lineItems.durationMinutes,
       servicePrice: lineItems.servicePrice,
+      totalPrice: payment.totalPrice,
+      depositAmount: payment.depositAmount,
+      depositPaid: payment.depositPaid,
+      depositPaidAmount: payment.depositPaidAmount,
+      balanceDue: payment.balanceDue,
+      paymentStatus: payment.paymentStatus,
+      paymentBadge: payment.paymentBadge,
       bookingSource: this.normalizeBookingSource(row.booking_source),
       paidWithPoints: Boolean(row.loyalty_reward_id),
       couponCode: couponFields.couponCode,
@@ -3547,7 +3694,16 @@ export class AppointmentsService {
   }
 
   async expireAbandonedDepositHolds(): Promise<number> {
-    return this.depositPaymentService.expireAbandonedDepositHolds();
+    const appointmentIds =
+      await this.depositPaymentService.expireAbandonedDepositHolds();
+
+    if (appointmentIds.length > 0) {
+      await this.billingService.cancelAbandonedDepositCharges(
+        appointmentIds.map((appointmentId) => ({ appointmentId })),
+      );
+    }
+
+    return appointmentIds.length;
   }
 
   private dispatchAppointmentEmails(params: {
@@ -4144,9 +4300,65 @@ export class AppointmentsService {
       );
     }
 
-    return availableProfessionalIds[
-      randomInt(availableProfessionalIds.length)
-    ] as string;
+    const chosen = await this.pickLeastBusyProfessional(
+      tenantId,
+      availableProfessionalIds,
+      dateKey,
+    );
+
+    return chosen;
+  }
+
+  private async pickLeastBusyProfessional(
+    tenantId: string,
+    professionalIds: string[],
+    dateKey: string,
+  ): Promise<string> {
+    const counts = new Map<string, number>(
+      professionalIds.map((professionalId) => [professionalId, 0]),
+    );
+
+    try {
+      const dayStart = buildWallClockDateTime(dateKey, '00:00');
+      const dayEnd = new Date(dayStart);
+      dayEnd.setHours(23, 59, 59, 0);
+
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('appointments')
+        .select('professional_id')
+        .eq('tenant_id', tenantId)
+        .in('professional_id', professionalIds)
+        .gte('start_time', wallClockToStorageIso(dayStart))
+        .lte('start_time', wallClockToStorageIso(dayEnd))
+        .neq('status', 'CANCELLED');
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      for (const row of data ?? []) {
+        const professionalId = row.professional_id as string;
+        counts.set(professionalId, (counts.get(professionalId) ?? 0) + 1);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(
+        `Sem preferência: não foi possível contar a agenda do dia ${dateKey} (${message}). O sorteio segue entre ${professionalIds.length} candidato(s).`,
+      );
+    }
+
+    const lowest = Math.min(...counts.values());
+    const tied = professionalIds.filter(
+      (professionalId) => (counts.get(professionalId) ?? 0) === lowest,
+    );
+    const chosen = tied[randomInt(tied.length)] as string;
+
+    this.logger.log(
+      `Sem preferência: ${professionalIds.length} candidato(s) livre(s) em ${dateKey}. Escolhido ${chosen} com ${counts.get(chosen) ?? 0} agendamento(s) no dia.`,
+    );
+
+    return chosen;
   }
 
   private resolveStoredDurationMinutes(

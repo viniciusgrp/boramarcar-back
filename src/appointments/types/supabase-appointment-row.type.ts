@@ -43,6 +43,7 @@ export interface SupabaseAppointmentWithRelations {
   coupon_id?: string | null;
   coupon_discount_amount?: number | string | null;
   deposit_paid?: boolean | null;
+  deposit_amount?: number | string | null;
   payment_status?: string | null;
   guest_access_token?: string | null;
   professionals: RelationName;

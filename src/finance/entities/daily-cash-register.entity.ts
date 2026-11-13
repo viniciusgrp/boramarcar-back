@@ -12,16 +12,22 @@ export interface DailyCashRegister {
   closed_at: string | null;
 }
 
+export interface OpenCashRegisterSummary {
+  id: string;
+  openingBalance: number;
+  openedAt: string;
+  status: CashRegisterStatus;
+  estimatedBalance: number;
+  periodRevenue: number;
+  periodExpenses: number;
+}
+
 export interface CashRegisterStatusResponse {
-  register: {
-    id: string;
-    openingBalance: number;
-    openedAt: string;
-    status: CashRegisterStatus;
-    estimatedBalance: number;
-    periodRevenue: number;
-    periodExpenses: number;
-  } | null;
+  register: OpenCashRegisterSummary | null;
+}
+
+export interface OpenCashRegistersResponse {
+  registers: OpenCashRegisterSummary[];
 }
 
 export interface CloseCashRegisterResponse {
