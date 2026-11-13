@@ -1176,11 +1176,28 @@ export class BillingService {
       return this.buildAsaasAccountStatus(tenant);
     }
 
+    const cpfCnpj = normalizeAsaasCpfCnpj(payload.cpfCnpj);
+    const { birthDate, companyType, ...accountFields } = payload;
+
+    if (cpfCnpj.length === 11 && !birthDate?.trim()) {
+      throw new BadRequestException(
+        'É necessário informar a data de nascimento (birthDate) no formato AAAA-MM-DD para CPF.',
+      );
+    }
+
+    if (cpfCnpj.length === 14 && !companyType) {
+      throw new BadRequestException(
+        'É necessário informar o tipo de empresa (companyType: MEI, LIMITED, INDIVIDUAL ou ASSOCIATION) para CNPJ.',
+      );
+    }
+
     try {
       const account = await this.asaasClient.createAccount({
-        ...payload,
-        cpfCnpj: payload.cpfCnpj.replace(/\D/g, ''),
+        ...accountFields,
+        cpfCnpj,
         postalCode: payload.postalCode.replace(/\D/g, ''),
+        ...(cpfCnpj.length === 11 ? { birthDate: birthDate!.trim() } : {}),
+        ...(cpfCnpj.length === 14 ? { companyType } : {}),
         webhooks: [this.buildSubaccountWebhook()],
       });
 

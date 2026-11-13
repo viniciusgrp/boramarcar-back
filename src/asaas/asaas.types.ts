@@ -116,6 +116,12 @@ export interface AsaasWebhookConfig {
   events: string[];
 }
 
+export type AsaasCompanyType =
+  | 'MEI'
+  | 'LIMITED'
+  | 'INDIVIDUAL'
+  | 'ASSOCIATION';
+
 export interface CreateAsaasAccountPayload {
   name: string;
   email: string;
@@ -128,5 +134,9 @@ export interface CreateAsaasAccountPayload {
   complement?: string;
   province: string;
   postalCode: string;
+  /** Required by Asaas for CPF accounts (YYYY-MM-DD). */
+  birthDate?: string;
+  /** Required by Asaas for CNPJ accounts. */
+  companyType?: AsaasCompanyType;
   webhooks?: AsaasWebhookConfig[];
 }

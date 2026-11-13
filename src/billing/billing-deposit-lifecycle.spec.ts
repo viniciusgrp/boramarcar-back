@@ -213,6 +213,7 @@ describe('BillingService deposit lifecycle', () => {
       addressNumber: '10',
       province: 'Centro',
       postalCode: '01001000',
+      birthDate: '1990-05-15',
     });
 
     const webhook = createAccount.mock.calls[0][0].webhooks[0] as {
