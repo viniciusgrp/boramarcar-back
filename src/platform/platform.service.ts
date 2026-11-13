@@ -644,7 +644,9 @@ export class PlatformService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data as Tenant[]) ?? [];
+    return ((data as Tenant[]) ?? []).map((row) =>
+      stripAsaasSubaccountApiKey(row),
+    );
   }
 
   private async fetchTenantById(tenantId: string): Promise<Tenant> {
@@ -663,7 +665,7 @@ export class PlatformService {
       throw new NotFoundException('Cliente não encontrado.');
     }
 
-    return data as Tenant;
+    return stripAsaasSubaccountApiKey(data as Tenant);
   }
 
   private async computeUsage(tenantId: string): Promise<PlatformTenantUsage> {
@@ -1172,4 +1174,12 @@ export class PlatformService {
       throw new InternalServerErrorException(error.message);
     }
   }
+}
+
+function stripAsaasSubaccountApiKey(row: Tenant): Tenant {
+  const copy = {
+    ...row,
+  } as Tenant & { asaas_subaccount_api_key_encrypted?: string };
+  delete copy.asaas_subaccount_api_key_encrypted;
+  return copy;
 }

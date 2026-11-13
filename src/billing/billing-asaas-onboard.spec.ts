@@ -24,6 +24,7 @@ function buildService(createAccount: jest.Mock) {
           PUBLIC_API_ORIGIN: 'https://api.example.com',
           ASAAS_WEBHOOK_TOKEN: 'whsec',
           SUPPORT_EMAIL: 'ops@horariocerto.app',
+          ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY: 'test-subaccount-key',
         })[key],
     } as unknown as ConfigService,
     {

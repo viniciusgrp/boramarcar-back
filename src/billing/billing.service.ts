@@ -65,6 +65,11 @@ import {
   parsePlanExternalReference,
 } from './utils/asaas-external-reference.util';
 import { isValidAsaasWebhookToken } from './utils/asaas-webhook-auth.util';
+import { mapAsaasAccountStatusUpdate } from './utils/asaas-account-status.util';
+import {
+  decryptAsaasSubaccountApiKey,
+  encryptAsaasSubaccountApiKey,
+} from './utils/asaas-subaccount-key.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -599,33 +604,19 @@ export class BillingService {
       return;
     }
 
-    const general = account?.accountStatus?.general?.trim();
-    const chargesEnabled =
-      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED' ||
-      general === 'APPROVED';
-    const generalRejected =
-      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED' ||
-      general === 'REJECTED';
+    const patch = mapAsaasAccountStatusUpdate({
+      eventType: type,
+      general: account?.accountStatus?.general,
+      commercialInfo: account?.accountStatus?.commercialInfo,
+      bankAccountInfo: account?.accountStatus?.bankAccountInfo,
+      documentation: account?.accountStatus?.documentation,
+    });
 
-    if (chargesEnabled || generalRejected) {
-      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-        asaasChargesEnabled: chargesEnabled,
-        asaasDetailsSubmitted:
-          chargesEnabled ||
-          account?.accountStatus?.documentation === 'APPROVED',
-        asaasAccountStatus: chargesEnabled ? 'APPROVED' : 'REJECTED',
-      });
+    if (!patch) {
       return;
     }
 
-    if (
-      type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED' ||
-      type === 'ACCOUNT_STATUS_DOCUMENT_REJECTED'
-    ) {
-      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-        asaasDetailsSubmitted: type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED',
-      });
-    }
+    await this.tenantsService.updateAsaasAccountStatus(tenant.id, patch);
   }
 
   private async resolveTenantFromPayment(
@@ -1193,6 +1184,8 @@ export class BillingService {
       );
     }
 
+    const subaccountKeySecret = this.getSubaccountKeyEncryptionSecret();
+
     try {
       const account = await this.asaasClient.createAccount({
         ...accountFields,
@@ -1220,6 +1213,15 @@ export class BillingService {
         },
       );
 
+      const apiKey = account.apiKey?.trim();
+
+      if (apiKey) {
+        await this.tenantsService.saveAsaasSubaccountApiKey(
+          tenant.id,
+          encryptAsaasSubaccountApiKey(apiKey, subaccountKeySecret),
+        );
+      }
+
       return this.buildAsaasAccountStatus(updated ?? tenant);
     } catch (error) {
       if (error instanceof AsaasHttpError && isAsaasDuplicateAccountError(error)) {
@@ -1243,6 +1245,27 @@ export class BillingService {
     }
 
     try {
+      const subaccountKey = await this.readSubaccountApiKey(tenant.id);
+
+      if (subaccountKey) {
+        const status = await this.asaasClient.getMyAccountStatus(subaccountKey);
+        const patch = mapAsaasAccountStatusUpdate({
+          general: status.general,
+          commercialInfo: status.commercialInfo,
+          bankAccountInfo: status.bankAccountInfo,
+          documentation: status.documentation,
+        });
+
+        if (!patch) {
+          this.logger.warn(
+            `Asaas account ${tenant.asaas_account_id} returned no general status. Local charges flag was kept.`,
+          );
+          return tenant;
+        }
+
+        return this.tenantsService.updateAsaasAccountStatus(tenant.id, patch);
+      }
+
       const account = await this.asaasClient.getAccount(tenant.asaas_account_id);
       const general = account.accountStatus?.general?.trim();
 
@@ -1315,6 +1338,49 @@ export class BillingService {
         subscriptionStatus: 'PAST_DUE',
       });
       this.logger.log(`Marked PAST_DUE after grace: tenant=${tenant.id}`);
+    }
+  }
+
+  private getSubaccountKeyEncryptionSecret(): string {
+    const secret = this.configService
+      .get<string>('ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY')
+      ?.trim();
+
+    if (!secret) {
+      throw new InternalServerErrorException(
+        'ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY is not configured',
+      );
+    }
+
+    return secret;
+  }
+
+  private async readSubaccountApiKey(tenantId: string): Promise<string | null> {
+    const ciphertext =
+      await this.tenantsService.findAsaasSubaccountApiKeyCiphertext(tenantId);
+
+    if (!ciphertext) {
+      return null;
+    }
+
+    const secret = this.configService
+      .get<string>('ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY')
+      ?.trim();
+
+    if (!secret) {
+      this.logger.warn(
+        `Tenant ${tenantId} has an encrypted Asaas subaccount key but ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY is not configured. Sync kept the legacy account lookup.`,
+      );
+      return null;
+    }
+
+    try {
+      return decryptAsaasSubaccountApiKey(ciphertext, secret);
+    } catch {
+      this.logger.warn(
+        `Tenant ${tenantId} has an Asaas subaccount key that could not be decrypted. Sync kept the legacy account lookup.`,
+      );
+      return null;
     }
   }
 

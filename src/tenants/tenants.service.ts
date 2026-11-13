@@ -149,9 +149,13 @@ function applySubscriptionTrialFields(
 
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
+  const source = {
+    ...(row as Tenant & { asaas_subaccount_api_key_encrypted?: string | null }),
+  };
+  delete source.asaas_subaccount_api_key_encrypted;
 
   return {
-    ...row,
+    ...source,
     description:
       typeof row.description === 'string' && row.description.trim()
         ? row.description.trim()
@@ -1578,6 +1582,45 @@ export class TenantsService {
     }
 
     return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async saveAsaasSubaccountApiKey(
+    tenantId: string,
+    encryptedApiKey: string,
+  ): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        asaas_subaccount_api_key_encrypted: encryptedApiKey,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  async findAsaasSubaccountApiKeyCiphertext(
+    tenantId: string,
+  ): Promise<string | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('asaas_subaccount_api_key_encrypted')
+      .eq('id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const ciphertext = (
+      data as { asaas_subaccount_api_key_encrypted?: string | null } | null
+    )?.asaas_subaccount_api_key_encrypted;
+
+    return ciphertext?.trim() || null;
   }
 
   async findByAsaasAccountId(asaasAccountId: string): Promise<Tenant | null> {

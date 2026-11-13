@@ -36,6 +36,25 @@ describe('toSafeTenantForRole', () => {
     expect(safe.asaas_wallet_id).toBe('wal_x');
   });
 
+  it('never returns the encrypted subaccount api key', () => {
+    const withKey = {
+      ...tenant,
+      asaas_subaccount_api_key_encrypted: 'enc:v1:secret',
+    } as Tenant;
+
+    for (const role of ['OWNER', 'ADMIN', 'PROFESSIONAL', null] as const) {
+      const safe = toSafeTenantForRole(withKey, role);
+      expect(JSON.stringify(safe)).not.toContain('enc:v1:secret');
+      expect(JSON.stringify(safe)).not.toContain(
+        'asaas_subaccount_api_key_encrypted',
+      );
+    }
+
+    expect(JSON.stringify(stripTenantAsaasSecrets(withKey))).not.toContain(
+      'enc:v1:secret',
+    );
+  });
+
   it('stripTenantAsaasSecrets nulls all Asaas secret fields', () => {
     const stripped = stripTenantAsaasSecrets(tenant);
     expect(stripped.asaas_customer_id).toBeNull();
