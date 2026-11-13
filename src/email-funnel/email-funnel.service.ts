@@ -17,6 +17,7 @@ import {
   resolveEmailFunnelEligibility,
   shouldRecordSkip,
 } from './email-funnel-eligibility.util';
+import { shouldDeferWelcomeUntilOwnerEmailConfirmed } from './email-funnel-welcome-gate.util';
 import { buildEmailFunnelContent } from './email-funnel-html.util';
 import { resolveEmailFunnelStepDueStatus } from './email-funnel-schedule.util';
 import type { UpdateEmailFunnelStepDto } from './dto/email-funnel.dto';
@@ -102,7 +103,14 @@ export class EmailFunnelService {
     tenantId: string;
     ownerEmail: string;
   }): Promise<void> {
-    await this.processTenantStep('welcome', params.tenantId, params.ownerEmail);
+    await this.processTenantStep(
+      'welcome',
+      params.tenantId,
+      params.ownerEmail,
+      {
+        ownerEmailConfirmed: true,
+      },
+    );
   }
 
   async processDueEmails(now: Date = new Date()): Promise<number> {
@@ -120,6 +128,7 @@ export class EmailFunnelService {
           tenant,
           ownerEmail: ownerDetails.email,
           ownerFirstName: ownerDetails.firstName,
+          ownerEmailConfirmed: ownerDetails.emailConfirmed,
           hasService: setup.hasService,
           hasBusinessHours: setup.hasBusinessHours,
           hasPublicBooking: setup.hasPublicBooking,
@@ -244,7 +253,12 @@ export class EmailFunnelService {
     stepKey: string,
     tenantId: string,
     ownerEmail: string | null,
+    options?: { ownerEmailConfirmed?: boolean },
   ): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
+    if (await this.hasSendRecord(tenantId, stepKey)) {
+      return 'ignored';
+    }
+
     const step = await this.getStep(stepKey);
     const tenant = await this.getFunnelTenant(tenantId);
 
@@ -259,6 +273,8 @@ export class EmailFunnelService {
       tenant,
       ownerEmail: ownerEmail || ownerDetails.email,
       ownerFirstName: ownerDetails.firstName,
+      ownerEmailConfirmed:
+        options?.ownerEmailConfirmed ?? ownerDetails.emailConfirmed,
       hasService: setup.hasService,
       hasBusinessHours: setup.hasBusinessHours,
       hasPublicBooking: setup.hasPublicBooking,
@@ -271,11 +287,21 @@ export class EmailFunnelService {
     tenant: FunnelTenantRow;
     ownerEmail: string | null;
     ownerFirstName: string | null;
+    ownerEmailConfirmed: boolean;
     hasService: boolean;
     hasBusinessHours: boolean;
     hasPublicBooking: boolean;
     now: Date;
   }): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
+    if (
+      shouldDeferWelcomeUntilOwnerEmailConfirmed({
+        stepKey: params.step.step_key,
+        ownerEmailConfirmed: params.ownerEmailConfirmed,
+      })
+    ) {
+      return 'ignored';
+    }
+
     const already = await this.hasSendRecord(
       params.tenant.id,
       params.step.step_key,
@@ -298,15 +324,20 @@ export class EmailFunnelService {
     });
 
     const isPostTrialStep = params.step.trigger_type === 'days_after_trial_end';
-    const isLastDayOfTrialStep = params.step.trigger_type === 'days_before_trial_end' && params.step.trigger_offset === 0;
+    const isLastDayOfTrialStep =
+      params.step.trigger_type === 'days_before_trial_end' &&
+      params.step.trigger_offset === 0;
 
     const eligibility = resolveEmailFunnelEligibility({
       isActive: params.step.is_active,
       optedOut: Boolean(params.tenant.trial_email_funnel_opted_out_at),
       subscriptionStatus: params.tenant.subscription_status,
-      trialEnded: !isTrialActive({
-        trial_ends_at: params.tenant.trial_ends_at,
-      }, params.now),
+      trialEnded: !isTrialActive(
+        {
+          trial_ends_at: params.tenant.trial_ends_at,
+        },
+        params.now,
+      ),
       skipIfSetupComplete: params.step.skip_if_setup_complete,
       hasService: params.hasService,
       hasBusinessHours: params.hasBusinessHours,
@@ -394,8 +425,7 @@ export class EmailFunnelService {
 
     const ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
 
-    const recipient =
-      existing.recipient_email?.trim() || ownerDetails.email;
+    const recipient = existing.recipient_email?.trim() || ownerDetails.email;
 
     if (!recipient) {
       await this.recordSend({
@@ -447,7 +477,8 @@ export class EmailFunnelService {
     const ctaPath = step.cta_path.trim() || '/admin/login';
     const ctaUrl = `${frontendUrl}${ctaPath.startsWith('/') ? ctaPath : `/${ctaPath}`}`;
     const optOutUrl = `${frontendUrl}/descadastrar-emails-trial?token=${encodeURIComponent(params.token)}`;
-    const companyAddress = this.configService.get<string>('COMPANY_ADDRESS') || null;
+    const companyAddress =
+      this.configService.get<string>('COMPANY_ADDRESS') || null;
 
     return buildEmailFunnelContent({
       step,
@@ -498,7 +529,7 @@ export class EmailFunnelService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data as FunnelTenantRow | null;
+    return data;
   }
 
   private async listCandidateTenants(): Promise<FunnelTenantRow[]> {
@@ -514,7 +545,7 @@ export class EmailFunnelService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []) as FunnelTenantRow[];
+    return data ?? [];
   }
 
   private async resolveSetupFlags(tenantId: string): Promise<{
@@ -580,9 +611,10 @@ export class EmailFunnelService {
   private async resolveOwnerDetails(ownerId: string | null): Promise<{
     email: string | null;
     firstName: string | null;
+    emailConfirmed: boolean;
   }> {
     if (!ownerId) {
-      return { email: null, firstName: null };
+      return { email: null, firstName: null, emailConfirmed: false };
     }
 
     const { data, error } = await this.supabaseService
@@ -591,7 +623,7 @@ export class EmailFunnelService {
 
     if (error) {
       this.logger.warn(`Could not resolve owner details for ${ownerId}`);
-      return { email: null, firstName: null };
+      return { email: null, firstName: null, emailConfirmed: false };
     }
 
     const email = data.user?.email?.trim().toLowerCase() ?? null;
@@ -601,7 +633,11 @@ export class EmailFunnelService {
         : null;
     const firstName = fullName ? fullName.split(/\s+/)[0] : null;
 
-    return { email, firstName };
+    return {
+      email,
+      firstName,
+      emailConfirmed: Boolean(data.user?.email_confirmed_at),
+    };
   }
 
   private async hasSendRecord(
@@ -717,11 +753,7 @@ export class EmailFunnelService {
       throw new NotFoundException('Envio não encontrado.');
     }
 
-    return data as {
-      tenant_id: string;
-      step_key: string;
-      recipient_email: string | null;
-    };
+    return data;
   }
 
   private async getSendListItem(
@@ -749,21 +781,28 @@ export class EmailFunnelService {
     return this.mapSendListItem(data);
   }
 
-  private mapSendListItem(row: Record<string, unknown>): EmailFunnelSendListItem {
+  private mapSendListItem(
+    row: Record<string, unknown>,
+  ): EmailFunnelSendListItem {
     const tenant = firstRelation(row.tenants);
     const step = firstRelation(row.email_funnel_steps);
 
     return {
       id: String(row.id),
       tenantId: String(row.tenant_id),
-      tenantName: typeof tenant?.name === 'string' ? tenant.name : 'Estabelecimento',
+      tenantName:
+        typeof tenant?.name === 'string' ? tenant.name : 'Estabelecimento',
       recipientEmail:
         typeof row.recipient_email === 'string' ? row.recipient_email : null,
       stepKey: String(row.step_key),
       stepNumber:
         typeof step?.step_number === 'number' ? step.step_number : null,
-      subject: typeof step?.subject === 'string' ? step.subject : String(row.step_key),
-      status: row.status === 'failed' || row.status === 'skipped' ? row.status : 'sent',
+      subject:
+        typeof step?.subject === 'string' ? step.subject : String(row.step_key),
+      status:
+        row.status === 'failed' || row.status === 'skipped'
+          ? row.status
+          : 'sent',
       skippedReason:
         typeof row.skipped_reason === 'string' ? row.skipped_reason : null,
       errorMessage:
@@ -842,9 +881,7 @@ export function resolvePreviewTrialEndsAt(
   return new Date(nowMs + TRIAL_DURATION_DAYS * dayMs).toISOString();
 }
 
-function firstRelation(
-  value: unknown,
-): Record<string, unknown> | null {
+function firstRelation(value: unknown): Record<string, unknown> | null {
   if (Array.isArray(value)) {
     const first = value[0];
     return first && typeof first === 'object'
