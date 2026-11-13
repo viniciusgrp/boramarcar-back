@@ -1,6 +1,7 @@
 import { TenantsService } from './tenants.service';
 import { DISPOSABLE_EMAIL_MESSAGE } from '../security/signup-security.messages';
 import { ESTABLISHMENT_EMAIL_NOT_CONFIRMED_MESSAGE } from '../security/signup-security.messages';
+import { hashEstablishmentOtp } from '../security/establishment-otp.util';
 
 function buildConfig(appEnv?: string) {
   return {
@@ -253,5 +254,325 @@ describe('TenantsService', () => {
     });
 
     expect(trackingData.firstVisitAt).toBeNull();
+  });
+});
+
+describe('TenantsService trial welcome timing', () => {
+  const registerDto = {
+    owner_name: 'Dono',
+    email: 'dono@gmail.com',
+    password: 'senha1234',
+    tenant_name: 'Studio',
+    slug: 'studio-novo',
+    recaptcha_token: 'token',
+  };
+
+  function buildRegistration(appEnv: string) {
+    const sendWelcomeForNewTenant = jest.fn().mockResolvedValue(undefined);
+    const sendEstablishmentEmailVerification = jest
+      .fn()
+      .mockResolvedValue(undefined);
+    const createUser = jest.fn().mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'dono@gmail.com' } },
+      error: null,
+    });
+    const generateLink = jest.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: 'user-1',
+          email: 'dono@gmail.com',
+          email_confirmed_at: null,
+          user_metadata: {
+            requires_email_verification: true,
+            full_name: 'Dono',
+          },
+        },
+        properties: {
+          hashed_token: 'hashed-token',
+          verification_type: 'magiclink',
+        },
+      },
+      error: null,
+    });
+    const updateUserById = jest.fn().mockResolvedValue({ error: null });
+    const from = jest.fn((table: string) => {
+      if (table === 'tenants') {
+        const tenant = {
+          id: 'tenant-1',
+          name: 'Studio',
+          slug: 'studio-novo',
+          owner_id: 'user-1',
+          created_at: '2026-11-13T00:00:00.000Z',
+          updated_at: '2026-11-13T00:00:00.000Z',
+        };
+        return {
+          insert: () => ({
+            select: () => ({
+              single: () => Promise.resolve({ data: tenant, error: null }),
+            }),
+          }),
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: tenant, error: null }),
+            }),
+          }),
+        };
+      }
+
+      const skipped = Promise.resolve({ error: { message: 'skip seed' } });
+      return {
+        insert: () => skipped,
+      };
+    });
+
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: { admin: { createUser, generateLink, updateUserById } },
+          from,
+        }),
+      } as never,
+      {
+        createOwnerMembership: jest.fn().mockResolvedValue(undefined),
+      } as never,
+      {} as never,
+      {
+        resolveAttributionForSignup: jest.fn().mockResolvedValue(null),
+      } as never,
+      { sendWelcomeForNewTenant } as never,
+      { sendEstablishmentEmailVerification } as never,
+      buildConfig(appEnv),
+      {
+        sendCompleteRegistration: jest.fn().mockResolvedValue(undefined),
+      } as never,
+    );
+    jest.spyOn(service, 'findBySlug').mockResolvedValue(null);
+
+    return {
+      service,
+      sendWelcomeForNewTenant,
+      sendEstablishmentEmailVerification,
+    };
+  }
+
+  it('does not send welcome on register when email verification is required', async () => {
+    const {
+      service,
+      sendWelcomeForNewTenant,
+      sendEstablishmentEmailVerification,
+    } = buildRegistration('production');
+
+    const result = await service.register(registerDto);
+
+    expect(result.requiresEmailConfirmation).toBe(true);
+    expect(sendEstablishmentEmailVerification).toHaveBeenCalledTimes(1);
+    expect(sendWelcomeForNewTenant).not.toHaveBeenCalled();
+  });
+
+  it('sends welcome right after register when verification is skipped', async () => {
+    const {
+      service,
+      sendWelcomeForNewTenant,
+      sendEstablishmentEmailVerification,
+    } = buildRegistration('hml');
+
+    const result = await service.register(registerDto);
+
+    expect(result.requiresEmailConfirmation).toBe(false);
+    expect(sendEstablishmentEmailVerification).not.toHaveBeenCalled();
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledTimes(1);
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      ownerEmail: 'dono@gmail.com',
+    });
+  });
+
+  it('sends welcome once when the 6 digit code is confirmed', async () => {
+    const code = '123456';
+    const sendWelcomeForNewTenant = jest.fn().mockResolvedValue(undefined);
+    const user = {
+      id: 'user-1',
+      email: 'dono@gmail.com',
+      email_confirmed_at: null,
+      user_metadata: {
+        requires_email_verification: true,
+        establishment_otp_hash: hashEstablishmentOtp('user-1', code),
+        establishment_otp_expires_at: new Date(
+          Date.now() + 60_000,
+        ).toISOString(),
+        establishment_otp_attempts: 0,
+      },
+    };
+    const generateLink = jest.fn().mockResolvedValue({
+      data: {
+        user,
+        properties: {
+          hashed_token: 'session-hash',
+          verification_type: 'magiclink',
+        },
+      },
+      error: null,
+    });
+    const updateUserById = jest.fn().mockResolvedValue({ error: null });
+    const from = jest.fn(() => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () =>
+            Promise.resolve({
+              data: { id: 'tenant-1', owner_id: 'user-1' },
+              error: null,
+            }),
+        }),
+      }),
+    }));
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: { admin: { generateLink, updateUserById } },
+          from,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { sendWelcomeForNewTenant } as never,
+      {} as never,
+      buildConfig('production'),
+      { sendCompleteRegistration: jest.fn() } as never,
+    );
+
+    const result = await service.verifyEstablishmentEmailCode(
+      'dono@gmail.com',
+      code,
+    );
+
+    expect(result).toEqual({
+      hashedToken: 'session-hash',
+      otpType: 'magiclink',
+    });
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledTimes(1);
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      ownerEmail: 'dono@gmail.com',
+    });
+  });
+
+  it('sends welcome once when the magic link session opens the panel', () => {
+    const sendWelcomeForNewTenant = jest.fn().mockResolvedValue(undefined);
+    const service = new TenantsService(
+      { getClient: () => ({}) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { sendWelcomeForNewTenant } as never,
+      {} as never,
+      buildConfig('production'),
+      { sendCompleteRegistration: jest.fn() } as never,
+    );
+
+    service.scheduleTrialWelcomeForConfirmedOwner({
+      tenantId: 'tenant-1',
+      role: 'OWNER',
+      ownerUserId: 'user-1',
+      ownerEmail: 'dono@gmail.com',
+      emailConfirmedAt: '2026-11-13T18:00:00.000Z',
+    });
+    service.scheduleTrialWelcomeForConfirmedOwner({
+      tenantId: 'tenant-1',
+      role: 'PROFESSIONAL',
+      ownerUserId: 'user-2',
+      ownerEmail: 'pro@gmail.com',
+      emailConfirmedAt: '2026-11-13T18:00:00.000Z',
+    });
+    service.scheduleTrialWelcomeForConfirmedOwner({
+      tenantId: 'tenant-1',
+      role: 'OWNER',
+      ownerUserId: 'user-1',
+      ownerEmail: 'dono@gmail.com',
+      emailConfirmedAt: null,
+    });
+
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledTimes(1);
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      ownerEmail: 'dono@gmail.com',
+    });
+  });
+
+  it('requests welcome from the code path and again from the magic link path', async () => {
+    const code = '123456';
+    const sendWelcomeForNewTenant = jest.fn().mockResolvedValue(undefined);
+    const user = {
+      id: 'user-1',
+      email: 'dono@gmail.com',
+      email_confirmed_at: null,
+      user_metadata: {
+        requires_email_verification: true,
+        establishment_otp_hash: hashEstablishmentOtp('user-1', code),
+        establishment_otp_expires_at: new Date(
+          Date.now() + 60_000,
+        ).toISOString(),
+        establishment_otp_attempts: 0,
+      },
+    };
+    const generateLink = jest.fn().mockResolvedValue({
+      data: {
+        user,
+        properties: {
+          hashed_token: 'session-hash',
+          verification_type: 'magiclink',
+        },
+      },
+      error: null,
+    });
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: {
+            admin: {
+              generateLink,
+              updateUserById: jest.fn().mockResolvedValue({ error: null }),
+            },
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({
+                    data: { id: 'tenant-1', owner_id: 'user-1' },
+                    error: null,
+                  }),
+              }),
+            }),
+          }),
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { sendWelcomeForNewTenant } as never,
+      {} as never,
+      buildConfig('production'),
+      { sendCompleteRegistration: jest.fn() } as never,
+    );
+
+    await service.verifyEstablishmentEmailCode('dono@gmail.com', code);
+    service.scheduleTrialWelcomeForConfirmedOwner({
+      tenantId: 'tenant-1',
+      role: 'OWNER',
+      ownerUserId: 'user-1',
+      ownerEmail: 'dono@gmail.com',
+      emailConfirmedAt: '2026-11-13T18:00:00.000Z',
+    });
+
+    expect(sendWelcomeForNewTenant).toHaveBeenCalledTimes(2);
+    expect(sendWelcomeForNewTenant).toHaveBeenNthCalledWith(1, {
+      tenantId: 'tenant-1',
+      ownerEmail: 'dono@gmail.com',
+    });
+    expect(sendWelcomeForNewTenant).toHaveBeenNthCalledWith(2, {
+      tenantId: 'tenant-1',
+      ownerEmail: 'dono@gmail.com',
+    });
   });
 });

@@ -18,8 +18,9 @@ describe('MailService', () => {
       SMTP_PORT: '587',
     });
     const sendMail = jest.fn();
-    (service as unknown as { transporter: { sendMail: typeof sendMail } }).transporter =
-      { sendMail };
+    (
+      service as unknown as { transporter: { sendMail: typeof sendMail } }
+    ).transporter = { sendMail };
 
     await expect(
       service.sendHtmlEmail({
@@ -49,7 +50,9 @@ describe('MailService', () => {
     });
 
     const options = (
-      service as unknown as { transporter: { options: { host: string; auth: { user: string } } } }
+      service as unknown as {
+        transporter: { options: { host: string; auth: { user: string } } };
+      }
     ).transporter.options;
 
     expect(options.host).toBe('smtp.resend.com');
@@ -71,7 +74,9 @@ describe('MailService', () => {
 
     const options = (
       service as unknown as {
-        transporter: { options: { host: string; port: number; requireTLS: boolean } };
+        transporter: {
+          options: { host: string; port: number; requireTLS: boolean };
+        };
       }
     ).transporter.options;
 
@@ -113,8 +118,9 @@ describe('MailService', () => {
         lastPayload = options;
         return Promise.resolve();
       });
-      (service as unknown as { transporter: { sendMail: typeof sendMail } }).transporter =
-        { sendMail };
+      (
+        service as unknown as { transporter: { sendMail: typeof sendMail } }
+      ).transporter = { sendMail };
       return {
         sendMail,
         getPayload: (): MailPayload => {
@@ -134,20 +140,25 @@ describe('MailService', () => {
         recipientEmail: 'dono@gmail.com',
         ownerName: 'QA Marketing',
         code: '123456',
-        verifyUrl: 'https://app.example.com/verify',
+        verifyUrl:
+          'https://app.example.com/verify?token_hash=abc&type=magiclink',
       });
 
       expect(sendMail).toHaveBeenCalledTimes(1);
       const payload = getPayload();
+      expect(payload.html).toContain('Olá, QA Marketing!');
       expect(payload.html).toContain(
-        'Olá, QA Marketing! Use o código abaixo para ativar o estabelecimento cadastrado com',
+        'Use o código abaixo para confirmar o e-mail <strong style="color:#111827;">dono@gmail.com</strong>. O código expira em 1 hora.',
       );
       expect(payload.html).not.toContain('olá,');
+      expect(payload.text).toContain('Olá, QA Marketing!');
       expect(payload.text).toContain(
-        'Olá, QA Marketing! Use o código abaixo para ativar o estabelecimento cadastrado com dono@gmail.com.',
+        'Use o código abaixo para confirmar o e-mail dono@gmail.com. O código expira em 1 hora.',
       );
       expect(payload.text).toContain('123456');
-      expect(payload.text).toContain('https://app.example.com/verify');
+      expect(payload.text).toContain(
+        'https://app.example.com/verify?token_hash=abc&type=magiclink',
+      );
     });
 
     it('greets without name when ownerName is empty', async () => {
@@ -163,14 +174,73 @@ describe('MailService', () => {
 
       expect(sendMail).toHaveBeenCalledTimes(1);
       const payload = getPayload();
+      expect(payload.html).toContain('>Olá!</p>');
       expect(payload.html).toContain(
-        'Olá! Use o código abaixo para ativar o estabelecimento cadastrado com',
+        'Use o código abaixo para confirmar o e-mail <strong style="color:#111827;">dono@gmail.com</strong>',
       );
       expect(payload.html).not.toContain('olá,');
+      expect(payload.text).toContain('Olá!');
       expect(payload.text).toContain(
-        'Olá! Use o código abaixo para ativar o estabelecimento cadastrado com dono@gmail.com.',
+        'Use o código abaixo para confirmar o e-mail dono@gmail.com. O código expira em 1 hora.',
       );
       expect(payload.text).toContain('654321');
+    });
+
+    it('renders the petróleo card, logo, code box and magic link button', async () => {
+      const service = buildService({
+        APP_ENV: 'production',
+        FRONTEND_URL: 'https://horariocerto.app',
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_USER: 'user',
+        SMTP_PASS: 'pass',
+        SMTP_FROM: 'Horário Certo <noreply@example.com>',
+        SMTP_PORT: '587',
+      });
+      const { getPayload } = mockSendMail(service);
+      const verifyUrl =
+        'https://horariocerto.app/auth/callback?token_hash=abc%2Bhash&type=magiclink&intent=tenant-register';
+
+      await service.sendEstablishmentEmailVerification({
+        recipientEmail: 'dono@gmail.com',
+        ownerName: 'Maria Souza',
+        code: '123456',
+        verifyUrl,
+      });
+
+      const payload = getPayload();
+      const html = payload.html;
+      expect(html).toContain('name="color-scheme" content="light only"');
+      expect(html).toContain(
+        'name="supported-color-schemes" content="light only"',
+      );
+      expect(html).toContain('role="presentation"');
+      expect(html).toContain('bgcolor="#f9fafb"');
+      expect(html).toContain('bgcolor="#ffffff"');
+      expect(html).toContain('bgcolor="#0F5F58"');
+      expect(html).toContain('bgcolor="#E7F4F2"');
+      expect(html).toContain('bgcolor="#fafafa"');
+      expect(html).toContain(
+        'src="https://horariocerto.app/email/logo-horariocerto-400x67.png"',
+      );
+      expect(html).toContain('alt="Horário Certo"');
+      expect(html).toContain('>123456</p>');
+      expect(html).not.toMatch(/>\s*1\s+2\s+3\s+4\s+5\s+6\s*</);
+      expect(html).toContain('Confirmar e entrar');
+      expect(html).toContain(
+        'Ou clique no botão para confirmar automaticamente e entrar no painel.',
+      );
+      expect(html).toContain('Se não foi você, ignore este e-mail.');
+      expect(html).toContain(
+        'Horário Certo · Agendamento online para barbearias e salões',
+      );
+      expect(html).toContain('token_hash=abc%2Bhash');
+      expect(html).not.toContain('BoraMarcar');
+      expect(html).not.toMatch(/[\u2013\u2014]/);
+      expect(payload.text).not.toContain('BoraMarcar');
+      expect(payload.text).not.toMatch(/[\u2013\u2014]/);
+      expect(payload.text).toContain(
+        'Ou clique no botão para confirmar automaticamente e entrar no painel:',
+      );
     });
   });
 });

@@ -379,4 +379,25 @@ describe('isEmailFunnelStepDue', () => {
       }),
     ).toBe('stale');
   });
+
+  it('keeps trial_mid anchored on signup even if welcome is sent later', () => {
+    const signupAt = new Date('2026-09-01T13:00:00.000Z');
+    const welcomeSentLater = new Date('2026-09-03T13:00:00.000Z');
+    const beforeDue = new Date('2026-09-08T12:59:00.000Z');
+    const atDue = new Date('2026-09-08T13:00:00.000Z');
+    const shared = {
+      signupAt,
+      trialEndsAt: new Date('2026-09-15T13:00:00.000Z'),
+      triggerType: 'days_after_signup' as const,
+      triggerOffset: 7,
+      sendHour: 10,
+      windowStartHour: null,
+      windowEndHour: null,
+      timeZone,
+    };
+
+    expect(isEmailFunnelStepDue({ ...shared, now: beforeDue })).toBe(false);
+    expect(isEmailFunnelStepDue({ ...shared, now: atDue })).toBe(true);
+    expect(welcomeSentLater.getTime()).toBeLessThan(atDue.getTime());
+  });
 });

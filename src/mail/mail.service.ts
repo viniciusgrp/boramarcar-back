@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -13,6 +18,7 @@ import {
 } from './mail-transport.config';
 import { formatTenantAddress } from './utils/format-tenant-address.util';
 import { BRAND_NAME } from '../common/brand.constants';
+import { resolveBrandHomeUrl } from '../email-funnel/email-funnel-template.util';
 
 @Injectable()
 export class MailService {
@@ -24,7 +30,9 @@ export class MailService {
   constructor(private readonly configService: ConfigService) {
     this.transportResolution = resolveMailTransport(this.configService);
     this.transport =
-      this.transportResolution.status === 'ready' ? this.transportResolution.config : null;
+      this.transportResolution.status === 'ready'
+        ? this.transportResolution.config
+        : null;
     this.transporter = this.createTransporter();
     this.logTransportStatus();
   }
@@ -194,53 +202,89 @@ export class MailService {
     verifyUrl: string;
   }): Promise<void> {
     const trimmedName = params.ownerName.trim();
-    const greetingHtml = trimmedName
-      ? `Olá, ${this.escapeHtml(trimmedName)}!`
-      : 'Olá!';
     const greetingText = trimmedName ? `Olá, ${trimmedName}!` : 'Olá!';
-    const code = this.escapeHtml(params.code);
-    const verifyUrl = this.escapeHtml(params.verifyUrl);
-    const email = this.escapeHtml(params.recipientEmail);
-    const bodyAfterGreeting =
-      'Use o código abaixo para ativar o estabelecimento cadastrado com';
+    const rendered = this.buildEstablishmentEmailVerificationContent({
+      ownerName: trimmedName,
+      recipientEmail: params.recipientEmail,
+      code: params.code,
+      verifyUrl: params.verifyUrl,
+    });
 
     await this.sendMail({
       to: params.recipientEmail,
       subject: `Confirme seu e-mail no ${BRAND_NAME}`,
       failIfUnconfigured: true,
       text: [
-        `${greetingText} ${bodyAfterGreeting} ${params.recipientEmail}. O código expira em 1 hora.`,
+        greetingText,
+        '',
+        `Use o código abaixo para confirmar o e-mail ${params.recipientEmail}. O código expira em 1 hora.`,
         '',
         params.code,
         '',
-        'Ou abra o link abaixo para confirmar automaticamente e entrar no painel:',
+        'Ou clique no botão para confirmar automaticamente e entrar no painel:',
         params.verifyUrl,
+        '',
+        'Se o botão não funcionar, copie e cole este link no navegador:',
+        params.verifyUrl,
+        '',
+        'Se não foi você, ignore este e-mail.',
+        '',
+        `${BRAND_NAME} · Agendamento online para barbearias e salões`,
       ].join('\n'),
-      html: `
-        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 560px;">
-          <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af;">
-            ${BRAND_NAME}
-          </p>
-          <h1 style="font-size: 20px; margin: 0 0 12px;">Confirme seu e-mail</h1>
-          <p style="margin: 0 0 16px; color: #4b5563;">
-            ${greetingHtml} ${bodyAfterGreeting}
-            <strong>${email}</strong>. O código expira em 1 hora.
-          </p>
-          <p style="margin: 0 0 24px; font-size: 32px; font-weight: 700; letter-spacing: 0.24em; color: #111827;">
-            ${code}
-          </p>
-          <p style="margin: 0 0 16px; color: #4b5563;">
-            Ou clique no botão para confirmar automaticamente e entrar no painel.
-          </p>
-          <a
-            href="${verifyUrl}"
-            style="display: inline-block; background: #111827; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 12px; font-weight: 600;"
-          >
-            Confirmar e entrar
-          </a>
-        </div>
-      `,
+      html: rendered,
     });
+  }
+
+  private resolveEstablishmentEmailLogoUrl(): string {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL')?.trim() ?? '';
+    return `${resolveBrandHomeUrl(frontendUrl)}/email/logo-horariocerto-400x67.png`;
+  }
+
+  private buildEstablishmentEmailVerificationContent(params: {
+    ownerName: string;
+    recipientEmail: string;
+    code: string;
+    verifyUrl: string;
+  }): string {
+    const greeting = params.ownerName
+      ? `Olá, ${this.escapeHtml(params.ownerName)}!`
+      : 'Olá!';
+    const code = this.escapeHtml(params.code);
+    const verifyUrl = this.escapeHtml(params.verifyUrl);
+    const email = this.escapeHtml(params.recipientEmail);
+    const logoUrl = this.escapeHtml(this.resolveEstablishmentEmailLogoUrl());
+    const brand = this.escapeHtml(BRAND_NAME);
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>Confirme seu e-mail</title>
+</head>
+<body bgcolor="#f9fafb" style="margin:0;padding:0;background-color:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#f9fafb" style="background-color:#f9fafb;padding:32px 16px;"><tr><td align="center" bgcolor="#f9fafb" style="background-color:#f9fafb;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#ffffff" style="max-width:480px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;">
+<tr><td bgcolor="#0F5F58" style="background-color:#0F5F58;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+<tr><td bgcolor="#ffffff" style="padding:32px 32px 24px;background-color:#ffffff;">
+<img src="${logoUrl}" width="200" height="33" alt="${brand}" style="display:block;width:200px;height:auto;border:0;margin:0 0 20px;">
+<h1 style="margin:0 0 12px;font-size:22px;font-weight:600;line-height:1.3;color:#0F5F58;">Confirme seu e-mail</h1>
+<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#111827;">${greeting}</p>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#6b7280;">Use o código abaixo para confirmar o e-mail <strong style="color:#111827;">${email}</strong>. O código expira em 1 hora.</p>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;"><tr><td align="center" bgcolor="#E7F4F2" style="background-color:#E7F4F2;border:1px solid #0F5F58;border-radius:12px;padding:16px 20px;"><p style="margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:32px;font-weight:700;line-height:1.2;letter-spacing:0.28em;color:#0F5F58;">${code}</p></td></tr></table>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#6b7280;">Ou clique no botão para confirmar automaticamente e entrar no painel.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 24px;"><tr><td bgcolor="#0F5F58" style="border-radius:12px;background-color:#0F5F58;"><a href="${verifyUrl}" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Confirmar e entrar</a></td></tr></table>
+<p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#6b7280;">Se o botão não funcionar, copie e cole este link no navegador:</p>
+<p style="margin:0 0 24px;font-size:12px;line-height:1.6;word-break:break-all;color:#9ca3af;">${verifyUrl}</p>
+<p style="margin:0;font-size:13px;line-height:1.6;color:#9ca3af;">Se não foi você, ignore este e-mail.</p>
+</td></tr>
+<tr><td bgcolor="#fafafa" style="padding:20px 32px;border-top:1px solid #f3f4f6;background-color:#fafafa;"><p style="margin:0;font-size:12px;line-height:1.5;color:#9ca3af;text-align:center;">${brand} · Agendamento online para barbearias e salões</p></td></tr>
+</table></td></tr></table>
+</body>
+</html>`;
   }
 
   async sendTeamInvite(params: {
@@ -447,7 +491,10 @@ export class MailService {
       return 'MAIL_PROVIDER inválido. Use "resend" ou "ses".';
     }
 
-    if (this.transportResolution.status === 'incomplete' && this.transportResolution.provider === 'ses') {
+    if (
+      this.transportResolution.status === 'incomplete' &&
+      this.transportResolution.provider === 'ses'
+    ) {
       return 'SES não está configurado. Preencha SES_SMTP_HOST, SES_SMTP_USER, SES_SMTP_PASS e SES_SMTP_FROM no backend.';
     }
 
@@ -485,7 +532,9 @@ export class MailService {
 
     if (!this.transporter || !this.transport) {
       const message = this.missingTransportMessage();
-      this.logger.warn(`Skipped email "${params.subject}" because mail transport is not configured.`);
+      this.logger.warn(
+        `Skipped email "${params.subject}" because mail transport is not configured.`,
+      );
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }
@@ -501,7 +550,9 @@ export class MailService {
         this.transport.provider === 'ses'
           ? 'SES_SMTP_FROM não está configurado no backend.'
           : 'SMTP_FROM não está configurado no backend.';
-      this.logger.warn(`Skipped email "${params.subject}" because the sender address is not configured.`);
+      this.logger.warn(
+        `Skipped email "${params.subject}" because the sender address is not configured.`,
+      );
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }
