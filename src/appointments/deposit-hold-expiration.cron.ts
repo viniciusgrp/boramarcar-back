@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { APP_TIME_ZONE } from '../common/app-time-zone';
 import { AppointmentsService } from './appointments.service';
 
 @Injectable()
@@ -8,7 +9,7 @@ export class DepositHoldExpirationCron {
 
   constructor(private readonly appointmentsService: AppointmentsService) {}
 
-  @Cron('*/15 * * * *')
+  @Cron('*/15 * * * *', { timeZone: APP_TIME_ZONE })
   async handleDepositHoldExpiration(): Promise<void> {
     try {
       const cancelled =

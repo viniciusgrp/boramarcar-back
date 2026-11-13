@@ -251,6 +251,9 @@ describe('PlatformService', () => {
         subscription_status: 'INACTIVE',
         trial_ends_at: '2027-01-15T23:59:59.000Z',
         comp_until: '2027-01-15T23:59:59.000Z',
+        asaas_subscription_id: null,
+        asaas_pending_payment_id: null,
+        asaas_open_invoice_url: null,
       }),
     );
   });

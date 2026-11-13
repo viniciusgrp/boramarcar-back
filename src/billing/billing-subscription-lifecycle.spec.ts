@@ -104,7 +104,7 @@ describe('BillingService SaaS billing', () => {
       {
         findById: jest.fn().mockResolvedValue(
           buildTenant({
-            trial_ends_at: '2026-12-01T00:00:00.000Z',
+            trial_ends_at: '2027-06-01T00:00:00.000Z',
             asaas_customer_id: null,
           }),
         ),
@@ -130,7 +130,7 @@ describe('BillingService SaaS billing', () => {
       expect.objectContaining({
         billingType: 'UNDEFINED',
         value: 69.9,
-        nextDueDate: '2026-12-01',
+        nextDueDate: '2027-05-31',
         externalReference: 'plan:tenant-1:PRO',
       }),
     );
@@ -264,7 +264,7 @@ describe('BillingService SaaS billing', () => {
     expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
       'tenant-1',
       expect.objectContaining({
-        subscriptionExpiresAt: '2026-12-01T00:00:00.000Z',
+        subscriptionExpiresAt: '2026-12-01T03:00:00.000Z',
       }),
     );
   });
@@ -670,8 +670,270 @@ describe('BillingService SaaS billing', () => {
     expect(updateSubscriptionByTenantId).toHaveBeenCalledTimes(1);
     expect(updateSubscriptionByTenantId).toHaveBeenCalledWith('tenant-1', {
       subscriptionStatus: 'ACTIVE',
-      subscriptionExpiresAt: '2026-12-01T00:00:00.000Z',
+      subscriptionExpiresAt: '2026-12-01T03:00:00.000Z',
     });
+  });
+
+  it('uses the Sao Paulo calendar date when the trial ends near UTC midnight', async () => {
+    const createSubscription = jest.fn().mockResolvedValue({
+      id: 'sub_asaas',
+      customer: 'cus_1',
+    });
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            trial_ends_at: '2027-06-01T02:30:00.000Z',
+          }),
+        ),
+        updateSubscriptionByTenantId: jest.fn().mockResolvedValue(buildTenant()),
+      },
+      {},
+      {
+        createSubscription,
+        listPayments: jest.fn().mockResolvedValue({
+          data: [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/1' }],
+        }),
+      },
+    );
+
+    await service.createCheckoutSession({
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      ownerEmail: 'owner@example.com',
+      planTier: 'SOLO',
+      cpfCnpj: '12345678901',
+    });
+
+    expect(createSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ nextDueDate: '2027-05-31' }),
+    );
+  });
+
+  it('does not reactivate a complimentary inactive tenant from an overdue charge', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const getSubscription = jest.fn().mockResolvedValue({
+      id: 'sub_old',
+      status: 'DELETED',
+      deleted: true,
+    });
+    const { service, affiliatesService } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            subscription_status: 'INACTIVE',
+            comp_until: '2027-06-01T00:00:00.000Z',
+            asaas_subscription_id: 'sub_old',
+            plan_tier: 'ELITE',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      { getSubscription },
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_comp_late',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_overdue',
+        customer: 'cus_1',
+        subscription: 'sub_old',
+        value: 120,
+        dueDate: '2026-10-01',
+        externalReference: 'plan:tenant-1:ELITE',
+      },
+    });
+
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+    expect(affiliatesService.accruePaidPlanInvoice).not.toHaveBeenCalled();
+  });
+
+  it('does not reactivate a complimentary tenant when the charge is another subscription', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const getSubscription = jest.fn();
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            subscription_status: 'INACTIVE',
+            comp_until: '2027-06-01T00:00:00.000Z',
+            asaas_subscription_id: null,
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      { getSubscription },
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_comp_other',
+      event: 'PAYMENT_CONFIRMED',
+      payment: {
+        id: 'pay_overdue',
+        customer: 'cus_1',
+        subscription: 'sub_old',
+        value: 69.9,
+        externalReference: 'plan:tenant-1:PRO',
+      },
+    });
+
+    expect(getSubscription).not.toHaveBeenCalled();
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+  });
+
+  it('activates a complimentary tenant when the payment is the current active Asaas subscription', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(buildTenant());
+    const getSubscription = jest.fn().mockResolvedValue({
+      id: 'sub_live',
+      status: 'ACTIVE',
+      deleted: false,
+    });
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            subscription_status: 'INACTIVE',
+            comp_until: '2027-06-01T00:00:00.000Z',
+            asaas_subscription_id: 'sub_live',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      { getSubscription },
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_comp_live',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_live',
+        customer: 'cus_1',
+        subscription: 'sub_live',
+        value: 69.9,
+        dueDate: '2026-11-01',
+        externalReference: 'plan:tenant-1:PRO',
+      },
+    });
+
+    expect(getSubscription).toHaveBeenCalledWith('sub_live');
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ subscriptionStatus: 'ACTIVE', planTier: 'PRO' }),
+    );
+  });
+
+  it('marks a deleted plan charge cancelled without changing tenant status', async () => {
+    const tenant = buildTenant({
+      subscription_status: 'INACTIVE',
+      asaas_subscription_id: 'sub_1',
+      asaas_pending_payment_id: 'pay_open',
+      asaas_open_invoice_url: 'https://asaas.com/i/open',
+    });
+    const updateSubscriptionByTenantId = jest.fn().mockImplementation(
+      (_id: string, patch: { asaasPendingPaymentId?: string | null }) => {
+        if (patch.asaasPendingPaymentId === null) {
+          tenant.asaas_pending_payment_id = null;
+          tenant.asaas_open_invoice_url = null;
+        }
+        return tenant;
+      },
+    );
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockImplementation(() => tenant),
+      updateSubscriptionByTenantId,
+    });
+
+    const event = {
+      id: 'evt_del_plan',
+      event: 'PAYMENT_DELETED',
+      payment: {
+        id: 'pay_open',
+        customer: 'cus_1',
+        subscription: 'sub_1',
+        invoiceUrl: 'https://asaas.com/i/open',
+        externalReference: 'plan:tenant-1:SOLO',
+      },
+    };
+
+    await service.processAsaasWebhookEvent(event);
+    await service.processAsaasWebhookEvent({
+      ...event,
+      id: 'evt_del_plan_again',
+    });
+
+    expect(affiliatesService.reverseInvoice).toHaveBeenCalledTimes(2);
+    expect(affiliatesService.reverseInvoice).toHaveBeenCalledWith(
+      'pay_open',
+      'payment_deleted',
+    );
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledTimes(1);
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionStatus: 'INACTIVE',
+        asaasPendingPaymentId: null,
+        asaasOpenInvoiceUrl: null,
+      }),
+    );
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ subscriptionStatus: 'ACTIVE' }),
+    );
+  });
+
+  it('leaves tenant status untouched when a deleted plan charge is not the open invoice', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          subscription_status: 'ACTIVE',
+          asaas_subscription_id: 'sub_1',
+          asaas_pending_payment_id: 'pay_other',
+        }),
+      ),
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_del_other',
+      event: 'PAYMENT_DELETED',
+      payment: {
+        id: 'pay_removed',
+        customer: 'cus_1',
+        subscription: 'sub_1',
+        externalReference: 'plan:tenant-1:SOLO',
+      },
+    });
+
+    expect(affiliatesService.reverseInvoice).toHaveBeenCalledWith(
+      'pay_removed',
+      'payment_deleted',
+    );
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+  });
+
+  it('does not change the Support AI entitlement when its charge is deleted', async () => {
+    const updateSupportAiEntitlement = jest.fn();
+    const { service } = buildService({
+      findById: jest.fn().mockResolvedValue(buildTenant()),
+      updateSupportAiEntitlement,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_ai_del',
+      event: 'PAYMENT_DELETED',
+      payment: {
+        id: 'pay_ai',
+        customer: 'cus_1',
+        externalReference: 'support-ai:tenant-1',
+      },
+    });
+
+    expect(updateSupportAiEntitlement).not.toHaveBeenCalled();
   });
 
   it('blocks checkout when APP_ENV is not production', async () => {
