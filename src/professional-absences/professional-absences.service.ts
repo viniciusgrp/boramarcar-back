@@ -5,15 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { bookingWallClockToInstantIso } from '../schedule/utils/booking-datetime.util';
 import {
   parseWallClockDateTime,
   wallClockToStorageIso,
 } from '../schedule/utils/wall-clock-datetime.util';
 import { CreateProfessionalAbsenceDto } from './dto/create-professional-absence.dto';
 import { ProfessionalAbsenceRangeDto } from './dto/professional-absence-range.dto';
-import {
-  ProfessionalAbsence,
-} from './entities/professional-absence.entity';
+import { ProfessionalAbsence } from './entities/professional-absence.entity';
 import { ProfessionalAbsenceRow } from './entities/professional-absence-row.entity';
 
 const ACTIVE_APPOINTMENT_STATUSES = [
@@ -216,8 +215,8 @@ export class ProfessionalAbsencesService {
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
       .in('status', [...ACTIVE_APPOINTMENT_STATUSES])
-      .lt('start_time', wallClockToStorageIso(endsAt))
-      .gt('end_time', wallClockToStorageIso(startsAt))
+      .lt('start_time', bookingWallClockToInstantIso(endsAt))
+      .gt('end_time', bookingWallClockToInstantIso(startsAt))
       .order('start_time', { ascending: true });
 
     if (error) {

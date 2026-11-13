@@ -40,11 +40,18 @@ import type { ProfessionalAbsenceRangeDto } from '../professional-absences/dto/p
 import { ProfessionalsService } from '../professionals/professionals.service';
 import { normalizeBookingSlotIntervalMinutes } from '../booking/utils/booking-slot-interval.util';
 import {
+  bookingDayBoundsIso,
+  bookingWallClockToInstantIso,
+  formatBookingLocalIso,
+  parseBookingDateTime,
+  resolveBookingTimeZone,
+  storedBookingInstantToWallClock,
+} from '../schedule/utils/booking-datetime.util';
+import {
   formatWallClockDate,
   getWallClockNow,
   isSameWallClockDay,
   parseWallClockDateTime,
-  wallClockToStorageIso,
 } from '../schedule/utils/wall-clock-datetime.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -266,7 +273,9 @@ export class AppointmentsService {
     const businessHours =
       await this.businessHoursService.findAllByTenant(tenantId);
     const businessOpenWeekdays = new Set(
-      businessHours.filter((hour) => !hour.isClosed).map((hour) => hour.dayOfWeek),
+      businessHours
+        .filter((hour) => !hour.isClosed)
+        .map((hour) => hour.dayOfWeek),
     );
 
     if (businessOpenWeekdays.size === 0) {
@@ -373,8 +382,12 @@ export class AppointmentsService {
     const businessOpen = schedule.openAt;
     const businessClose = schedule.closeAt;
 
-    const dayStartIso = `${date}T00:00:00`;
-    const dayEndIso = `${date}T23:59:59`;
+    const tenant = await this.tenantsService.findById(tenantId);
+    const timeZone = resolveBookingTimeZone(tenant?.timezone);
+    const { start: dayStartIso, end: dayEndIso } = bookingDayBoundsIso(
+      date,
+      timeZone,
+    );
 
     const { data: appointments, error: appointmentsError } =
       await this.supabaseService
@@ -419,8 +432,14 @@ export class AppointmentsService {
       const slotEnd = addMinutes(slotStart, durationMinutes);
 
       const hasConflict = bookedSlots.some((appointment) => {
-        const appointmentStart = parseWallClockDateTime(appointment.start_time);
-        const appointmentEnd = parseWallClockDateTime(appointment.end_time);
+        const appointmentStart = storedBookingInstantToWallClock(
+          appointment.start_time,
+          timeZone,
+        );
+        const appointmentEnd = storedBookingInstantToWallClock(
+          appointment.end_time,
+          timeZone,
+        );
         return slotStart < appointmentEnd && slotEnd > appointmentStart;
       });
 
@@ -471,8 +490,8 @@ export class AppointmentsService {
 
     const serviceIds = normalizeServiceIds(dto);
     const booking = await this.resolveBookingServices(dto.tenantId, serviceIds);
-
-    const startTime = parseWallClockDateTime(dto.startTime);
+    const timeZone = resolveBookingTimeZone(tenant.timezone);
+    const startTime = parseBookingDateTime(dto.startTime, timeZone);
     const endTime = addMinutes(startTime, booking.totalDurationMinutes);
 
     let professionalId = dto.professionalId?.trim() ?? '';
@@ -483,6 +502,8 @@ export class AppointmentsService {
         serviceIds,
         startTime,
         endTime,
+        undefined,
+        timeZone,
       );
     } else {
       if (!professionalId) {
@@ -501,6 +522,8 @@ export class AppointmentsService {
       professionalId,
       startTime,
       endTime,
+      undefined,
+      timeZone,
     );
 
     if (hasConflict) {
@@ -633,8 +656,8 @@ export class AppointmentsService {
         customer_id: customer.id,
         customer_name: customer.name.trim(),
         customer_phone: customer.phone.trim(),
-        start_time: wallClockToStorageIso(startTime),
-        end_time: wallClockToStorageIso(endTime),
+        start_time: bookingWallClockToInstantIso(startTime, timeZone),
+        end_time: bookingWallClockToInstantIso(endTime, timeZone),
         status: appointmentStatus,
         deposit_paid: isPaidWithPoints,
         payment_status: paymentStatus,
@@ -664,11 +687,7 @@ export class AppointmentsService {
 
     await this.markFirstAppointmentReceived(dto.tenantId);
 
-    await this.insertAppointmentServices(
-      appointment.id,
-      dto.tenantId,
-      booking,
-    );
+    await this.insertAppointmentServices(appointment.id, dto.tenantId, booking);
 
     if (loyaltyRewardId) {
       try {
@@ -744,7 +763,9 @@ export class AppointmentsService {
         customerEmail: customer.email,
       });
     } catch (checkoutError: unknown) {
-      await this.depositPaymentService.releasePendingDepositHold(appointment.id);
+      await this.depositPaymentService.releasePendingDepositHold(
+        appointment.id,
+      );
       this.logger.error(
         `Deposit checkout failed for appointment ${appointment.id}; hold released`,
       );
@@ -769,7 +790,9 @@ export class AppointmentsService {
     };
   }
 
-  async confirmDepositPayment(appointmentId: string): Promise<Appointment | null> {
+  async confirmDepositPayment(
+    appointmentId: string,
+  ): Promise<Appointment | null> {
     const result =
       await this.depositPaymentService.confirmDepositPayment(appointmentId);
 
@@ -841,7 +864,9 @@ export class AppointmentsService {
     );
   }
 
-  async markDepositRefunded(appointmentId: string): Promise<Appointment | null> {
+  async markDepositRefunded(
+    appointmentId: string,
+  ): Promise<Appointment | null> {
     const row =
       await this.depositPaymentService.markDepositRefunded(appointmentId);
     return row ? this.mapAppointmentRow(row) : null;
@@ -883,12 +908,13 @@ export class AppointmentsService {
       dto.customerPhone,
     );
 
-    let customerId: string | null = customer.customerId;
+    const customerId: string | null = customer.customerId;
 
     const booking = await this.resolveBookingServices(tenantId, serviceIds);
     const primaryServiceId = booking.items[0].id;
-
-    const startTime = parseWallClockDateTime(dto.startTime);
+    const tenant = await this.tenantsService.findById(tenantId);
+    const timeZone = resolveBookingTimeZone(tenant?.timezone);
+    const startTime = parseBookingDateTime(dto.startTime, timeZone);
     const durationMinutes = resolveAppointmentDurationMinutes(
       booking.totalDurationMinutes,
       dto.durationMinutes,
@@ -922,6 +948,8 @@ export class AppointmentsService {
       dto.professionalId,
       startTime,
       endTime,
+      undefined,
+      timeZone,
     );
 
     if (hasConflict) {
@@ -954,8 +982,8 @@ export class AppointmentsService {
         customer_id: customerId,
         customer_name: customer.name,
         customer_phone: customer.phone,
-        start_time: wallClockToStorageIso(startTime),
-        end_time: wallClockToStorageIso(endTime),
+        start_time: bookingWallClockToInstantIso(startTime, timeZone),
+        end_time: bookingWallClockToInstantIso(endTime, timeZone),
         status: 'CONFIRMED',
         deposit_paid: false,
         payment_status: 'PAID',
@@ -982,7 +1010,7 @@ export class AppointmentsService {
 
     await this.insertAppointmentServices(row.id, tenantId, booking);
 
-    return this.mapAdminAppointmentRow(row);
+    return this.mapAdminAppointmentRow(row, timeZone);
   }
 
   async updateDurationForTenant(
@@ -1024,7 +1052,12 @@ export class AppointmentsService {
       );
     }
 
-    const startTime = parseWallClockDateTime(existing.start_time);
+    const durationTenant = await this.tenantsService.findById(tenantId);
+    const timeZone = resolveBookingTimeZone(durationTenant?.timezone);
+    const startTime = storedBookingInstantToWallClock(
+      existing.start_time,
+      timeZone,
+    );
     const currentDuration = this.resolveStoredDurationMinutes(
       existing.total_duration_minutes,
       startTime,
@@ -1043,7 +1076,10 @@ export class AppointmentsService {
     }
 
     const endTime = addMinutes(startTime, durationMinutes);
-    const currentEnd = parseWallClockDateTime(existing.end_time);
+    const currentEnd = storedBookingInstantToWallClock(
+      existing.end_time,
+      timeZone,
+    );
     const dateKey = formatWallClockDate(startTime);
     const schedule =
       await this.professionalHoursService.getEffectiveScheduleForDate(
@@ -1069,6 +1105,7 @@ export class AppointmentsService {
       startTime,
       endTime,
       appointmentId,
+      timeZone,
     );
 
     if (hasConflict) {
@@ -1095,7 +1132,7 @@ export class AppointmentsService {
       .getClient()
       .from('appointments')
       .update({
-        end_time: wallClockToStorageIso(endTime),
+        end_time: bookingWallClockToInstantIso(endTime, timeZone),
         total_duration_minutes: durationMinutes,
       })
       .eq('id', appointmentId)
@@ -1113,7 +1150,7 @@ export class AppointmentsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapAdminAppointmentRow(data as SupabaseAppointmentWithRelations);
+    return this.mapAdminAppointmentRow(data, timeZone);
   }
 
   async findAllByDate(
@@ -1121,8 +1158,12 @@ export class AppointmentsService {
     date: string,
     scopedProfessionalId?: string,
   ): Promise<AdminAppointment[]> {
-    const dayStartIso = `${date}T00:00:00`;
-    const dayEndIso = `${date}T23:59:59`;
+    const agendaTenant = await this.tenantsService.findById(tenantId);
+    const timeZone = resolveBookingTimeZone(agendaTenant?.timezone);
+    const { start: dayStartIso, end: dayEndIso } = bookingDayBoundsIso(
+      date,
+      timeZone,
+    );
 
     let query = this.supabaseService
       .getClient()
@@ -1136,7 +1177,9 @@ export class AppointmentsService {
       query = query.eq('professional_id', scopedProfessionalId);
     }
 
-    const { data, error } = await query.order('start_time', { ascending: true });
+    const { data, error } = await query.order('start_time', {
+      ascending: true,
+    });
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -1144,7 +1187,7 @@ export class AppointmentsService {
 
     const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
 
-    return rows.map((row) => this.mapAdminAppointmentRow(row));
+    return rows.map((row) => this.mapAdminAppointmentRow(row, timeZone));
   }
 
   async findConflictingAppointmentsForAbsenceRange(
@@ -1165,8 +1208,8 @@ export class AppointmentsService {
       .eq('tenant_id', tenantId)
       .eq('professional_id', professionalId)
       .in('status', [...CUSTOMER_CANCELLABLE_STATUSES])
-      .lt('start_time', wallClockToStorageIso(endsAt))
-      .gt('end_time', wallClockToStorageIso(startsAt))
+      .lt('start_time', bookingWallClockToInstantIso(endsAt))
+      .gt('end_time', bookingWallClockToInstantIso(startsAt))
       .order('start_time', { ascending: true });
 
     if (error) {
@@ -1193,7 +1236,9 @@ export class AppointmentsService {
       query = query.eq('professional_id', scopedProfessionalId);
     }
 
-    const { data, error } = await query.order('start_time', { ascending: true });
+    const { data, error } = await query.order('start_time', {
+      ascending: true,
+    });
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -1357,7 +1402,10 @@ export class AppointmentsService {
       throw new BadRequestException('Query parameter "tenantId" is required');
     }
 
-    const customer = await this.customersService.getMe(authUserId, trimmedTenantId);
+    const customer = await this.customersService.getMe(
+      authUserId,
+      trimmedTenantId,
+    );
 
     if (!customer.customer?.id || !customer.isProfileComplete) {
       throw new BadRequestException(
@@ -1371,10 +1419,11 @@ export class AppointmentsService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
-    const customerIds = await this.customersService.findEquivalentCustomerIdsForTenant(
-      trimmedTenantId,
-      customer.customer.phone,
-    );
+    const customerIds =
+      await this.customersService.findEquivalentCustomerIdsForTenant(
+        trimmedTenantId,
+        customer.customer.phone,
+      );
     const scopedCustomerIds =
       customerIds.length > 0 ? customerIds : [customer.customer.id];
 
@@ -1411,7 +1460,8 @@ export class AppointmentsService {
         this.mapCustomerAppointmentRow(row, now, {
           id: tenant.id,
           slug: tenant.slug,
-          allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+          allowCustomerSelfCancellation:
+            tenant.allow_customer_self_cancellation,
           allowCustomerReschedule: tenant.allow_customer_reschedule,
         }),
       ),
@@ -1466,7 +1516,9 @@ export class AppointmentsService {
     >();
 
     for (const [customerId, mapping] of expanded.tenantByCustomerId) {
-      const tenant = tenantInfoByPrimaryCustomerId.get(mapping.primaryCustomerId);
+      const tenant = tenantInfoByPrimaryCustomerId.get(
+        mapping.primaryCustomerId,
+      );
 
       if (tenant) {
         tenantByCustomerId.set(customerId, tenant);
@@ -1496,8 +1548,10 @@ export class AppointmentsService {
         continue;
       }
 
-      const customerId = row.customer_id as string | undefined;
-      const tenant = customerId ? tenantByCustomerId.get(customerId) : undefined;
+      const customerId = row.customer_id;
+      const tenant = customerId
+        ? tenantByCustomerId.get(customerId)
+        : undefined;
 
       if (!tenant) {
         continue;
@@ -1527,7 +1581,9 @@ export class AppointmentsService {
       group.appointments.sort((left, right) => {
         const leftTime = new Date(left.startTime).getTime();
         const rightTime = new Date(right.startTime).getTime();
-        return scope === 'upcoming' ? leftTime - rightTime : rightTime - leftTime;
+        return scope === 'upcoming'
+          ? leftTime - rightTime
+          : rightTime - leftTime;
       });
 
       const tenantEntity = await this.tenantsService.findById(group.tenantId);
@@ -1566,7 +1622,10 @@ export class AppointmentsService {
       );
     }
 
-    const customer = await this.customersService.getMe(authUserId, trimmedTenantId);
+    const customer = await this.customersService.getMe(
+      authUserId,
+      trimmedTenantId,
+    );
 
     if (!customer.customer?.id || !customer.isProfileComplete) {
       throw new BadRequestException(
@@ -1580,10 +1639,11 @@ export class AppointmentsService {
       throw new NotFoundException('Estabelecimento não encontrado.');
     }
 
-    const customerIds = await this.customersService.findEquivalentCustomerIdsForTenant(
-      trimmedTenantId,
-      customer.customer.phone,
-    );
+    const customerIds =
+      await this.customersService.findEquivalentCustomerIdsForTenant(
+        trimmedTenantId,
+        customer.customer.phone,
+      );
     const scopedCustomerIds =
       customerIds.length > 0 ? customerIds : [customer.customer.id];
 
@@ -1652,18 +1712,12 @@ export class AppointmentsService {
 
       this.dispatchCustomerCancelledEmail(context);
 
-      return this.mapCustomerAppointmentRow(
-        updated as SupabaseAppointmentWithRelations & {
-          cancellation_requested_at?: string | null;
-        },
-        now,
-        {
-          id: tenant.id,
-          slug: tenant.slug,
-          allowCustomerSelfCancellation: true,
-          allowCustomerReschedule: tenant.allow_customer_reschedule,
-        },
-      );
+      return this.mapCustomerAppointmentRow(updated, now, {
+        id: tenant.id,
+        slug: tenant.slug,
+        allowCustomerSelfCancellation: true,
+        allowCustomerReschedule: tenant.allow_customer_reschedule,
+      });
     }
 
     const requestedAt = new Date().toISOString();
@@ -1831,10 +1885,7 @@ export class AppointmentsService {
           ? existing.appointment_services
           : []
       )
-        .map(
-          (item: { service_id?: string }) =>
-            item.service_id?.trim() || '',
-        )
+        .map((item: { service_id?: string }) => item.service_id?.trim() || '')
         .filter(Boolean);
 
       if (serviceIds.length === 0 && existing.service_id) {
@@ -1870,16 +1921,11 @@ export class AppointmentsService {
       }
 
       const commissionPercent = Number(professional?.commission_percent ?? 0);
-      const serviceLines = buildAppointmentCommissionServiceLines(
-        existing as Parameters<typeof buildAppointmentCommissionServiceLines>[0],
-      );
+      const serviceLines = buildAppointmentCommissionServiceLines(existing);
 
       updatePayload.commission_amount = appliedLoyaltyRewardId
         ? 0
-        : calculateAppointmentCommissionAmount(
-            serviceLines,
-            commissionPercent,
-          );
+        : calculateAppointmentCommissionAmount(serviceLines, commissionPercent);
     }
 
     if (isRevertingCompletion) {
@@ -2003,9 +2049,7 @@ export class AppointmentsService {
     }
 
     if (isCompletingAppointment && !appliedLoyaltyRewardId) {
-      const loyaltyServiceLines = buildAppointmentLoyaltyServiceLines(
-        existing as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
-      );
+      const loyaltyServiceLines = buildAppointmentLoyaltyServiceLines(existing);
 
       await this.loyaltyService.awardPointsForCompletedAppointment({
         tenantId,
@@ -2120,9 +2164,7 @@ export class AppointmentsService {
       .eq('appointment_id', appointmentId)
       .eq('tenant_id', tenantId);
 
-    const resolvedServiceIds = (
-      (serviceRows as Array<{ service_id: string }> | null) ?? []
-    )
+    const resolvedServiceIds = (serviceRows ?? [])
       .map((item) => item.service_id)
       .filter(Boolean);
 
@@ -2198,7 +2240,9 @@ export class AppointmentsService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select(`${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`)
+      .select(
+        `${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`,
+      )
       .eq('tenant_id', tenantId)
       .in('id', ids);
 
@@ -2218,7 +2262,8 @@ export class AppointmentsService {
       .filter((row) => {
         const expected = tokenById.get(row.id);
         return Boolean(
-          expected && this.guestAccessTokensMatch(row.guest_access_token, expected),
+          expected &&
+          this.guestAccessTokensMatch(row.guest_access_token, expected),
         );
       })
       .filter((row) => matchesCustomerAppointmentScope(row, params.scope, now))
@@ -2226,7 +2271,8 @@ export class AppointmentsService {
         this.mapCustomerAppointmentRow(row, now, {
           id: tenant.id,
           slug: tenant.slug,
-          allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+          allowCustomerSelfCancellation:
+            tenant.allow_customer_self_cancellation,
           allowCustomerReschedule: tenant.allow_customer_reschedule,
         }),
       )
@@ -2269,7 +2315,9 @@ export class AppointmentsService {
     const { data: existing, error: fetchError } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .select(`${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`)
+      .select(
+        `${ADMIN_APPOINTMENT_SELECT}, guest_access_token, cancellation_requested_at`,
+      )
       .eq('id', appointmentId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -2331,18 +2379,12 @@ export class AppointmentsService {
       );
       this.dispatchCustomerCancelledEmail(context);
 
-      return this.mapCustomerAppointmentRow(
-        updated as SupabaseAppointmentWithRelations & {
-          cancellation_requested_at?: string | null;
-        },
-        now,
-        {
-          id: tenant.id,
-          slug: tenant.slug,
-          allowCustomerSelfCancellation: true,
-          allowCustomerReschedule: tenant.allow_customer_reschedule,
-        },
-      );
+      return this.mapCustomerAppointmentRow(updated, now, {
+        id: tenant.id,
+        slug: tenant.slug,
+        allowCustomerSelfCancellation: true,
+        allowCustomerReschedule: tenant.allow_customer_reschedule,
+      });
     }
 
     const requestedAt = new Date().toISOString();
@@ -2393,9 +2435,7 @@ export class AppointmentsService {
     );
 
     if (!customer.customer?.id || !customer.isProfileComplete) {
-      throw new BadRequestException(
-        'Complete seu perfil antes de reagendar.',
-      );
+      throw new BadRequestException('Complete seu perfil antes de reagendar.');
     }
 
     const tenant = await this.tenantsService.findById(trimmedTenantId);
@@ -2600,7 +2640,8 @@ export class AppointmentsService {
     }
 
     const booking = await this.resolveBookingServices(tenant.id, serviceIds);
-    const startTime = parseWallClockDateTime(dto.startTime);
+    const timeZone = resolveBookingTimeZone(tenant.timezone);
+    const startTime = parseBookingDateTime(dto.startTime, timeZone);
     const endTime = addMinutes(startTime, booking.totalDurationMinutes);
 
     let professionalId = dto.professionalId?.trim() ?? '';
@@ -2612,6 +2653,7 @@ export class AppointmentsService {
         startTime,
         endTime,
         appointmentId,
+        timeZone,
       );
     } else {
       if (!professionalId) {
@@ -2631,6 +2673,7 @@ export class AppointmentsService {
       startTime,
       endTime,
       appointmentId,
+      timeZone,
     );
 
     if (hasConflict) {
@@ -2676,7 +2719,10 @@ export class AppointmentsService {
     const existingDiscount = Number(row.coupon_discount_amount ?? 0);
 
     if (!isPaidWithPoints && row.coupon_id && existingDiscount > 0) {
-      appointmentTotalPrice = Math.max(0, booking.totalPrice - existingDiscount);
+      appointmentTotalPrice = Math.max(
+        0,
+        booking.totalPrice - existingDiscount,
+      );
     }
 
     const professionalBookingSettings =
@@ -2700,8 +2746,8 @@ export class AppointmentsService {
       .update({
         professional_id: professionalId,
         service_id: primaryServiceId,
-        start_time: wallClockToStorageIso(startTime),
-        end_time: wallClockToStorageIso(endTime),
+        start_time: bookingWallClockToInstantIso(startTime, timeZone),
+        end_time: bookingWallClockToInstantIso(endTime, timeZone),
         status: nextStatus,
         total_duration_minutes: booking.totalDurationMinutes,
         total_price: appointmentTotalPrice,
@@ -2755,18 +2801,12 @@ export class AppointmentsService {
     );
     this.dispatchCustomerRescheduledEmail(context);
 
-    return this.mapCustomerAppointmentRow(
-      updated as SupabaseAppointmentWithRelations & {
-        cancellation_requested_at?: string | null;
-      },
-      now,
-      {
-        id: tenant.id,
-        slug: tenant.slug,
-        allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
-        allowCustomerReschedule: true,
-      },
-    );
+    return this.mapCustomerAppointmentRow(updated, now, {
+      id: tenant.id,
+      slug: tenant.slug,
+      allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
+      allowCustomerReschedule: true,
+    });
   }
 
   private async findAdminById(
@@ -2789,7 +2829,7 @@ export class AppointmentsService {
       return null;
     }
 
-    return this.mapAdminAppointmentRow(data as SupabaseAppointmentWithRelations);
+    return this.mapAdminAppointmentRow(data);
   }
 
   private extractServiceDuration(
@@ -2868,8 +2908,10 @@ export class AppointmentsService {
         (row) => this.normalizePhoneDigits(row.customer_phone) === phoneDigits,
       );
 
-      const resolvedName = trimmedName || existing?.customer_name || 'Cliente balcão';
-      const resolvedPhone = customerPhone?.trim() || existing?.customer_phone || '';
+      const resolvedName =
+        trimmedName || existing?.customer_name || 'Cliente balcão';
+      const resolvedPhone =
+        customerPhone?.trim() || existing?.customer_phone || '';
 
       const loyaltyCustomer =
         await this.loyaltyService.findOrCreateCustomerForAppointment(
@@ -2908,9 +2950,13 @@ export class AppointmentsService {
     startTime: Date,
     endTime: Date,
     excludeAppointmentId?: string,
+    timeZone?: string | null,
   ): Promise<boolean> {
-    const dayStartIso = `${formatWallClockDate(startTime)}T00:00:00`;
-    const dayEndIso = `${formatWallClockDate(startTime)}T23:59:59`;
+    const zone = resolveBookingTimeZone(timeZone);
+    const { start: dayStartIso, end: dayEndIso } = bookingDayBoundsIso(
+      formatWallClockDate(startTime),
+      zone,
+    );
 
     const { data: appointments, error } = await this.supabaseService
       .getClient()
@@ -2942,8 +2988,14 @@ export class AppointmentsService {
         return false;
       }
 
-      const appointmentStart = parseWallClockDateTime(appointment.start_time);
-      const appointmentEnd = parseWallClockDateTime(appointment.end_time);
+      const appointmentStart = storedBookingInstantToWallClock(
+        appointment.start_time,
+        zone,
+      );
+      const appointmentEnd = storedBookingInstantToWallClock(
+        appointment.end_time,
+        zone,
+      );
       return doTimeRangesOverlap(
         startTime,
         endTime,
@@ -2980,10 +3032,11 @@ export class AppointmentsService {
       durationMinutes: adminAppointment.durationMinutes,
       cancellationRequestedAt: row.cancellation_requested_at ?? null,
       canRequestCancellation: this.canCustomerRequestCancellation(row, now),
-      allowsAutomaticCancellation: Boolean(tenant?.allowCustomerSelfCancellation),
+      allowsAutomaticCancellation: Boolean(
+        tenant?.allowCustomerSelfCancellation,
+      ),
       canReschedule:
-        allowsCustomerReschedule &&
-        this.canCustomerReschedule(row, now),
+        allowsCustomerReschedule && this.canCustomerReschedule(row, now),
       allowsCustomerReschedule,
       canLeaveReview: false,
       reviewStatus: null,
@@ -3229,6 +3282,7 @@ export class AppointmentsService {
 
   private mapAdminAppointmentRow(
     row: SupabaseAppointmentWithRelations,
+    timeZone?: string | null,
   ): AdminAppointment {
     const lineItems = this.extractAppointmentLineItems(row);
     const couponFields = mapAppointmentCouponFields(row);
@@ -3238,8 +3292,8 @@ export class AppointmentsService {
       customerId: row.customer_id?.trim() ? row.customer_id : null,
       customerName: row.customer_name,
       customerPhone: row.customer_phone,
-      startTime: row.start_time,
-      endTime: row.end_time,
+      startTime: formatBookingLocalIso(row.start_time, timeZone),
+      endTime: formatBookingLocalIso(row.end_time, timeZone),
       status: row.status as AppointmentStatus,
       professionalId: row.professional_id,
       professionalName: this.extractRelationName(row.professionals),
@@ -3285,8 +3339,7 @@ export class AppointmentsService {
         serviceName: sorted
           .map((item) => this.extractRelationName(item.services))
           .join(' + '),
-        durationMinutes:
-          row.total_duration_minutes ?? durationFromJunction,
+        durationMinutes: row.total_duration_minutes ?? durationFromJunction,
         servicePrice: Number(row.total_price ?? priceFromJunction),
       };
     }
@@ -3398,7 +3451,7 @@ export class AppointmentsService {
 
     return {
       ...safeRow,
-      payment_status: (row.payment_status ?? 'PENDING') as PaymentStatus,
+      payment_status: row.payment_status ?? 'PENDING',
       commission_amount: Number(row.commission_amount ?? 0),
       guest_access_token: null,
     };
@@ -3415,7 +3468,10 @@ export class AppointmentsService {
       return false;
     }
 
-    return timingSafeEqual(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+    return timingSafeEqual(
+      Buffer.from(left, 'utf8'),
+      Buffer.from(right, 'utf8'),
+    );
   }
 
   private async deleteAppointmentCascade(
@@ -3444,7 +3500,9 @@ export class AppointmentsService {
       const { error } = await this.supabaseService
         .getClient()
         .from('tenants')
-        .update({ initial_setup_first_appointment_at: new Date().toISOString() })
+        .update({
+          initial_setup_first_appointment_at: new Date().toISOString(),
+        })
         .eq('id', tenantId)
         .is('initial_setup_first_appointment_at', null);
 
@@ -3695,7 +3753,9 @@ export class AppointmentsService {
       )
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : 'Unknown rejection email error';
+          error instanceof Error
+            ? error.message
+            : 'Unknown rejection email error';
         this.logger.error(
           `Failed to send rejection for appointment ${params.appointment.id}: ${message}`,
         );
@@ -3753,7 +3813,7 @@ export class AppointmentsService {
     const lineItems = this.extractAppointmentLineItems(row);
 
     return {
-      tenant: tenantRow as Tenant,
+      tenant: tenantRow,
       customer: (customerRow ?? {
         id: row.customer_id ?? '',
         tenant_id: tenantId,
@@ -3998,7 +4058,10 @@ export class AppointmentsService {
     dto: CreateAppointmentDto,
     authUserId?: string,
   ): void {
-    const requiredFields: (keyof CreateAppointmentDto)[] = ['tenantId', 'startTime'];
+    const requiredFields: (keyof CreateAppointmentDto)[] = [
+      'tenantId',
+      'startTime',
+    ];
 
     const hasMissingField = requiredFields.some(
       (field) => !dto[field]?.toString().trim(),
@@ -4036,6 +4099,7 @@ export class AppointmentsService {
     startTime: Date,
     endTime: Date,
     excludeAppointmentId?: string,
+    timeZone?: string | null,
   ): Promise<string> {
     const professionals =
       await this.professionalsService.findActivePerformingAllServices(
@@ -4074,6 +4138,7 @@ export class AppointmentsService {
         startTime,
         endTime,
         excludeAppointmentId,
+        timeZone,
       );
 
       if (hasConflict) {
@@ -4101,9 +4166,7 @@ export class AppointmentsService {
       );
     }
 
-    return availableProfessionalIds[
-      randomInt(availableProfessionalIds.length)
-    ] as string;
+    return availableProfessionalIds[randomInt(availableProfessionalIds.length)];
   }
 
   private resolveStoredDurationMinutes(
@@ -4119,7 +4182,7 @@ export class AppointmentsService {
       return totalDurationMinutes;
     }
 
-    const endTime = parseWallClockDateTime(endTimeIso);
+    const endTime = storedBookingInstantToWallClock(endTimeIso);
     return Math.round((endTime.getTime() - startTime.getTime()) / 60000);
   }
 

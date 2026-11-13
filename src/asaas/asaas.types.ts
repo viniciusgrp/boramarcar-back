@@ -77,9 +77,18 @@ export interface AsaasAccount {
   apiKey?: string;
   accountStatus?: {
     commercialInfo?: string;
+    bankAccountInfo?: string;
     documentation?: string;
     general?: string;
   };
+}
+
+/** GET /v3/myAccount/status authenticated with the subaccount apiKey. */
+export interface AsaasMyAccountStatus {
+  commercialInfo?: string;
+  bankAccountInfo?: string;
+  documentation?: string;
+  general?: string;
 }
 
 export interface AsaasListResponse<T> {
@@ -116,11 +125,7 @@ export interface AsaasWebhookConfig {
   events: string[];
 }
 
-export type AsaasCompanyType =
-  | 'MEI'
-  | 'LIMITED'
-  | 'INDIVIDUAL'
-  | 'ASSOCIATION';
+export type AsaasCompanyType = 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION';
 
 export interface CreateAsaasAccountPayload {
   name: string;

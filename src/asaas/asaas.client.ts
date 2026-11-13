@@ -10,6 +10,7 @@ import type {
   AsaasCheckout,
   AsaasCustomer,
   AsaasListResponse,
+  AsaasMyAccountStatus,
   AsaasPayment,
   AsaasSubscription,
   CreateAsaasAccountPayload,
@@ -61,7 +62,10 @@ export class AsaasClient {
   }
 
   async deleteSubscription(subscriptionId: string): Promise<void> {
-    await this.request('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    await this.request(
+      'DELETE',
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
   }
 
   async getSubscription(subscriptionId: string): Promise<AsaasSubscription> {
@@ -133,7 +137,9 @@ export class AsaasClient {
     return this.request<AsaasCheckout>('POST', '/checkouts', payload);
   }
 
-  async createAccount(payload: CreateAsaasAccountPayload): Promise<AsaasAccount> {
+  async createAccount(
+    payload: CreateAsaasAccountPayload,
+  ): Promise<AsaasAccount> {
     return this.request<AsaasAccount>('POST', '/accounts', payload);
   }
 
@@ -141,6 +147,19 @@ export class AsaasClient {
     return this.request<AsaasAccount>(
       'GET',
       `/accounts/${encodeURIComponent(accountId)}`,
+    );
+  }
+
+  /**
+   * Subaccount onboarding status. `accessToken` is the subaccount apiKey and
+   * must not be logged.
+   */
+  async getMyAccountStatus(accessToken: string): Promise<AsaasMyAccountStatus> {
+    return this.request<AsaasMyAccountStatus>(
+      'GET',
+      '/myAccount/status',
+      undefined,
+      accessToken,
     );
   }
 
@@ -165,8 +184,10 @@ export class AsaasClient {
     method: string,
     path: string,
     body?: unknown,
+    accessToken?: string,
   ): Promise<T> {
     const url = `${this.getBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+    const token = accessToken?.trim() || this.getApiKey();
 
     let response: Response;
 
@@ -176,7 +197,7 @@ export class AsaasClient {
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
-          access_token: this.getApiKey(),
+          access_token: token,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),

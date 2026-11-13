@@ -1,6 +1,12 @@
-import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
+import { storedBookingInstantToWallClock } from '../schedule/utils/booking-datetime.util';
 import { ptBR } from 'date-fns/locale';
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -24,7 +30,9 @@ export class MailService {
   constructor(private readonly configService: ConfigService) {
     this.transportResolution = resolveMailTransport(this.configService);
     this.transport =
-      this.transportResolution.status === 'ready' ? this.transportResolution.config : null;
+      this.transportResolution.status === 'ready'
+        ? this.transportResolution.config
+        : null;
     this.transporter = this.createTransporter();
     this.logTransportStatus();
   }
@@ -472,7 +480,10 @@ export class MailService {
       return 'MAIL_PROVIDER inválido. Use "resend" ou "ses".';
     }
 
-    if (this.transportResolution.status === 'incomplete' && this.transportResolution.provider === 'ses') {
+    if (
+      this.transportResolution.status === 'incomplete' &&
+      this.transportResolution.provider === 'ses'
+    ) {
       return 'SES não está configurado. Preencha SES_SMTP_HOST, SES_SMTP_USER, SES_SMTP_PASS e SES_SMTP_FROM no backend.';
     }
 
@@ -510,7 +521,9 @@ export class MailService {
 
     if (!this.transporter || !this.transport) {
       const message = this.missingTransportMessage();
-      this.logger.warn(`Skipped email "${params.subject}" because mail transport is not configured.`);
+      this.logger.warn(
+        `Skipped email "${params.subject}" because mail transport is not configured.`,
+      );
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }
@@ -526,7 +539,9 @@ export class MailService {
         this.transport.provider === 'ses'
           ? 'SES_SMTP_FROM não está configurado no backend.'
           : 'SMTP_FROM não está configurado no backend.';
-      this.logger.warn(`Skipped email "${params.subject}" because the sender address is not configured.`);
+      this.logger.warn(
+        `Skipped email "${params.subject}" because the sender address is not configured.`,
+      );
       if (params.failIfUnconfigured) {
         throw new ServiceUnavailableException(message);
       }
@@ -586,7 +601,10 @@ export class MailService {
     tenant: Tenant;
     showCustomerContact?: boolean;
   }): string {
-    const startTime = parseISO(params.appointment.startTime);
+    const startTime = storedBookingInstantToWallClock(
+      params.appointment.startTime,
+      params.tenant.timezone,
+    );
     const formattedDate = format(startTime, "EEEE, dd 'de' MMMM 'de' yyyy", {
       locale: ptBR,
     });

@@ -30,8 +30,10 @@ export function canExposeTenantAsaasIds(
   return role === 'OWNER';
 }
 
-export function stripTenantAsaasSecrets(tenant: Tenant): TenantWithoutAsaasSecrets {
-  return {
+export function stripTenantAsaasSecrets(
+  tenant: Tenant,
+): TenantWithoutAsaasSecrets {
+  return omitAsaasSubaccountApiKey({
     ...tenant,
     asaas_customer_id: null,
     asaas_subscription_id: null,
@@ -40,7 +42,7 @@ export function stripTenantAsaasSecrets(tenant: Tenant): TenantWithoutAsaasSecre
     asaas_account_id: null,
     asaas_wallet_id: null,
     support_ai_asaas_subscription_id: null,
-  };
+  });
 }
 
 export function toSafeTenantForRole(
@@ -48,8 +50,15 @@ export function toSafeTenantForRole(
   role: UserRole | null | undefined,
 ): Tenant | TenantWithoutAsaasSecrets {
   if (canExposeTenantAsaasIds(role)) {
-    return tenant;
+    return omitAsaasSubaccountApiKey(tenant);
   }
 
   return stripTenantAsaasSecrets(tenant);
+}
+
+function omitAsaasSubaccountApiKey<T extends object>(tenant: T): T {
+  const copy = { ...tenant };
+  delete (copy as { asaas_subaccount_api_key_encrypted?: unknown })
+    .asaas_subaccount_api_key_encrypted;
+  return copy;
 }

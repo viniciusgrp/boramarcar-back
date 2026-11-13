@@ -58,7 +58,10 @@ function parsePage(
 function uniqueIds(values: unknown[]): string[] {
   return [
     ...new Set(
-      values.filter((value): value is string => typeof value === 'string' && value.length > 0),
+      values.filter(
+        (value): value is string =>
+          typeof value === 'string' && value.length > 0,
+      ),
     ),
   ];
 }
@@ -143,15 +146,21 @@ export class PlatformService {
       ? await this.resolveUserEmail(tenant.owner_id)
       : null;
 
-    const [usage, loyaltyActive, loginActivity, subscriptionExtras, recentApiErrors, businessHours] =
-      await Promise.all([
-        this.computeUsage(tenant.id),
-        this.isLoyaltyActive(tenant.id),
-        this.resolveLoginActivity(tenant.id, tenant.owner_id),
-        this.resolveAsaasSubscriptionExtras(tenant),
-        this.fetchRecentApiErrors(tenant.id),
-        this.fetchBusinessHours(tenant.id),
-      ]);
+    const [
+      usage,
+      loyaltyActive,
+      loginActivity,
+      subscriptionExtras,
+      recentApiErrors,
+      businessHours,
+    ] = await Promise.all([
+      this.computeUsage(tenant.id),
+      this.isLoyaltyActive(tenant.id),
+      this.resolveLoginActivity(tenant.id, tenant.owner_id),
+      this.resolveAsaasSubscriptionExtras(tenant),
+      this.fetchRecentApiErrors(tenant.id),
+      this.fetchBusinessHours(tenant.id),
+    ]);
 
     return {
       id: tenant.id,
@@ -241,7 +250,8 @@ export class PlatformService {
         endTime: row.end_time as string,
         status: row.status as string,
         customerName: (row.customer_name as string) ?? '',
-        professionalName: professionals.get(row.professional_id as string) ?? null,
+        professionalName:
+          professionals.get(row.professional_id as string) ?? null,
         serviceName: services.get(row.service_id as string) ?? null,
       })),
       total: count ?? 0,
@@ -260,7 +270,10 @@ export class PlatformService {
     const { data, error, count } = await this.supabaseService
       .getClient()
       .from('services')
-      .select('id, name, duration_minutes, price, is_active, created_at, updated_at', { count: 'exact' })
+      .select(
+        'id, name, duration_minutes, price, is_active, created_at, updated_at',
+        { count: 'exact' },
+      )
       .eq('tenant_id', tenantId)
       .order('name', { ascending: true })
       .range(from, to);
@@ -348,16 +361,24 @@ export class PlatformService {
     return { professionals, users };
   }
 
-  async extendTrial(tenantId: string, days: number): Promise<PlatformTenantDetail> {
+  async extendTrial(
+    tenantId: string,
+    days: number,
+  ): Promise<PlatformTenantDetail> {
     const tenant = await this.fetchTenantById(tenantId);
     const now = Date.now();
     const currentEnd = parseUtcInstant(tenant.trial_ends_at);
     const base =
       currentEnd && currentEnd.getTime() > now ? currentEnd : new Date();
-    const next = new Date(base.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    const next = new Date(
+      base.getTime() + days * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const fields: Record<string, string | null> = { trial_ends_at: next };
 
-    if (isComplimentaryAccessActive(tenant) || tenant.comp_until === tenant.trial_ends_at) {
+    if (
+      isComplimentaryAccessActive(tenant) ||
+      tenant.comp_until === tenant.trial_ends_at
+    ) {
       fields.comp_until = next;
     }
 
@@ -412,7 +433,10 @@ export class PlatformService {
     return this.getTenantDetail(tenantId);
   }
 
-  async deleteAppointment(tenantId: string, appointmentId: string): Promise<void> {
+  async deleteAppointment(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<void> {
     await this.fetchTenantById(tenantId);
     await this.deleteOwnedRow('appointments', tenantId, appointmentId);
   }
@@ -467,7 +491,10 @@ export class PlatformService {
     await this.deleteAuthUsersIfOrphaned(authUserIds);
   }
 
-  async purgeOrphanedAuthUsers(): Promise<{ scanned: number; deleted: number }> {
+  async purgeOrphanedAuthUsers(): Promise<{
+    scanned: number;
+    deleted: number;
+  }> {
     let scanned = 0;
     let deleted = 0;
     let page = 1;
@@ -644,7 +671,9 @@ export class PlatformService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data as Tenant[]) ?? [];
+    return ((data as Tenant[]) ?? []).map((row) =>
+      stripAsaasSubaccountApiKey(row),
+    );
   }
 
   private async fetchTenantById(tenantId: string): Promise<Tenant> {
@@ -663,7 +692,7 @@ export class PlatformService {
       throw new NotFoundException('Cliente não encontrado.');
     }
 
-    return data as Tenant;
+    return stripAsaasSubaccountApiKey(data as Tenant);
   }
 
   private async computeUsage(tenantId: string): Promise<PlatformTenantUsage> {
@@ -931,9 +960,7 @@ export class PlatformService {
     return map;
   }
 
-  private async resolveAsaasSubscriptionExtras(
-    tenant: Tenant,
-  ): Promise<{
+  private async resolveAsaasSubscriptionExtras(tenant: Tenant): Promise<{
     monthlyAmountCents: number | null;
     currency: string | null;
     nextBillingAt: string | null;
@@ -949,7 +976,9 @@ export class PlatformService {
     };
   }
 
-  private async getPlanPriceCents(): Promise<Partial<Record<PlanTier, number>>> {
+  private async getPlanPriceCents(): Promise<
+    Partial<Record<PlanTier, number>>
+  > {
     if (this.planPriceCentsCache) {
       return this.planPriceCentsCache;
     }
@@ -988,7 +1017,9 @@ export class PlatformService {
     const now = new Date();
     const months: string[] = [];
     for (let i = 11; i >= 0; i -= 1) {
-      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const d = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1),
+      );
       const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
       months.push(key);
     }
@@ -1019,7 +1050,8 @@ export class PlatformService {
     businessHours: PlatformBusinessHour[],
   ): PlatformTenantSettings {
     return {
-      requireCustomerEmailConfirmation: tenant.require_customer_email_confirmation,
+      requireCustomerEmailConfirmation:
+        tenant.require_customer_email_confirmation,
       requireCustomerAccount: tenant.require_customer_account,
       allowCustomerSelfCancellation: tenant.allow_customer_self_cancellation,
       allowCustomerReschedule: tenant.allow_customer_reschedule,
@@ -1161,7 +1193,10 @@ export class PlatformService {
     }
   }
 
-  private async deleteByTenantId(table: string, tenantId: string): Promise<void> {
+  private async deleteByTenantId(
+    table: string,
+    tenantId: string,
+  ): Promise<void> {
     const { error } = await this.supabaseService
       .getClient()
       .from(table)
@@ -1172,4 +1207,12 @@ export class PlatformService {
       throw new InternalServerErrorException(error.message);
     }
   }
+}
+
+function stripAsaasSubaccountApiKey(row: Tenant): Tenant {
+  const copy = {
+    ...row,
+  } as Tenant & { asaas_subaccount_api_key_encrypted?: string };
+  delete copy.asaas_subaccount_api_key_encrypted;
+  return copy;
 }

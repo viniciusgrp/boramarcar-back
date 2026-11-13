@@ -39,6 +39,8 @@ export interface Tenant {
   allow_customer_reschedule: boolean;
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
+  /** IANA timezone. Missing values are treated as America/Sao_Paulo. */
+  timezone?: string | null;
   owner_id: string | null;
   asaas_customer_id: string | null;
   asaas_subscription_id: string | null;

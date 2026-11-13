@@ -65,6 +65,11 @@ import {
   parsePlanExternalReference,
 } from './utils/asaas-external-reference.util';
 import { isValidAsaasWebhookToken } from './utils/asaas-webhook-auth.util';
+import { mapAsaasAccountStatusUpdate } from './utils/asaas-account-status.util';
+import {
+  decryptAsaasSubaccountApiKey,
+  encryptAsaasSubaccountApiKey,
+} from './utils/asaas-subaccount-key.util';
 
 export interface CreateCheckoutSessionParams {
   tenantId: string;
@@ -86,7 +91,11 @@ export interface CreateDepositCheckoutSessionParams {
   customerEmail?: string | null;
 }
 
-const PAID_PAYMENT_STATUSES = new Set(['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH']);
+const PAID_PAYMENT_STATUSES = new Set([
+  'CONFIRMED',
+  'RECEIVED',
+  'RECEIVED_IN_CASH',
+]);
 const OPEN_INVOICE_STATUSES = new Set(['PENDING', 'OVERDUE']);
 
 const CHECKOUT_ITEM_IMAGE_BASE64 =
@@ -138,9 +147,7 @@ export class BillingService {
     this.logger.warn(
       `Skipped Asaas "${action}" because APP_ENV is not production and ASAAS_API_URL is not the sandbox.`,
     );
-    throw new BadRequestException(
-      'Asaas não está disponível neste ambiente.',
-    );
+    throw new BadRequestException('Asaas não está disponível neste ambiente.');
   }
 
   async handleAsaasWebhook(
@@ -274,11 +281,16 @@ export class BillingService {
     }
 
     if (type === 'PAYMENT_REFUNDED') {
-      await this.affiliatesService.reverseInvoice(payment.id, 'payment_refunded');
+      await this.affiliatesService.reverseInvoice(
+        payment.id,
+        'payment_refunded',
+      );
     }
   }
 
-  private async handlePlanPaymentReceived(payment: AsaasPayment): Promise<void> {
+  private async handlePlanPaymentReceived(
+    payment: AsaasPayment,
+  ): Promise<void> {
     const tenant = await this.resolveTenantFromPayment(payment);
 
     if (!tenant) {
@@ -315,7 +327,10 @@ export class BillingService {
       tenant.subscription_expires_at,
       this.periodEndFromPaidCharge(payment),
     );
-    const trialTransition = resolveSubscriptionTrialTransition(tenant, 'ACTIVE');
+    const trialTransition = resolveSubscriptionTrialTransition(
+      tenant,
+      'ACTIVE',
+    );
 
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
       asaasCustomerId: payment.customer ?? tenant.asaas_customer_id,
@@ -391,7 +406,10 @@ export class BillingService {
           appointmentId,
         );
 
-      if (result.outcome === 'confirmed' || result.outcome === 'already_confirmed') {
+      if (
+        result.outcome === 'confirmed' ||
+        result.outcome === 'already_confirmed'
+      ) {
         return;
       }
 
@@ -464,9 +482,10 @@ export class BillingService {
     subscription: AsaasSubscription,
   ): Promise<void> {
     if (isSupportAiExternalReference(subscription.externalReference)) {
-      const tenant = await this.tenantsService.findBySupportAiAsaasSubscriptionId(
-        subscription.id,
-      );
+      const tenant =
+        await this.tenantsService.findBySupportAiAsaasSubscriptionId(
+          subscription.id,
+        );
 
       if (tenant) {
         await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
@@ -539,9 +558,14 @@ export class BillingService {
     }
 
     const result =
-      await this.appointmentsService.confirmDepositPaymentDetailed(appointmentId);
+      await this.appointmentsService.confirmDepositPaymentDetailed(
+        appointmentId,
+      );
 
-    if (result.outcome === 'confirmed' || result.outcome === 'already_confirmed') {
+    if (
+      result.outcome === 'confirmed' ||
+      result.outcome === 'already_confirmed'
+    ) {
       return;
     }
 
@@ -599,33 +623,19 @@ export class BillingService {
       return;
     }
 
-    const general = account?.accountStatus?.general?.trim();
-    const chargesEnabled =
-      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED' ||
-      general === 'APPROVED';
-    const generalRejected =
-      type === 'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED' ||
-      general === 'REJECTED';
+    const patch = mapAsaasAccountStatusUpdate({
+      eventType: type,
+      general: account?.accountStatus?.general,
+      commercialInfo: account?.accountStatus?.commercialInfo,
+      bankAccountInfo: account?.accountStatus?.bankAccountInfo,
+      documentation: account?.accountStatus?.documentation,
+    });
 
-    if (chargesEnabled || generalRejected) {
-      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-        asaasChargesEnabled: chargesEnabled,
-        asaasDetailsSubmitted:
-          chargesEnabled ||
-          account?.accountStatus?.documentation === 'APPROVED',
-        asaasAccountStatus: chargesEnabled ? 'APPROVED' : 'REJECTED',
-      });
+    if (!patch) {
       return;
     }
 
-    if (
-      type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED' ||
-      type === 'ACCOUNT_STATUS_DOCUMENT_REJECTED'
-    ) {
-      await this.tenantsService.updateAsaasAccountStatus(tenant.id, {
-        asaasDetailsSubmitted: type === 'ACCOUNT_STATUS_DOCUMENT_APPROVED',
-      });
-    }
+    await this.tenantsService.updateAsaasAccountStatus(tenant.id, patch);
   }
 
   private async resolveTenantFromPayment(
@@ -779,7 +789,10 @@ export class BillingService {
 
     const tenant = await this.requireTenant(tenantId);
 
-    if (!tenantHasManageableSubscription(tenant) || !tenant.asaas_subscription_id) {
+    if (
+      !tenantHasManageableSubscription(tenant) ||
+      !tenant.asaas_subscription_id
+    ) {
       throw new BadRequestException(
         'Você precisa de uma assinatura ativa para trocar de plano.',
       );
@@ -824,7 +837,10 @@ export class BillingService {
 
     const tenant = await this.requireTenant(tenantId);
 
-    if (!tenant.asaas_subscription_id && !tenant.support_ai_asaas_subscription_id) {
+    if (
+      !tenant.asaas_subscription_id &&
+      !tenant.support_ai_asaas_subscription_id
+    ) {
       throw new BadRequestException('Não há assinatura Asaas para cancelar.');
     }
 
@@ -974,8 +990,7 @@ export class BillingService {
     }
 
     const payment = await this.findLatestSubscriptionPayment(subscription.id);
-    const paid =
-      payment?.status && PAID_PAYMENT_STATUSES.has(payment.status);
+    const paid = payment?.status && PAID_PAYMENT_STATUSES.has(payment.status);
 
     if (!paid) {
       return tenant;
@@ -991,7 +1006,10 @@ export class BillingService {
       resolvePlanTierFromValue(subscription.value, values) ??
       tenant.plan_tier;
 
-    const trialTransition = resolveSubscriptionTrialTransition(tenant, 'ACTIVE');
+    const trialTransition = resolveSubscriptionTrialTransition(
+      tenant,
+      'ACTIVE',
+    );
     const updated = await this.tenantsService.updateSubscriptionByTenantId(
       tenant.id,
       {
@@ -1161,7 +1179,9 @@ export class BillingService {
     };
   }
 
-  async getConnectStatus(tenantId: string): Promise<AsaasAccountStatusResponse> {
+  async getConnectStatus(
+    tenantId: string,
+  ): Promise<AsaasAccountStatusResponse> {
     const tenant = await this.requireTenant(tenantId);
     return this.buildAsaasAccountStatus(tenant);
   }
@@ -1193,6 +1213,8 @@ export class BillingService {
       );
     }
 
+    const subaccountKeySecret = this.getSubaccountKeyEncryptionSecret();
+
     try {
       const account = await this.asaasClient.createAccount({
         ...accountFields,
@@ -1220,9 +1242,21 @@ export class BillingService {
         },
       );
 
+      const apiKey = account.apiKey?.trim();
+
+      if (apiKey) {
+        await this.tenantsService.saveAsaasSubaccountApiKey(
+          tenant.id,
+          encryptAsaasSubaccountApiKey(apiKey, subaccountKeySecret),
+        );
+      }
+
       return this.buildAsaasAccountStatus(updated ?? tenant);
     } catch (error) {
-      if (error instanceof AsaasHttpError && isAsaasDuplicateAccountError(error)) {
+      if (
+        error instanceof AsaasHttpError &&
+        isAsaasDuplicateAccountError(error)
+      ) {
         throw new BadRequestException(
           'Este e-mail ou documento já possui uma conta no Asaas. Use outro e-mail para criar a subconta.',
         );
@@ -1243,7 +1277,30 @@ export class BillingService {
     }
 
     try {
-      const account = await this.asaasClient.getAccount(tenant.asaas_account_id);
+      const subaccountKey = await this.readSubaccountApiKey(tenant.id);
+
+      if (subaccountKey) {
+        const status = await this.asaasClient.getMyAccountStatus(subaccountKey);
+        const patch = mapAsaasAccountStatusUpdate({
+          general: status.general,
+          commercialInfo: status.commercialInfo,
+          bankAccountInfo: status.bankAccountInfo,
+          documentation: status.documentation,
+        });
+
+        if (!patch) {
+          this.logger.warn(
+            `Asaas account ${tenant.asaas_account_id} returned no general status. Local charges flag was kept.`,
+          );
+          return tenant;
+        }
+
+        return this.tenantsService.updateAsaasAccountStatus(tenant.id, patch);
+      }
+
+      const account = await this.asaasClient.getAccount(
+        tenant.asaas_account_id,
+      );
       const general = account.accountStatus?.general?.trim();
 
       if (!general) {
@@ -1288,7 +1345,9 @@ export class BillingService {
       .not('subscription_expires_at', 'is', null);
 
     if (error) {
-      this.logger.error(`Failed to load tenants for billing grace: ${error.message}`);
+      this.logger.error(
+        `Failed to load tenants for billing grace: ${error.message}`,
+      );
       return;
     }
 
@@ -1318,6 +1377,49 @@ export class BillingService {
     }
   }
 
+  private getSubaccountKeyEncryptionSecret(): string {
+    const secret = this.configService
+      .get<string>('ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY')
+      ?.trim();
+
+    if (!secret) {
+      throw new InternalServerErrorException(
+        'ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY is not configured',
+      );
+    }
+
+    return secret;
+  }
+
+  private async readSubaccountApiKey(tenantId: string): Promise<string | null> {
+    const ciphertext =
+      await this.tenantsService.findAsaasSubaccountApiKeyCiphertext(tenantId);
+
+    if (!ciphertext) {
+      return null;
+    }
+
+    const secret = this.configService
+      .get<string>('ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY')
+      ?.trim();
+
+    if (!secret) {
+      this.logger.warn(
+        `Tenant ${tenantId} has an encrypted Asaas subaccount key but ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY is not configured. Sync kept the legacy account lookup.`,
+      );
+      return null;
+    }
+
+    try {
+      return decryptAsaasSubaccountApiKey(ciphertext, secret);
+    } catch {
+      this.logger.warn(
+        `Tenant ${tenantId} has an Asaas subaccount key that could not be decrypted. Sync kept the legacy account lookup.`,
+      );
+      return null;
+    }
+  }
+
   private async resumePendingSubscription(
     tenant: Tenant,
     planTier: PlanTier,
@@ -1341,7 +1443,8 @@ export class BillingService {
       });
     }
 
-    const pendingPayment = await this.findOpenSubscriptionPayment(subscriptionId);
+    const pendingPayment =
+      await this.findOpenSubscriptionPayment(subscriptionId);
     const invoiceUrl = pendingPayment?.invoiceUrl?.trim();
 
     if (!invoiceUrl) {
@@ -1353,7 +1456,8 @@ export class BillingService {
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
       subscriptionStatus: tenant.subscription_status,
       planTier,
-      asaasPendingPaymentId: pendingPayment?.id ?? tenant.asaas_pending_payment_id,
+      asaasPendingPaymentId:
+        pendingPayment?.id ?? tenant.asaas_pending_payment_id,
       asaasOpenInvoiceUrl: invoiceUrl,
     });
 
@@ -1384,11 +1488,15 @@ export class BillingService {
 
   private buildSubaccountWebhook() {
     const origin = this.getRequiredUrl('PUBLIC_API_ORIGIN').replace(/\/$/, '');
-    const authToken = this.configService.get<string>('ASAAS_WEBHOOK_TOKEN')?.trim();
+    const authToken = this.configService
+      .get<string>('ASAAS_WEBHOOK_TOKEN')
+      ?.trim();
     const email = this.configService.get<string>('SUPPORT_EMAIL')?.trim();
 
     if (!authToken) {
-      throw new InternalServerErrorException('ASAAS_WEBHOOK_TOKEN is not configured');
+      throw new InternalServerErrorException(
+        'ASAAS_WEBHOOK_TOKEN is not configured',
+      );
     }
 
     if (!email) {
@@ -1518,9 +1626,7 @@ export class BillingService {
     const tenant = await this.tenantsService.findById(tenantId);
 
     if (!tenant) {
-      throw new NotFoundException(
-        `Tenant with id "${tenantId}" was not found`,
-      );
+      throw new NotFoundException(`Tenant with id "${tenantId}" was not found`);
     }
 
     return tenant;

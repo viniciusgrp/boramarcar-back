@@ -19,7 +19,7 @@ describe('toSafeTenantForRole', () => {
   it.each(['ADMIN', 'PROFESSIONAL', null, undefined] as const)(
     'strips Asaas IDs for role %s',
     (role) => {
-      const safe = toSafeTenantForRole(tenant, role as UserRole | null | undefined);
+      const safe = toSafeTenantForRole(tenant, role);
       expect(safe.asaas_customer_id).toBeNull();
       expect(safe.asaas_subscription_id).toBeNull();
       expect(safe.asaas_account_id).toBeNull();
@@ -34,6 +34,25 @@ describe('toSafeTenantForRole', () => {
     expect(safe.asaas_customer_id).toBe('cus_x');
     expect(safe.asaas_subscription_id).toBe('sub_x');
     expect(safe.asaas_wallet_id).toBe('wal_x');
+  });
+
+  it('never returns the encrypted subaccount api key', () => {
+    const withKey = {
+      ...tenant,
+      asaas_subaccount_api_key_encrypted: 'enc:v1:secret',
+    } as Tenant;
+
+    for (const role of ['OWNER', 'ADMIN', 'PROFESSIONAL', null] as const) {
+      const safe = toSafeTenantForRole(withKey, role);
+      expect(JSON.stringify(safe)).not.toContain('enc:v1:secret');
+      expect(JSON.stringify(safe)).not.toContain(
+        'asaas_subaccount_api_key_encrypted',
+      );
+    }
+
+    expect(JSON.stringify(stripTenantAsaasSecrets(withKey))).not.toContain(
+      'enc:v1:secret',
+    );
   });
 
   it('stripTenantAsaasSecrets nulls all Asaas secret fields', () => {

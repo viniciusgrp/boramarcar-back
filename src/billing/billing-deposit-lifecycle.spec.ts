@@ -255,6 +255,7 @@ describe('BillingService deposit lifecycle', () => {
             ASAAS_WEBHOOK_TOKEN: 'whsec',
             SUPPORT_EMAIL: 'ops@horariocerto.app',
             ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+            ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY: 'test-subaccount-key',
           })[key],
       } as unknown as ConfigService,
       {
