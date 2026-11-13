@@ -9,6 +9,8 @@ const ASAAS_TENANT_KEYS = [
   'asaas_account_id',
   'asaas_wallet_id',
   'support_ai_asaas_subscription_id',
+  'pending_plan_payment_id',
+  'pending_plan_invoice_url',
 ] as const;
 
 export type TenantWithoutAsaasSecrets = Omit<
@@ -22,6 +24,8 @@ export type TenantWithoutAsaasSecrets = Omit<
   asaas_account_id: null;
   asaas_wallet_id: null;
   support_ai_asaas_subscription_id: null;
+  pending_plan_payment_id: null;
+  pending_plan_invoice_url: null;
 };
 
 export function canExposeTenantAsaasIds(
@@ -42,6 +46,8 @@ export function stripTenantAsaasSecrets(
     asaas_account_id: null,
     asaas_wallet_id: null,
     support_ai_asaas_subscription_id: null,
+    pending_plan_payment_id: null,
+    pending_plan_invoice_url: null,
   });
 }
 

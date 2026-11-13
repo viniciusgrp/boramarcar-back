@@ -3,9 +3,11 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
   Headers,
   NotFoundException,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -19,12 +21,19 @@ import {
   canAccessDepositFeatures,
   normalizePlanTier,
 } from '../tenants/utils/plan-tier.util';
+import { PLAN_TIERS } from '../tenants/entities/plan-tier.type';
+import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { CreateAsaasAccountDto } from './dto/create-asaas-account.dto';
 import { BillingService } from './billing.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
+import type { BillingStatusResponse } from './entities/billing-status.entity';
+import type {
+  ChangePlanPreview,
+  ChangePlanResult,
+} from './entities/change-plan-preview.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 import type { AsaasWebhookEvent } from '../asaas/asaas.types';
 
@@ -76,13 +85,35 @@ export class BillingController {
     });
   }
 
+  @Get('status')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async getStatus(@CurrentUser() user: User): Promise<BillingStatusResponse> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.getBillingStatus(tenant.id);
+  }
+
+  @Get('change-plan/preview')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async previewChangePlan(
+    @CurrentUser() user: User,
+    @Query('planTier') planTier: string | undefined,
+  ): Promise<ChangePlanPreview> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.previewChangePlan(
+      tenant.id,
+      this.parsePlanTier(planTier),
+    );
+  }
+
   @Post('change-plan')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
   async changePlan(
     @CurrentUser() user: User,
     @Body() dto: ChangePlanDto,
-  ): Promise<Tenant> {
+  ): Promise<ChangePlanResult> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.billingService.changePlan(tenant.id, dto.planTier);
   }
@@ -93,6 +124,14 @@ export class BillingController {
   async cancel(@CurrentUser() user: User): Promise<Tenant> {
     const tenant = await this.resolveOwnerTenant(user.id);
     return this.billingService.cancelSubscription(tenant.id);
+  }
+
+  @Post('reactivate')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async reactivate(@CurrentUser() user: User): Promise<Tenant> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.reactivateSubscription(tenant.id);
   }
 
   @Post('invoice')
@@ -153,6 +192,18 @@ export class BillingController {
     const tenant = await this.resolveOwnerTenant(user.id);
     this.assertCanAccessDepositFeatures(tenant);
     return this.billingService.createConnectDashboardLink(tenant.id);
+  }
+
+  private parsePlanTier(planTier: string | undefined): PlanTier {
+    const normalized = planTier?.trim().toUpperCase() ?? '';
+
+    if (!PLAN_TIERS.includes(normalized as PlanTier)) {
+      throw new BadRequestException(
+        'Informe um plano válido: SOLO, PRO ou ELITE.',
+      );
+    }
+
+    return normalized as PlanTier;
   }
 
   private assertCanAccessDepositFeatures(tenant: Tenant): void {

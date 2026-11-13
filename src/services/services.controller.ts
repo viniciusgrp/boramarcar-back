@@ -20,6 +20,7 @@ import type { TenantAccessContext } from '../tenants/entities/tenant-access-cont
 import { TenantAccessGuard } from '../tenants/guards/tenant-access.guard';
 import { RolesGuard } from '../tenants/guards/roles.guard';
 import { TenantsService } from '../tenants/tenants.service';
+import { tenantCanChargeDeposits } from '../tenants/utils/deposit-charges.util';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { Service } from './entities/service.entity';
@@ -87,6 +88,7 @@ export class ServicesController {
       tenant.id,
       tenant.plan_tier,
       tenant.deposit_feature_enabled,
+      tenantCanChargeDeposits(tenant),
       dto,
     );
   }
@@ -104,6 +106,7 @@ export class ServicesController {
       tenant.id,
       tenant.plan_tier,
       tenant.deposit_feature_enabled,
+      tenantCanChargeDeposits(tenant),
       id,
       dto,
     );
@@ -121,6 +124,7 @@ export class ServicesController {
       tenant.id,
       tenant.plan_tier,
       tenant.deposit_feature_enabled,
+      tenantCanChargeDeposits(tenant),
       id,
     );
   }

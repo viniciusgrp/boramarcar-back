@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE } from '../../tenants/constants/deposit-feature.constants';
+import {
+  DEPOSIT_FEATURE_UNAVAILABLE_MESSAGE,
+  DEPOSIT_SUBACCOUNT_REQUIRED_MESSAGE,
+} from '../../tenants/constants/deposit-feature.constants';
 
 export interface ResolvedServiceDepositFields {
   requires_deposit: boolean;
@@ -10,6 +13,7 @@ export function resolveServiceDepositFields(
   canUseDepositFeatures: boolean,
   requiresDeposit?: boolean,
   depositAmount?: number | null,
+  canChargeDeposits = true,
 ): ResolvedServiceDepositFields {
   if (!canUseDepositFeatures) {
     if (requiresDeposit) {
@@ -21,6 +25,10 @@ export function resolveServiceDepositFields(
 
   if (!requiresDeposit) {
     return { requires_deposit: false, deposit_amount: null };
+  }
+
+  if (!canChargeDeposits) {
+    throw new BadRequestException(DEPOSIT_SUBACCOUNT_REQUIRED_MESSAGE);
   }
 
   if (depositAmount === undefined || depositAmount === null || depositAmount <= 0) {

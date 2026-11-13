@@ -25,6 +25,8 @@ describe('toSafeTenantForRole', () => {
       expect(safe.asaas_account_id).toBeNull();
       expect(safe.asaas_wallet_id).toBeNull();
       expect(safe.support_ai_asaas_subscription_id).toBeNull();
+      expect(safe.pending_plan_payment_id).toBeNull();
+      expect(safe.pending_plan_invoice_url).toBeNull();
       expect(canExposeTenantAsaasIds(role as UserRole | null)).toBe(false);
     },
   );
