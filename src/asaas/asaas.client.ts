@@ -114,6 +114,21 @@ export class AsaasClient implements OnModuleInit {
     );
   }
 
+  async createPayment(payload: {
+    customer: string;
+    billingType: 'UNDEFINED' | 'PIX' | 'BOLETO' | 'CREDIT_CARD';
+    value: number;
+    dueDate: string;
+    description: string;
+    externalReference: string;
+  }): Promise<AsaasPayment> {
+    return this.request<AsaasPayment>('POST', '/payments', payload);
+  }
+
+  async deletePayment(paymentId: string): Promise<void> {
+    await this.request('DELETE', `/payments/${encodeURIComponent(paymentId)}`);
+  }
+
   async getPayment(paymentId: string): Promise<AsaasPayment> {
     return this.request<AsaasPayment>(
       'GET',

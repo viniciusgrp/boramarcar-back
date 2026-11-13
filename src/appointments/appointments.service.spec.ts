@@ -69,6 +69,7 @@ function buildService() {
   };
   const tenantsService = {
     findById: jest.fn(),
+    claimDailyDepositChargeAlert: jest.fn().mockResolvedValue(false),
   };
   const billingService = {
     createDepositCheckoutSession: jest.fn(),
@@ -99,10 +100,20 @@ function buildService() {
   };
   const mailService = {
     sendAppointmentReminder: jest.fn().mockResolvedValue(undefined),
+    sendDepositChargeUnavailable: jest.fn().mockResolvedValue(undefined),
   };
+  const getUserById = jest.fn().mockResolvedValue({
+    data: { user: { email: 'owner@example.com' } },
+    error: null,
+  });
 
   const service = new AppointmentsService(
-    { getClient: () => ({ from }) } as never,
+    {
+      getClient: () => ({
+        from,
+        auth: { admin: { getUserById } },
+      }),
+    } as never,
     professionalHoursService as never,
     businessHoursService as never,
     professionalAbsencesService as never,
@@ -347,6 +358,110 @@ describe('AppointmentsService', () => {
       expect(result.appointment.status).toBe('CONFIRMED');
       expect(result.appointment.guest_access_token).toBeNull();
       expect(result.checkoutUrl).toBeUndefined();
+    });
+
+    it('confirms a public booking without deposit when the subaccount cannot charge and emails the owner once', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({
+          plan_tier: 'ELITE',
+          owner_id: 'owner-1',
+          asaas_wallet_id: null,
+          asaas_charges_enabled: false,
+        }),
+      );
+      ctx.tenantsService.claimDailyDepositChargeAlert.mockResolvedValue(true);
+      const depositBooking: ResolvedBookingServices = {
+        ...booking,
+        requiresDeposit: true,
+        totalDepositAmount: 20,
+        items: [
+          {
+            ...booking.items[0],
+            requiresDeposit: true,
+            depositAmount: 20,
+          },
+        ],
+      };
+      jest
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
+        .mockResolvedValue(depositBooking);
+      jest
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
+        .mockResolvedValue(false);
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
+        .mockResolvedValue({
+          name: 'João',
+          contact_phone: '11988888888',
+          bookingAcceptanceType: 'DEFAULT',
+        });
+      jest
+        .spyOn(ctx.service as never as { insertAppointmentServices: () => Promise<void> }, 'insertAppointmentServices')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ctx.service as never as { dispatchAppointmentEmails: () => void }, 'dispatchAppointmentEmails')
+        .mockReturnValue(undefined);
+
+      ctx.loyaltyService.findOrCreateCustomerForAppointment.mockResolvedValue({
+        customer: { id: 'cust-1', name: 'Ana', phone: '11999999999', email: null },
+        isNew: true,
+      });
+
+      const inserted = {
+        id: 'appt-1',
+        tenant_id: 'tenant-1',
+        professional_id: 'pro-1',
+        service_id: 'svc-1',
+        customer_id: 'cust-1',
+        customer_name: 'Ana',
+        customer_phone: '11999999999',
+        start_time: '2099-01-15T09:00:00.000Z',
+        end_time: '2099-01-15T10:00:00.000Z',
+        status: 'CONFIRMED',
+        deposit_paid: false,
+        payment_status: 'PAID',
+        commission_amount: 0,
+        booking_source: 'PUBLIC',
+        guest_access_token: 'secret-token',
+      } as Appointment;
+
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: inserted, error: null }),
+      );
+
+      const result = await ctx.service.create({
+        tenantId: 'tenant-1',
+        professionalId: 'pro-1',
+        startTime: '2099-01-15T09:00:00.000Z',
+        customerName: 'Ana',
+        customerPhone: '11999999999',
+        serviceIds: ['svc-1'],
+      });
+
+      expect(result.appointment.status).toBe('CONFIRMED');
+      expect(result.appointment.payment_status).toBe('PAID');
+      expect(result.checkoutUrl).toBeUndefined();
+      expect(ctx.billingService.createDepositCheckoutSession).not.toHaveBeenCalled();
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(ctx.tenantsService.claimDailyDepositChargeAlert).toHaveBeenCalledWith(
+        'tenant-1',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      );
+      expect(ctx.mailService.sendDepositChargeUnavailable).toHaveBeenCalledWith(
+        'owner@example.com',
+        expect.objectContaining({ id: 'tenant-1' }),
+      );
     });
 
     it('marks the first-appointment onboarding milestone after a successful booking', async () => {

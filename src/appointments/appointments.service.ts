@@ -53,6 +53,9 @@ import {
   assertProfessionalScopeForMutation,
 } from '../tenants/utils/tenant-user-scope.util';
 import { canAccessDepositFeatures } from '../tenants/utils/plan-tier.util';
+import { tenantCanChargeDeposits } from '../tenants/utils/deposit-charges.util';
+import { toAsaasDate } from '../billing/utils/billing-grace.util';
+import { resolvePublicBookingDeposit } from './utils/public-booking-deposit.util';
 import { FinanceService } from '../finance/finance.service';
 import { StockMovementsService } from '../inventory/stock-movements.service';
 import { resolveAppointmentServiceIds } from '../inventory/utils/service-bom.util';
@@ -569,22 +572,23 @@ export class AppointmentsService {
       appointmentTotalPrice = couponValidation.finalPrice;
     }
 
-    const requiresDepositPayment =
-      !isPaidWithPoints &&
-      canAccessDepositFeatures(
+    const depositDecision = resolvePublicBookingDeposit({
+      isPaidWithPoints,
+      planAllowsDeposit: canAccessDepositFeatures(
         tenant.plan_tier,
         tenant.deposit_feature_enabled,
-      ) &&
-      booking.requiresDeposit &&
-      booking.totalDepositAmount > 0;
+      ),
+      bookingRequiresDeposit: booking.requiresDeposit,
+      totalDepositAmount: booking.totalDepositAmount,
+      canChargeDeposits: tenantCanChargeDeposits(tenant),
+    });
+    const requiresDepositPayment = depositDecision.requiresDepositPayment;
 
-    if (
-      requiresDepositPayment &&
-      (!tenant.asaas_wallet_id?.trim() || !tenant.asaas_charges_enabled)
-    ) {
-      throw new BadRequestException(
-        'Este estabelecimento ainda não configurou a conta Asaas para receber sinais.',
+    if (depositDecision.skippedUnapprovedSubaccount) {
+      this.logger.warn(
+        `Agendamento público do estabelecimento ${tenant.id} seguiu sem sinal porque a conta de recebimentos Asaas não está aprovada.`,
       );
+      this.notifyOwnerDepositChargeUnavailable(tenant);
     }
 
     const professionalBookingSettings =
@@ -2666,7 +2670,11 @@ export class AppointmentsService {
       booking.requiresDeposit &&
       booking.totalDepositAmount > 0;
 
-    if (wouldRequireDeposit && !depositAlreadyPaid) {
+    if (
+      wouldRequireDeposit &&
+      !depositAlreadyPaid &&
+      tenantCanChargeDeposits(tenant)
+    ) {
       throw new BadRequestException(
         'Este reagendamento exigiria sinal. Cancele e agende novamente para pagar o sinal.',
       );
@@ -3843,6 +3851,35 @@ export class AppointmentsService {
     return this.resolveTenantOwnerEmail(ownerId);
   }
 
+  private notifyOwnerDepositChargeUnavailable(tenant: Tenant): void {
+    const today = toAsaasDate(new Date());
+
+    void this.tenantsService
+      .claimDailyDepositChargeAlert(tenant.id, today)
+      .then(async (claimed) => {
+        if (!claimed) {
+          return;
+        }
+
+        const ownerEmail = await this.resolveTenantOwnerEmail(tenant.owner_id);
+
+        if (!ownerEmail) {
+          return;
+        }
+
+        await this.mailService.sendDepositChargeUnavailable(ownerEmail, tenant);
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown deposit charge alert error';
+        this.logger.error(
+          `Failed to notify owner about deposits for tenant ${tenant.id}: ${message}`,
+        );
+      });
+  }
+
   private async resolveTenantOwnerEmail(
     ownerId: string | null,
   ): Promise<string | null> {
@@ -3925,6 +3962,12 @@ export class AppointmentsService {
       asaas_details_submitted: false,
       subscription_status: 'INACTIVE',
       subscription_expires_at: null,
+      subscription_cancel_at: null,
+      pending_plan_tier: null,
+      pending_plan_payment_id: null,
+      pending_plan_invoice_url: null,
+      pending_plan_effective_at: null,
+      can_charge_deposits: false,
       trial_starts_at: null,
       trial_ends_at: null,
       pre_subscription_trial_ends_at: null,

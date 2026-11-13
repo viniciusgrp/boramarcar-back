@@ -195,6 +195,29 @@ export class MailService {
     });
   }
 
+  async sendDepositChargeUnavailable(
+    ownerEmail: string,
+    tenant: Tenant,
+  ): Promise<void> {
+    const intro =
+      'A conta de recebimentos ainda não pode cobrar sinal. Os serviços que pedem sinal continuam cadastrados, e os novos agendamentos públicos entram sem essa cobrança até a aprovação no Asaas.';
+
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Sinal indisponível em ${tenant.name}`,
+      text: [
+        `Olá,`,
+        '',
+        intro,
+        '',
+        'Conclua o cadastro da conta de recebimentos e aguarde a aprovação para voltar a cobrar sinal.',
+        '',
+        `Equipe ${BRAND_NAME}`,
+      ].join('\n'),
+      html: `<p>Olá,</p><p>${intro}</p><p>Conclua o cadastro da conta de recebimentos e aguarde a aprovação para voltar a cobrar sinal.</p><p>Equipe ${BRAND_NAME}</p>`,
+    });
+  }
+
   async sendEstablishmentEmailVerification(params: {
     recipientEmail: string;
     ownerName: string;

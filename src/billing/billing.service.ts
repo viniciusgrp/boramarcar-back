@@ -31,6 +31,11 @@ import type {
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { CheckoutSessionResponse } from './entities/checkout-session-response.entity';
+import type {
+  ChangePlanPreview,
+  ChangePlanResult,
+} from './entities/change-plan-preview.entity';
+import type { BillingStatusResponse } from './entities/billing-status.entity';
 import type { AsaasAccountStatusResponse } from './entities/asaas-account-status.entity';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 import { resolveSubscriptionTrialTransition } from './utils/subscription-trial-transition.util';
@@ -67,11 +72,22 @@ import {
 import {
   buildDepositExternalReference,
   buildPlanExternalReference,
+  buildPlanUpgradeExternalReference,
   buildSupportAiExternalReference,
+  isPlanUpgradeExternalReference,
   isSupportAiExternalReference,
   parseDepositExternalReference,
   parsePlanExternalReference,
+  parsePlanUpgradeExternalReference,
 } from './utils/asaas-external-reference.util';
+import {
+  ASAAS_MIN_CHARGE_BRL,
+  paidPeriodDates,
+  planTierLabel,
+  quotePlanChange,
+} from './utils/plan-change-proration.util';
+import { tenantCanChargeDeposits } from '../tenants/utils/deposit-charges.util';
+import { DEPOSIT_CHARGE_ALERT_MESSAGE } from '../tenants/constants/deposit-feature.constants';
 import { isValidAsaasWebhookToken } from './utils/asaas-webhook-auth.util';
 import { mapAsaasAccountStatusUpdate } from './utils/asaas-account-status.util';
 import {
@@ -281,6 +297,11 @@ export class BillingService {
       return;
     }
 
+    if (isPlanUpgradeExternalReference(payment.externalReference)) {
+      await this.handlePlanUpgradePaymentEvent(type, payment);
+      return;
+    }
+
     if (type === 'PAYMENT_CONFIRMED' || type === 'PAYMENT_RECEIVED') {
       await this.handlePlanPaymentReceived(payment);
       return;
@@ -316,6 +337,13 @@ export class BillingService {
       return;
     }
 
+    if (tenant.subscription_cancel_at) {
+      this.logger.warn(
+        `Ignoring plan payment ${payment.id} for tenant ${tenant.id} because cancellation is scheduled for ${tenant.subscription_cancel_at}`,
+      );
+      return;
+    }
+
     if (
       currentSubscriptionId &&
       paymentSubscriptionId &&
@@ -338,7 +366,8 @@ export class BillingService {
     }
 
     const planRef = parsePlanExternalReference(payment.externalReference);
-    const planTier = planRef?.planTier ?? tenant.plan_tier;
+    const downgrade = this.resolveDuePlanDowngrade(tenant, payment);
+    const planTier = downgrade.planTier ?? planRef?.planTier ?? tenant.plan_tier;
     const subscriptionExpiresAt = laterIsoInstant(
       tenant.subscription_expires_at,
       this.periodEndFromPaidCharge(payment),
@@ -354,6 +383,14 @@ export class BillingService {
       subscriptionExpiresAt,
       planTier,
       ...trialTransition,
+      ...(downgrade.clearPending
+        ? {
+            pendingPlanTier: null,
+            pendingPlanPaymentId: null,
+            pendingPlanInvoiceUrl: null,
+            pendingPlanEffectiveAt: null,
+          }
+        : {}),
     });
 
     const amountPaidCents = Math.round((payment.value ?? 0) * 100);
@@ -520,6 +557,13 @@ export class BillingService {
     if (!existing || existing.asaas_subscription_id !== subscription.id) {
       this.logger.warn(
         `Ignoring ${subscription.id} cancellation because it is not the current subscription`,
+      );
+      return;
+    }
+
+    if (existing.subscription_cancel_at) {
+      this.logger.log(
+        `Ignoring Asaas subscription ${subscription.id} deletion for tenant ${existing.id} because cancellation is already scheduled locally.`,
       );
       return;
     }
@@ -885,49 +929,156 @@ export class BillingService {
     }
   }
 
-  async changePlan(tenantId: string, planTier: PlanTier): Promise<Tenant> {
+  async previewChangePlan(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<ChangePlanPreview> {
+    const tenant = await this.requireTenant(tenantId);
+    return this.buildChangePlanPreview(tenant, normalizePlanTier(planTier));
+  }
+
+  async changePlan(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<ChangePlanResult> {
     this.ensureAsaasOutbound('subscriptions.update');
 
-    const tenant = await this.requireTenant(tenantId);
+    let tenant = await this.requireTenant(tenantId);
+    tenant = await this.applyDueScheduledDowngradeIfNeeded(tenant);
+    const nextTier = normalizePlanTier(planTier);
 
-    if (!tenantHasManageableSubscription(tenant) || !tenant.asaas_subscription_id) {
+    if (tenant.subscription_cancel_at && this.hasCurrentPaidPeriod(tenant)) {
+      throw new BadRequestException(
+        'Reative a assinatura antes de trocar de plano.',
+      );
+    }
+
+    if (
+      !tenant.asaas_subscription_id ||
+      (!tenantHasManageableSubscription(tenant) &&
+        !tenantHasPendingAsaasSubscription(tenant))
+    ) {
       throw new BadRequestException(
         'Você precisa de uma assinatura ativa para trocar de plano.',
       );
     }
 
-    const nextTier = normalizePlanTier(planTier);
-    const value = resolvePlanValueBrl(this.configService, nextTier);
+    if (tenant.pending_plan_payment_id) {
+      if (tenant.pending_plan_tier === nextTier) {
+        return this.toChangePlanResult(
+          tenant,
+          this.buildChangePlanPreview(tenant, nextTier),
+          {
+            invoiceUrl: tenant.pending_plan_invoice_url,
+            applied: false,
+          },
+        );
+      }
+
+      throw new BadRequestException(
+        'Já existe uma troca de plano aguardando pagamento.',
+      );
+    }
+
+    if (nextTier === normalizePlanTier(tenant.plan_tier)) {
+      if (
+        tenant.pending_plan_tier &&
+        tenant.pending_plan_tier !== tenant.plan_tier
+      ) {
+        return this.restoreCurrentPlanPrice(tenant);
+      }
+
+      throw new BadRequestException('Você já está neste plano.');
+    }
+
+    const preview = this.buildChangePlanPreview(tenant, nextTier);
+
+    if (!this.hasCurrentPaidPeriod(tenant)) {
+      const updated = await this.applyPlanValueNow(tenant, nextTier);
+      return this.toChangePlanResult(
+        updated,
+        {
+          ...preview,
+          appliesImmediately: true,
+          effectiveAt: new Date().toISOString(),
+          proratedAmountBrl: null,
+          chargeAmountBrl: 0,
+          belowAsaasMinimum: false,
+        },
+        { invoiceUrl: null, applied: true },
+      );
+    }
+
+    if (preview.direction === 'downgrade' || preview.chargeAmountBrl <= 0) {
+      await this.updateAsaasPlanValue(
+        tenant.asaas_subscription_id,
+        tenant.id,
+        nextTier,
+      );
+
+      const clearsPending = preview.direction !== 'downgrade';
+      const updated = await this.requireSubscriptionUpdate(tenant.id, {
+        subscriptionStatus: tenant.subscription_status,
+        ...(clearsPending ? { planTier: nextTier } : {}),
+        pendingPlanTier: clearsPending ? null : nextTier,
+        pendingPlanPaymentId: null,
+        pendingPlanInvoiceUrl: null,
+        pendingPlanEffectiveAt: clearsPending
+          ? null
+          : tenant.subscription_expires_at,
+      });
+
+      return this.toChangePlanResult(updated, preview, {
+        invoiceUrl: null,
+        applied: clearsPending,
+      });
+    }
+
+    if (!tenant.asaas_customer_id) {
+      throw new BadRequestException(
+        'Não encontramos um cliente Asaas para este estabelecimento.',
+      );
+    }
+
+    let payment: AsaasPayment;
 
     try {
-      await this.asaasClient.updateSubscription(tenant.asaas_subscription_id, {
-        value,
-        description: `Horário Certo ${nextTier}`,
-        externalReference: buildPlanExternalReference(tenant.id, nextTier),
-        updatePendingPayments: true,
+      payment = await this.asaasClient.createPayment({
+        customer: tenant.asaas_customer_id,
+        billingType: 'UNDEFINED',
+        value: preview.chargeAmountBrl,
+        dueDate: toAsaasDate(new Date()),
+        description: `Diferença de plano ${planTierLabel(tenant.plan_tier)} para ${planTierLabel(nextTier)}`,
+        externalReference: buildPlanUpgradeExternalReference(tenant.id, nextTier),
       });
     } catch (error) {
       this.rethrowAsaasError(
         error,
-        'Não foi possível atualizar o plano no Asaas.',
+        'Não foi possível criar a cobrança da diferença de plano.',
       );
     }
 
-    const updated = await this.tenantsService.updateSubscriptionByTenantId(
-      tenant.id,
-      {
-        subscriptionStatus: tenant.subscription_status,
-        planTier: nextTier,
-      },
-    );
+    const invoiceUrl = payment.invoiceUrl?.trim() || null;
 
-    if (!updated) {
+    if (!invoiceUrl) {
+      await this.deletePaymentBestEffort(payment.id);
       throw new InternalServerErrorException(
-        'Não foi possível gravar o novo plano.',
+        'O Asaas não devolveu o link da cobrança da diferença de plano.',
       );
     }
 
-    return updated;
+    const updated = await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      pendingPlanTier: nextTier,
+      pendingPlanPaymentId: payment.id,
+      pendingPlanInvoiceUrl: invoiceUrl,
+      pendingPlanEffectiveAt: null,
+    });
+
+    return this.toChangePlanResult(updated, preview, {
+      invoiceUrl,
+      applied: false,
+    });
   }
 
   async cancelSubscription(tenantId: string): Promise<Tenant> {
@@ -939,32 +1090,15 @@ export class BillingService {
       throw new BadRequestException('Não há assinatura Asaas para cancelar.');
     }
 
-    if (tenant.support_ai_asaas_subscription_id) {
-      try {
-        await this.asaasClient.deleteSubscription(
-          tenant.support_ai_asaas_subscription_id,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `Failed to cancel Support AI subscription for tenant ${tenant.id}: ${
-            error instanceof Error ? error.message : 'unknown'
-          }`,
-        );
-      }
-    }
+    await this.cancelSupportAiSubscription(tenant);
 
-    if (tenant.asaas_subscription_id) {
-      try {
-        await this.asaasClient.deleteSubscription(tenant.asaas_subscription_id);
-      } catch (error) {
-        this.rethrowAsaasError(
-          error,
-          'Não foi possível cancelar a assinatura no Asaas.',
-        );
-      }
+    if (!tenant.asaas_subscription_id) {
+      return (await this.tenantsService.findById(tenant.id)) ?? tenant;
     }
 
     if (isComplimentaryAccessActive(tenant)) {
+      await this.deleteFutureUnpaidSubscriptionPayments(tenant.asaas_subscription_id);
+      await this.deletePlanSubscriptionOrThrow(tenant.asaas_subscription_id);
       const updated = await this.tenantsService.updateSubscriptionByTenantId(
         tenant.id,
         {
@@ -974,47 +1108,83 @@ export class BillingService {
               : tenant.subscription_status,
           asaasSubscriptionId: null,
           asaasPendingPaymentId: null,
+          subscriptionCancelAt: null,
         },
       );
-
-      await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
-        supportAiEnabled: false,
-        supportAiAsaasSubscriptionId: null,
-        supportAiStatus: 'canceled',
-      });
 
       return updated ?? tenant;
     }
 
-    const trialTransition = resolveSubscriptionTrialTransition(
-      tenant,
-      'CANCELED',
-    );
+    if (tenant.subscription_cancel_at && this.hasCurrentPaidPeriod(tenant)) {
+      return (await this.tenantsService.findById(tenant.id)) ?? tenant;
+    }
 
-    const updated = await this.tenantsService.updateSubscriptionByTenantId(
-      tenant.id,
-      {
-        subscriptionStatus: 'CANCELED',
-        asaasSubscriptionId: null,
-        asaasPendingPaymentId: null,
-        planTier: 'SOLO',
-        ...trialTransition,
-      },
-    );
+    if (this.hasCurrentPaidPeriod(tenant)) {
+      return this.scheduleCancelAtPeriodEnd(tenant);
+    }
 
-    await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
-      supportAiEnabled: false,
-      supportAiAsaasSubscriptionId: null,
-      supportAiStatus: 'canceled',
-    });
+    return this.cancelPlanAccessNow(tenant);
+  }
 
-    if (!updated) {
-      throw new InternalServerErrorException(
-        'Não foi possível cancelar a assinatura.',
+  async reactivateSubscription(tenantId: string): Promise<Tenant> {
+    this.ensureAsaasOutbound('subscriptions.create');
+
+    const tenant = await this.requireTenant(tenantId);
+
+    if (!tenant.subscription_cancel_at) {
+      throw new BadRequestException(
+        'Não há cancelamento agendado para reativar.',
       );
     }
 
-    return updated;
+    if (!this.hasCurrentPaidPeriod(tenant) || !tenant.subscription_expires_at) {
+      await this.expireScheduledCancellation(tenant);
+      throw new BadRequestException(
+        'O período pago já terminou. Assine novamente para continuar.',
+      );
+    }
+
+    if (!tenant.asaas_customer_id) {
+      throw new BadRequestException(
+        'Não encontramos um cliente Asaas para este estabelecimento.',
+      );
+    }
+
+    const planTier = normalizePlanTier(tenant.plan_tier);
+    const value = resolvePlanValueBrl(this.configService, planTier);
+    let subscription: AsaasSubscription;
+
+    try {
+      subscription = await this.asaasClient.createSubscription({
+        customer: tenant.asaas_customer_id,
+        billingType: 'UNDEFINED',
+        value,
+        nextDueDate: toAsaasDate(new Date(tenant.subscription_expires_at)),
+        cycle: 'MONTHLY',
+        description: `Horário Certo ${planTier}`,
+        externalReference: buildPlanExternalReference(tenant.id, planTier),
+      });
+    } catch (error) {
+      this.rethrowAsaasError(
+        error,
+        'Não foi possível reativar a assinatura no Asaas.',
+      );
+    }
+
+    try {
+      return await this.requireSubscriptionUpdate(tenant.id, {
+        subscriptionStatus: 'ACTIVE',
+        asaasCustomerId: tenant.asaas_customer_id,
+        asaasSubscriptionId: subscription.id,
+        asaasPendingPaymentId: null,
+        asaasOpenInvoiceUrl: null,
+        subscriptionCancelAt: null,
+        planTier,
+      });
+    } catch (error) {
+      await this.deleteAsaasSubscriptionBestEffort(subscription.id);
+      throw error;
+    }
   }
 
   async getOpenInvoiceUrl(tenantId: string): Promise<CheckoutSessionResponse> {
@@ -1257,6 +1427,7 @@ export class BillingService {
     const chargesEnabled = Boolean(tenant.asaas_charges_enabled);
     const detailsSubmitted = Boolean(tenant.asaas_details_submitted);
     const isReady = Boolean(walletId && chargesEnabled);
+    const canChargeDeposits = tenantCanChargeDeposits(tenant);
 
     return {
       accountId,
@@ -1265,6 +1436,7 @@ export class BillingService {
       chargesEnabled,
       detailsSubmitted,
       isReady,
+      canChargeDeposits,
       onboardingRequired: !walletId || !chargesEnabled,
       applicationFeePercent:
         this.resolveDepositApplicationFeePercentForTenant(tenant),
@@ -1275,6 +1447,57 @@ export class BillingService {
   async getConnectStatus(tenantId: string): Promise<AsaasAccountStatusResponse> {
     const tenant = await this.requireTenant(tenantId);
     return this.buildAsaasAccountStatus(tenant);
+  }
+
+  async getBillingStatus(tenantId: string): Promise<BillingStatusResponse> {
+    const tenant = await this.requireTenant(tenantId);
+    const currentTier = normalizePlanTier(tenant.plan_tier);
+    const soloMonthlyValueBrl = resolvePlanValueBrl(this.configService, 'SOLO');
+    const currentMonthlyValueBrl = resolvePlanValueBrl(
+      this.configService,
+      currentTier,
+    );
+    const canChargeDeposits = tenantCanChargeDeposits(tenant);
+    const servicesRequiringDeposit =
+      await this.countActiveServicesRequiringDeposit(tenant.id);
+    const alertActive = servicesRequiringDeposit > 0 && !canChargeDeposits;
+    const alreadyScheduled =
+      tenant.pending_plan_tier === 'SOLO' && !tenant.pending_plan_payment_id;
+    const available =
+      currentTier !== 'SOLO' &&
+      this.hasCurrentPaidPeriod(tenant) &&
+      !tenant.subscription_cancel_at &&
+      !tenant.pending_plan_payment_id &&
+      !alreadyScheduled &&
+      currentMonthlyValueBrl > soloMonthlyValueBrl;
+
+    return {
+      planTier: currentTier,
+      subscriptionStatus: tenant.subscription_status,
+      subscriptionExpiresAt: tenant.subscription_expires_at,
+      subscriptionCancelAt: tenant.subscription_cancel_at ?? null,
+      cancelAtPeriodEnd: Boolean(tenant.subscription_cancel_at),
+      pendingPlanTier: tenant.pending_plan_tier ?? null,
+      pendingPlanPaymentId: tenant.pending_plan_payment_id ?? null,
+      pendingPlanInvoiceUrl: tenant.pending_plan_invoice_url ?? null,
+      pendingPlanEffectiveAt: tenant.pending_plan_effective_at ?? null,
+      canChargeDeposits,
+      depositChargeAlert: {
+        active: alertActive,
+        message: alertActive ? DEPOSIT_CHARGE_ALERT_MESSAGE : null,
+      },
+      retentionOffer: {
+        targetPlanTier: 'SOLO',
+        monthlyValueBrl: soloMonthlyValueBrl,
+        available,
+        alreadyScheduled,
+        effectiveAt:
+          available || alreadyScheduled
+            ? (tenant.pending_plan_effective_at ??
+              tenant.subscription_expires_at)
+            : null,
+      },
+    };
   }
 
   async createAsaasAccount(
@@ -1422,6 +1645,9 @@ export class BillingService {
 
   @Cron('15 8 * * *', { timeZone: APP_TIME_ZONE })
   async markPastDueAfterGrace(): Promise<void> {
+    const now = new Date();
+    await this.applyScheduledBillingChanges(now);
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
@@ -1435,10 +1661,18 @@ export class BillingService {
       return;
     }
 
-    const now = new Date();
-
     for (const row of data ?? []) {
       const tenant = row as Tenant;
+
+      if (tenant.subscription_cancel_at) {
+        if (
+          (parseUtcInstant(tenant.subscription_cancel_at)?.getTime() ??
+            Number.POSITIVE_INFINITY) <= now.getTime()
+        ) {
+          await this.expireScheduledCancellation(tenant);
+        }
+        continue;
+      }
 
       if (!isPaidSubscriptionGraceExpired(tenant, now)) {
         continue;
@@ -1746,6 +1980,641 @@ export class BillingService {
       tenant.deposit_application_fee_percent,
       this.getDefaultDepositApplicationFeePercent(),
     );
+  }
+
+  private async handlePlanUpgradePaymentEvent(
+    type: string,
+    payment: AsaasPayment,
+  ): Promise<void> {
+    const ref = parsePlanUpgradeExternalReference(payment.externalReference);
+
+    if (!ref) {
+      return;
+    }
+
+    const tenant = await this.tenantsService.findById(ref.tenantId);
+
+    if (!tenant) {
+      this.logger.warn(
+        `Plan upgrade payment ${payment.id} without tenant ${ref.tenantId}`,
+      );
+      return;
+    }
+
+    if (type === 'PAYMENT_CONFIRMED' || type === 'PAYMENT_RECEIVED') {
+      await this.applyPaidPlanUpgrade(tenant, ref.planTier, payment);
+      return;
+    }
+
+    if (
+      type === 'PAYMENT_OVERDUE' ||
+      type === 'PAYMENT_DELETED' ||
+      type === 'PAYMENT_REFUNDED'
+    ) {
+      if (tenant.pending_plan_payment_id !== payment.id) {
+        return;
+      }
+
+      await this.clearPendingPlan(tenant);
+      this.logger.log(
+        `Cleared pending plan upgrade for tenant ${tenant.id} after ${type} on ${payment.id}`,
+      );
+    }
+  }
+
+  /**
+   * Applies the target tier after the difference is paid and updates the next
+   * Asaas cycles. Affiliate commission stays on the full subscription invoice,
+   * not on this prorated difference.
+   */
+  private async applyPaidPlanUpgrade(
+    tenant: Tenant,
+    target: PlanTier,
+    payment: AsaasPayment,
+  ): Promise<void> {
+    if (
+      tenant.pending_plan_payment_id &&
+      tenant.pending_plan_payment_id !== payment.id
+    ) {
+      this.logger.warn(
+        `Ignoring plan upgrade payment ${payment.id} for tenant ${tenant.id}; pending payment is ${tenant.pending_plan_payment_id}`,
+      );
+      return;
+    }
+
+    const alreadyApplied =
+      normalizePlanTier(tenant.plan_tier) === target &&
+      !tenant.pending_plan_payment_id &&
+      !tenant.pending_plan_tier;
+
+    if (alreadyApplied) {
+      return;
+    }
+
+    if (tenant.asaas_subscription_id) {
+      await this.updateAsaasPlanValue(
+        tenant.asaas_subscription_id,
+        tenant.id,
+        target,
+      );
+    }
+
+    await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      planTier: target,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+
+    this.logger.log(
+      `Plan upgrade applied: tenant=${tenant.id} payment=${payment.id} plan_tier=${target}`,
+    );
+  }
+
+  private resolveDuePlanDowngrade(
+    tenant: Tenant,
+    payment: AsaasPayment,
+  ): { planTier: PlanTier | null; clearPending: boolean } {
+    if (!tenant.pending_plan_tier || tenant.pending_plan_payment_id) {
+      return { planTier: null, clearPending: false };
+    }
+
+    if (this.isScheduledDowngradeDue(tenant, payment.dueDate)) {
+      return { planTier: tenant.pending_plan_tier, clearPending: true };
+    }
+
+    return { planTier: tenant.plan_tier, clearPending: false };
+  }
+
+  private isScheduledDowngradeDue(
+    tenant: Tenant,
+    dueDate?: string | null,
+  ): boolean {
+    const effective = parseUtcInstant(tenant.pending_plan_effective_at);
+
+    if (!effective) {
+      return true;
+    }
+
+    if (Date.now() >= effective.getTime()) {
+      return true;
+    }
+
+    const due = dueDate?.trim().slice(0, 10) ?? '';
+    return Boolean(due && due >= toAsaasDate(effective));
+  }
+
+  private async applyScheduledBillingChanges(now: Date): Promise<void> {
+    await this.expireDueScheduledCancellations(now);
+    await this.applyDueScheduledDowngrades(now);
+  }
+
+  private async expireDueScheduledCancellations(now: Date): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('*')
+      .not('subscription_cancel_at', 'is', null)
+      .lte('subscription_cancel_at', now.toISOString());
+
+    if (error) {
+      this.logger.error(
+        `Failed to load scheduled cancellations: ${error.message}`,
+      );
+      return;
+    }
+
+    for (const row of data ?? []) {
+      const tenant = row as Tenant;
+      const cancelAt = parseUtcInstant(tenant.subscription_cancel_at);
+
+      if (!cancelAt || cancelAt.getTime() > now.getTime()) {
+        continue;
+      }
+
+      await this.expireScheduledCancellation(tenant);
+    }
+  }
+
+  private async applyDueScheduledDowngrades(now: Date): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('*')
+      .not('pending_plan_effective_at', 'is', null)
+      .lte('pending_plan_effective_at', now.toISOString())
+      .is('pending_plan_payment_id', null);
+
+    if (error) {
+      this.logger.error(`Failed to load scheduled downgrades: ${error.message}`);
+      return;
+    }
+
+    for (const row of data ?? []) {
+      const tenant = row as Tenant;
+
+      if (
+        !tenant.pending_plan_tier ||
+        tenant.pending_plan_payment_id ||
+        tenant.subscription_cancel_at
+      ) {
+        continue;
+      }
+
+      const effective = parseUtcInstant(tenant.pending_plan_effective_at);
+
+      if (!effective || effective.getTime() > now.getTime()) {
+        continue;
+      }
+
+      await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+        subscriptionStatus: tenant.subscription_status,
+        planTier: tenant.pending_plan_tier,
+        pendingPlanTier: null,
+        pendingPlanPaymentId: null,
+        pendingPlanInvoiceUrl: null,
+        pendingPlanEffectiveAt: null,
+      });
+      this.logger.log(
+        `Applied scheduled downgrade: tenant=${tenant.id} plan_tier=${tenant.pending_plan_tier}`,
+      );
+    }
+  }
+
+  private async applyDueScheduledDowngradeIfNeeded(
+    tenant: Tenant,
+  ): Promise<Tenant> {
+    if (
+      !tenant.pending_plan_tier ||
+      tenant.pending_plan_payment_id ||
+      !this.isScheduledDowngradeDue(tenant, null)
+    ) {
+      return tenant;
+    }
+
+    const updated = await this.tenantsService.updateSubscriptionByTenantId(
+      tenant.id,
+      {
+        subscriptionStatus: tenant.subscription_status,
+        planTier: tenant.pending_plan_tier,
+        pendingPlanTier: null,
+        pendingPlanPaymentId: null,
+        pendingPlanInvoiceUrl: null,
+        pendingPlanEffectiveAt: null,
+      },
+    );
+
+    return updated ?? tenant;
+  }
+
+  private async expireScheduledCancellation(tenant: Tenant): Promise<Tenant | null> {
+    const updated = await this.tenantsService.updateSubscriptionByTenantId(
+      tenant.id,
+      {
+        subscriptionStatus: 'PAST_DUE',
+        asaasSubscriptionId: null,
+        asaasPendingPaymentId: null,
+        asaasOpenInvoiceUrl: null,
+        subscriptionCancelAt: null,
+        pendingPlanTier: null,
+        pendingPlanPaymentId: null,
+        pendingPlanInvoiceUrl: null,
+        pendingPlanEffectiveAt: null,
+      },
+    );
+    this.logger.log(
+      `Scheduled cancellation ended: tenant=${tenant.id} status=PAST_DUE plan_tier=${tenant.plan_tier}`,
+    );
+    return updated;
+  }
+
+  private async scheduleCancelAtPeriodEnd(tenant: Tenant): Promise<Tenant> {
+    const cancelAt = tenant.subscription_expires_at;
+
+    if (!cancelAt || !tenant.asaas_subscription_id) {
+      throw new BadRequestException(
+        'Não foi possível determinar o fim do período pago.',
+      );
+    }
+
+    await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      subscriptionCancelAt: cancelAt,
+    });
+
+    try {
+      if (tenant.pending_plan_payment_id) {
+        await this.deletePaymentBestEffort(tenant.pending_plan_payment_id);
+      }
+
+      await this.deleteFutureUnpaidSubscriptionPayments(
+        tenant.asaas_subscription_id,
+      );
+      await this.deletePlanSubscriptionOrThrow(tenant.asaas_subscription_id);
+    } catch (error) {
+      await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+        subscriptionStatus: tenant.subscription_status,
+        subscriptionCancelAt: null,
+      });
+      this.rethrowAsaasError(
+        error,
+        'Não foi possível cancelar a assinatura no Asaas.',
+      );
+    }
+
+    return this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      subscriptionCancelAt: cancelAt,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+  }
+
+  private async cancelPlanAccessNow(tenant: Tenant): Promise<Tenant> {
+    if (!tenant.asaas_subscription_id) {
+      return tenant;
+    }
+
+    await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      subscriptionCancelAt: new Date().toISOString(),
+    });
+
+    try {
+      if (tenant.pending_plan_payment_id) {
+        await this.deletePaymentBestEffort(tenant.pending_plan_payment_id);
+      }
+
+      await this.deleteFutureUnpaidSubscriptionPayments(
+        tenant.asaas_subscription_id,
+      );
+      await this.deletePlanSubscriptionOrThrow(tenant.asaas_subscription_id);
+    } catch (error) {
+      await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+        subscriptionStatus: tenant.subscription_status,
+        subscriptionCancelAt: null,
+      });
+      this.rethrowAsaasError(
+        error,
+        'Não foi possível cancelar a assinatura no Asaas.',
+      );
+    }
+
+    const nextStatus =
+      tenant.subscription_status === 'ACTIVE'
+        ? 'PAST_DUE'
+        : tenant.subscription_status;
+
+    return this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: nextStatus,
+      asaasSubscriptionId: null,
+      asaasPendingPaymentId: null,
+      asaasOpenInvoiceUrl: null,
+      subscriptionCancelAt: null,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+  }
+
+  private async cancelSupportAiSubscription(tenant: Tenant): Promise<void> {
+    if (!tenant.support_ai_asaas_subscription_id) {
+      return;
+    }
+
+    await this.deleteAsaasSubscriptionBestEffort(
+      tenant.support_ai_asaas_subscription_id,
+    );
+    await this.tenantsService.updateSupportAiEntitlement(tenant.id, {
+      supportAiEnabled: false,
+      supportAiAsaasSubscriptionId: null,
+      supportAiStatus: 'canceled',
+    });
+  }
+
+  private async deleteFutureUnpaidSubscriptionPayments(
+    subscriptionId: string,
+  ): Promise<void> {
+    let payments: AsaasPayment[] = [];
+
+    try {
+      const listed = await this.asaasClient.listPayments({
+        subscription: subscriptionId,
+        limit: 100,
+      });
+      payments = listed.data ?? [];
+    } catch (error) {
+      this.logger.warn(
+        `Could not list open payments for subscription ${subscriptionId}: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+      return;
+    }
+
+    const today = toAsaasDate(new Date());
+
+    for (const payment of payments) {
+      const status = (payment.status ?? '').toUpperCase();
+
+      if (status !== 'PENDING' && status !== 'OVERDUE') {
+        continue;
+      }
+
+      const due = payment.dueDate?.trim().slice(0, 10) ?? '';
+
+      if (due && due <= today) {
+        continue;
+      }
+
+      await this.deletePaymentBestEffort(payment.id);
+    }
+  }
+
+  private async deletePlanSubscriptionOrThrow(
+    subscriptionId: string,
+  ): Promise<void> {
+    try {
+      await this.asaasClient.deleteSubscription(subscriptionId);
+    } catch (error) {
+      if (error instanceof AsaasHttpError && error.statusCode === 404) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  private async deleteAsaasSubscriptionBestEffort(
+    subscriptionId: string,
+  ): Promise<void> {
+    try {
+      await this.asaasClient.deleteSubscription(subscriptionId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to cancel Asaas subscription ${subscriptionId}: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+    }
+  }
+
+  private async deletePaymentBestEffort(paymentId: string): Promise<void> {
+    try {
+      await this.asaasClient.deletePayment(paymentId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete Asaas payment ${paymentId}: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+    }
+  }
+
+  private hasCurrentPaidPeriod(tenant: Tenant, now = new Date()): boolean {
+    if (tenant.subscription_status !== 'ACTIVE') {
+      return false;
+    }
+
+    const expires = parseUtcInstant(tenant.subscription_expires_at);
+    return Boolean(expires && expires.getTime() > now.getTime());
+  }
+
+  private buildChangePlanPreview(
+    tenant: Tenant,
+    target: PlanTier,
+  ): ChangePlanPreview {
+    const currentTier = normalizePlanTier(tenant.plan_tier);
+    const currentMonthlyValueBrl = resolvePlanValueBrl(
+      this.configService,
+      currentTier,
+    );
+    const targetMonthlyValueBrl = resolvePlanValueBrl(
+      this.configService,
+      target,
+    );
+    const paid = this.hasCurrentPaidPeriod(tenant);
+    const dates =
+      paid && tenant.subscription_expires_at
+        ? paidPeriodDates(tenant.subscription_expires_at, new Date())
+        : null;
+    const quote = quotePlanChange({
+      currentMonthlyValueBrl,
+      targetMonthlyValueBrl,
+      periodStartDate: dates?.periodStartDate,
+      periodEndDate: dates?.periodEndDate,
+      todayDate: dates?.todayDate,
+    });
+    const nowIso = new Date().toISOString();
+    let effectiveAt: string | null = null;
+    let appliesImmediately = false;
+
+    if (!paid && quote.direction !== 'same') {
+      effectiveAt = nowIso;
+      appliesImmediately = true;
+    } else if (quote.direction === 'downgrade') {
+      effectiveAt = tenant.subscription_expires_at;
+    } else if (quote.direction === 'upgrade' && quote.chargeAmountBrl <= 0) {
+      effectiveAt = nowIso;
+      appliesImmediately = true;
+    }
+
+    return {
+      direction: quote.direction,
+      currentPlanTier: currentTier,
+      targetPlanTier: target,
+      currentMonthlyValueBrl: quote.currentMonthlyValueBrl,
+      targetMonthlyValueBrl: quote.targetMonthlyValueBrl,
+      proratedAmountBrl: paid ? quote.proratedAmountBrl : null,
+      chargeAmountBrl: paid ? quote.chargeAmountBrl : 0,
+      belowAsaasMinimum: paid ? quote.belowAsaasMinimum : false,
+      minimumChargeBrl: ASAAS_MIN_CHARGE_BRL,
+      effectiveAt,
+      appliesImmediately,
+    };
+  }
+
+  private toChangePlanResult(
+    tenant: Tenant,
+    preview: ChangePlanPreview,
+    extra: { invoiceUrl: string | null; applied: boolean },
+  ): ChangePlanResult {
+    return {
+      ...preview,
+      tenant,
+      invoiceUrl: extra.invoiceUrl,
+      applied: extra.applied,
+    };
+  }
+
+  private async applyPlanValueNow(
+    tenant: Tenant,
+    nextTier: PlanTier,
+  ): Promise<Tenant> {
+    if (!tenant.asaas_subscription_id) {
+      throw new BadRequestException(
+        'Você precisa de uma assinatura ativa para trocar de plano.',
+      );
+    }
+
+    await this.updateAsaasPlanValue(
+      tenant.asaas_subscription_id,
+      tenant.id,
+      nextTier,
+    );
+
+    return this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      planTier: nextTier,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+  }
+
+  private async restoreCurrentPlanPrice(tenant: Tenant): Promise<ChangePlanResult> {
+    if (!tenant.asaas_subscription_id) {
+      throw new BadRequestException(
+        'Você precisa de uma assinatura ativa para trocar de plano.',
+      );
+    }
+
+    const currentTier = normalizePlanTier(tenant.plan_tier);
+    await this.updateAsaasPlanValue(
+      tenant.asaas_subscription_id,
+      tenant.id,
+      currentTier,
+    );
+    const updated = await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+
+    return this.toChangePlanResult(
+      updated,
+      this.buildChangePlanPreview(updated, currentTier),
+      { invoiceUrl: null, applied: true },
+    );
+  }
+
+  private async updateAsaasPlanValue(
+    subscriptionId: string,
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<void> {
+    const value = resolvePlanValueBrl(this.configService, planTier);
+
+    try {
+      await this.asaasClient.updateSubscription(subscriptionId, {
+        value,
+        description: `Horário Certo ${planTier}`,
+        externalReference: buildPlanExternalReference(tenantId, planTier),
+        updatePendingPayments: true,
+      });
+    } catch (error) {
+      this.rethrowAsaasError(
+        error,
+        'Não foi possível atualizar o plano no Asaas.',
+      );
+    }
+  }
+
+  private async clearPendingPlan(tenant: Tenant): Promise<void> {
+    await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+  }
+
+  private async requireSubscriptionUpdate(
+    tenantId: string,
+    payload: Parameters<TenantsService['updateSubscriptionByTenantId']>[1],
+  ): Promise<Tenant> {
+    const updated = await this.tenantsService.updateSubscriptionByTenantId(
+      tenantId,
+      payload,
+    );
+
+    if (!updated) {
+      throw new InternalServerErrorException(
+        'Não foi possível gravar a assinatura.',
+      );
+    }
+
+    return updated;
+  }
+
+  private async countActiveServicesRequiringDeposit(
+    tenantId: string,
+  ): Promise<number> {
+    const { count, error } = await this.supabaseService
+      .getClient()
+      .from('services')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .eq('requires_deposit', true);
+
+    if (error) {
+      this.logger.warn(
+        `Failed to count deposit services for tenant ${tenantId}: ${error.message}`,
+      );
+      return 0;
+    }
+
+    return count ?? 0;
   }
 
   private rethrowAsaasError(error: unknown, fallback: string): never {

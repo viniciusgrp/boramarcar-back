@@ -5,6 +5,8 @@ export interface AsaasAccountStatusResponse {
   chargesEnabled: boolean;
   detailsSubmitted: boolean;
   isReady: boolean;
+  /** True when the subaccount can receive appointment deposits. */
+  canChargeDeposits: boolean;
   onboardingRequired: boolean;
   applicationFeePercent: number;
   canOpenDashboard: boolean;

@@ -91,6 +91,8 @@ import type { TenantAccessContext } from './entities/tenant-access-context.entit
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
 import type { TenantUser } from './entities/tenant-user.entity';
 import { canAccessPanelWithLinkedProfessional } from './utils/inactive-professional-access.util';
+import { tenantCanChargeDeposits } from './utils/deposit-charges.util';
+import { PLAN_TIERS } from './entities/plan-tier.type';
 
 export interface TenantSubscriptionUpdatePayload {
   asaasCustomerId?: string | null;
@@ -99,7 +101,12 @@ export interface TenantSubscriptionUpdatePayload {
   asaasOpenInvoiceUrl?: string | null;
   subscriptionStatus: SubscriptionStatus;
   subscriptionExpiresAt?: string | null;
+  subscriptionCancelAt?: string | null;
   planTier?: PlanTier;
+  pendingPlanTier?: PlanTier | null;
+  pendingPlanPaymentId?: string | null;
+  pendingPlanInvoiceUrl?: string | null;
+  pendingPlanEffectiveAt?: string | null;
   trialEndsAt?: string | null;
   preSubscriptionTrialEndsAt?: string | null;
   compUntil?: string | null;
@@ -156,6 +163,8 @@ function mapTenantRow(row: Tenant): Tenant {
     ...(row as Tenant & { asaas_subaccount_api_key_encrypted?: string | null }),
   };
   delete source.asaas_subaccount_api_key_encrypted;
+  delete (source as { deposit_charge_alerted_on?: string | null })
+    .deposit_charge_alerted_on;
 
   return {
     ...source,
@@ -217,6 +226,12 @@ function mapTenantRow(row: Tenant): Tenant {
     ),
     asaas_charges_enabled: Boolean(row.asaas_charges_enabled),
     asaas_details_submitted: Boolean(row.asaas_details_submitted),
+    subscription_cancel_at: row.subscription_cancel_at ?? null,
+    pending_plan_tier: readPendingPlanTier(row.pending_plan_tier),
+    pending_plan_payment_id: row.pending_plan_payment_id ?? null,
+    pending_plan_invoice_url: row.pending_plan_invoice_url ?? null,
+    pending_plan_effective_at: row.pending_plan_effective_at ?? null,
+    can_charge_deposits: tenantCanChargeDeposits(row),
     admin_secondary_color_light: normalizeAdminThemeColor(
       row.admin_secondary_color_light,
       DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT,
@@ -235,6 +250,16 @@ function mapTenantRow(row: Tenant): Tenant {
       row.background_pattern_icon_count,
     ),
   };
+}
+
+function readPendingPlanTier(
+  value: string | null | undefined,
+): PlanTier | null {
+  if (value && PLAN_TIERS.includes(value as PlanTier)) {
+    return value as PlanTier;
+  }
+
+  return null;
 }
 
 function normalizeTenantBookingAcceptanceType(
@@ -685,6 +710,26 @@ export class TenantsService {
 
     if (payload.planTier !== undefined) {
       updatePayload.plan_tier = payload.planTier;
+    }
+
+    if (payload.subscriptionCancelAt !== undefined) {
+      updatePayload.subscription_cancel_at = payload.subscriptionCancelAt;
+    }
+
+    if (payload.pendingPlanTier !== undefined) {
+      updatePayload.pending_plan_tier = payload.pendingPlanTier;
+    }
+
+    if (payload.pendingPlanPaymentId !== undefined) {
+      updatePayload.pending_plan_payment_id = payload.pendingPlanPaymentId;
+    }
+
+    if (payload.pendingPlanInvoiceUrl !== undefined) {
+      updatePayload.pending_plan_invoice_url = payload.pendingPlanInvoiceUrl;
+    }
+
+    if (payload.pendingPlanEffectiveAt !== undefined) {
+      updatePayload.pending_plan_effective_at = payload.pendingPlanEffectiveAt;
     }
 
     applySubscriptionTrialFields(updatePayload, payload);
@@ -1661,6 +1706,34 @@ export class TenantsService {
     }
 
     return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  async claimDailyDepositChargeAlert(
+    tenantId: string,
+    alertedOn: string,
+  ): Promise<boolean> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        deposit_charge_alerted_on: alertedOn,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId)
+      .or(
+        `deposit_charge_alerted_on.is.null,deposit_charge_alerted_on.lt.${alertedOn}`,
+      )
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(
+        `Failed to claim deposit charge alert for tenant ${tenantId}: ${error.message}`,
+      );
+      return false;
+    }
+
+    return Boolean(data && typeof data === 'object' && 'id' in data);
   }
 
   async saveAsaasSubaccountApiKey(

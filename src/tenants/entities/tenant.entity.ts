@@ -51,6 +51,14 @@ export interface Tenant {
   asaas_details_submitted: boolean;
   subscription_status: SubscriptionStatus;
   subscription_expires_at: string | null;
+  /** Set while cancel-at-period-end is scheduled. Not applied until that instant. */
+  subscription_cancel_at: string | null;
+  pending_plan_tier: PlanTier | null;
+  pending_plan_payment_id: string | null;
+  pending_plan_invoice_url: string | null;
+  pending_plan_effective_at: string | null;
+  /** Computed from asaas_wallet_id and asaas_charges_enabled. Not a database column. */
+  can_charge_deposits: boolean;
   trial_starts_at: string | null;
   trial_ends_at: string | null;
   pre_subscription_trial_ends_at: string | null;
