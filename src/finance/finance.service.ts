@@ -16,6 +16,7 @@ import type { PlanTier } from '../tenants/entities/plan-tier.type';
 import { canConfigureCommissions } from '../professionals/utils/professional-commission.util';
 import type {
   FinanceReportFilters,
+  FinanceReportProductSale,
   FinanceReportResponse,
 } from './entities/finance-report.entity';
 import type {
@@ -31,6 +32,7 @@ import {
   buildFinanceReportSummary,
   isValidFinanceReportStatus,
   mapFinanceReportAppointmentRow,
+  mapFinanceReportProductSale,
 } from './utils/finance-report-mapper.util';
 import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
@@ -87,6 +89,7 @@ export class FinanceService {
       return {
         summary: buildFinanceReportSummary([]),
         appointments: [],
+        productSales: [],
       };
     }
 
@@ -159,10 +162,14 @@ export class FinanceService {
         row as Parameters<typeof mapFinanceReportAppointmentRow>[0],
       ),
     );
+    const productSales = filters.serviceId
+      ? []
+      : await this.loadProductSalesForReport(tenantId, filters);
 
     return {
-      summary: buildFinanceReportSummary(appointments),
+      summary: buildFinanceReportSummary(appointments, productSales),
       appointments,
+      productSales,
     };
   }
 
@@ -497,6 +504,16 @@ export class FinanceService {
     }
   }
 
+  async requireOpenCashRegisterId(
+    tenantId: string,
+    cashRegisterId?: string | null,
+  ): Promise<string> {
+    return this.cashRegisterService.requireOpenCashRegisterId(
+      tenantId,
+      cashRegisterId,
+    );
+  }
+
   async recordCompletedAppointmentCashFlow(params: {
     tenantId: string;
     appointmentId: string;
@@ -504,27 +521,44 @@ export class FinanceService {
     totalPrice: number;
     commissionAmount: number;
     enablePayoutControl: boolean;
+    cashRegisterId: string;
+    paymentMethod: 'CASH' | 'CARD' | 'PIX' | 'OTHER';
   }): Promise<void> {
-    const cashRegisterId =
-      await this.cashRegisterService.resolveOpenCashRegisterId(params.tenantId);
     const revenueAmount = this.roundCurrency(params.totalPrice);
+    const client = this.supabaseService.getClient();
 
     if (revenueAmount > 0) {
-      const { error: revenueError } = await this.supabaseService
-        .getClient()
+      const { data: existingEntries, error: existingError } = await client
         .from('cash_flow_entries')
-        .insert({
-          tenant_id: params.tenantId,
-          cash_register_id: cashRegisterId,
-          type: 'REVENUE',
-          amount: revenueAmount,
-          description: 'Receita de atendimento concluído',
-          category: 'APPOINTMENT',
-          is_recurring: false,
-        });
+        .select('type, amount, category')
+        .eq('tenant_id', params.tenantId)
+        .eq('appointment_id', params.appointmentId)
+        .in('category', ['APPOINTMENT', 'APPOINTMENT_REVERSAL']);
 
-      if (revenueError) {
-        throw new InternalServerErrorException(revenueError.message);
+      if (existingError) {
+        throw new InternalServerErrorException(existingError.message);
+      }
+
+      const net = this.appointmentCashNet(existingEntries ?? []);
+
+      if (net <= 0) {
+        const { error: revenueError } = await client
+          .from('cash_flow_entries')
+          .insert({
+            tenant_id: params.tenantId,
+            cash_register_id: params.cashRegisterId,
+            appointment_id: params.appointmentId,
+            payment_method: params.paymentMethod,
+            type: 'REVENUE',
+            amount: revenueAmount,
+            description: `Receita de atendimento concluído (${this.paymentMethodLabel(params.paymentMethod)})`,
+            category: 'APPOINTMENT',
+            is_recurring: false,
+          });
+
+        if (revenueError) {
+          throw new InternalServerErrorException(revenueError.message);
+        }
       }
     }
 
@@ -538,8 +572,23 @@ export class FinanceService {
       return;
     }
 
-    const { error: payoutError } = await this.supabaseService
-      .getClient()
+    const { data: existingPayouts, error: payoutLookupError } = await client
+      .from('employee_payouts')
+      .select('id')
+      .eq('tenant_id', params.tenantId)
+      .eq('appointment_id', params.appointmentId)
+      .eq('status', 'PENDING')
+      .limit(1);
+
+    if (payoutLookupError) {
+      throw new InternalServerErrorException(payoutLookupError.message);
+    }
+
+    if ((existingPayouts ?? []).length > 0) {
+      return;
+    }
+
+    const { error: payoutError } = await client
       .from('employee_payouts')
       .insert({
         tenant_id: params.tenantId,
@@ -551,6 +600,60 @@ export class FinanceService {
 
     if (payoutError) {
       throw new InternalServerErrorException(payoutError.message);
+    }
+  }
+
+  async reverseCompletedAppointmentCashFlow(params: {
+    tenantId: string;
+    appointmentId: string;
+  }): Promise<void> {
+    const client = this.supabaseService.getClient();
+    const { data: entries, error } = await client
+      .from('cash_flow_entries')
+      .select('type, amount, category, cash_register_id, payment_method')
+      .eq('tenant_id', params.tenantId)
+      .eq('appointment_id', params.appointmentId)
+      .in('category', ['APPOINTMENT', 'APPOINTMENT_REVERSAL']);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const net = this.appointmentCashNet(entries ?? []);
+
+    if (net > 0) {
+      const source = (entries ?? []).find(
+        (entry) => entry.category === 'APPOINTMENT' && entry.type === 'REVENUE',
+      );
+      const { error: reversalError } = await client
+        .from('cash_flow_entries')
+        .insert({
+          tenant_id: params.tenantId,
+          cash_register_id: source?.cash_register_id ?? null,
+          appointment_id: params.appointmentId,
+          payment_method: source?.payment_method ?? null,
+          type: 'EXPENSE',
+          amount: net,
+          description: 'Estorno de atendimento revertido',
+          category: 'APPOINTMENT_REVERSAL',
+          is_recurring: false,
+        });
+
+      if (reversalError) {
+        throw new InternalServerErrorException(reversalError.message);
+      }
+    }
+
+    const { error: deleteError } = await client
+      .from('employee_payouts')
+      .delete()
+      .eq('tenant_id', params.tenantId)
+      .eq('appointment_id', params.appointmentId)
+      .eq('status', 'PENDING')
+      .gte('amount', 0);
+
+    if (deleteError) {
+      throw new InternalServerErrorException(deleteError.message);
     }
   }
 
@@ -712,6 +815,42 @@ export class FinanceService {
       });
     }
 
+    const productSales = await this.loadProductSalesForReport(tenantId, {
+      startDate,
+      endDate,
+      professionalId: scopedProfessionalId,
+      status: 'COMPLETED',
+    });
+
+    for (const sale of productSales) {
+      if (!sale.professionalId || !sale.countsTowardRevenue) {
+        continue;
+      }
+
+      const commissionItem = this.mapCommissionProductSaleItem(sale);
+      const existing = grouped.get(sale.professionalId);
+
+      if (existing) {
+        existing.totalRevenue = this.roundCurrency(
+          existing.totalRevenue + commissionItem.totalPrice,
+        );
+        existing.totalCommissionDue = this.roundCurrency(
+          existing.totalCommissionDue + commissionItem.commissionAmount,
+        );
+        existing.items.push(commissionItem);
+        continue;
+      }
+
+      grouped.set(sale.professionalId, {
+        professionalId: sale.professionalId,
+        professionalName: sale.professionalName?.trim() || 'Profissional',
+        totalRevenue: commissionItem.totalPrice,
+        totalCommissionDue: commissionItem.commissionAmount,
+        appointmentCount: 0,
+        items: [commissionItem],
+      });
+    }
+
     const professionals = [...grouped.values()]
       .map((summary) => ({
         ...summary,
@@ -759,6 +898,88 @@ export class FinanceService {
         professionalCommissionPercent,
       ),
     };
+  }
+
+  private mapCommissionProductSaleItem(
+    sale: FinanceReportProductSale,
+  ): CommissionAppointmentItem {
+    return {
+      source: 'PRODUCT_SALE',
+      appointmentId: sale.id,
+      productSaleId: sale.id,
+      serviceName: 'Venda de produto',
+      customerName: sale.customerName ?? '',
+      customerPhone: '',
+      startTime: sale.createdAt,
+      endTime: sale.createdAt,
+      durationMinutes: 0,
+      totalPrice: this.roundCurrency(sale.recognizedRevenue),
+      commissionAmount: this.roundCurrency(sale.commissionAmount),
+      payoutStatus: null,
+      paidAt: null,
+    };
+  }
+
+  private async loadProductSalesForReport(
+    tenantId: string,
+    filters: FinanceReportFilters,
+  ): Promise<FinanceReportProductSale[]> {
+    if (
+      filters.status &&
+      filters.status !== 'COMPLETED' &&
+      filters.status !== 'CANCELLED'
+    ) {
+      return [];
+    }
+
+    let query = this.supabaseService
+      .getClient()
+      .from('product_sales')
+      .select(
+        `
+        id,
+        created_at,
+        status,
+        customer_name,
+        professional_id,
+        total_amount,
+        commission_amount,
+        professionals ( name )
+      `,
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false });
+
+    if (filters.startDate && filters.endDate) {
+      const range = this.resolveDateRange(filters.startDate, filters.endDate);
+      query = query
+        .gte('created_at', range.startIso)
+        .lte('created_at', range.endIso);
+    }
+
+    if (filters.professionalId) {
+      query = query.eq('professional_id', filters.professionalId);
+    }
+
+    if (filters.customerId) {
+      query = query.eq('customer_id', filters.customerId);
+    }
+
+    if (filters.status === 'COMPLETED' || filters.status === 'CANCELLED') {
+      query = query.eq('status', filters.status);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? []).map((row) =>
+      mapFinanceReportProductSale(
+        row as Parameters<typeof mapFinanceReportProductSale>[0],
+      ),
+    );
   }
 
   private async resolveAppointmentIdsForService(
@@ -881,7 +1102,9 @@ export class FinanceService {
     );
 
     return {
+      source: 'APPOINTMENT',
       appointmentId: appointment.id,
+      productSaleId: null,
       serviceName: appointment.serviceName,
       customerName: appointment.customerName,
       customerPhone: appointment.customerPhone,
@@ -972,6 +1195,48 @@ export class FinanceService {
         data.payout_frequency as string | null | undefined,
       ),
     };
+  }
+
+  private paymentMethodLabel(
+    method: 'CASH' | 'CARD' | 'PIX' | 'OTHER',
+  ): string {
+    switch (method) {
+      case 'CASH':
+        return 'Dinheiro';
+      case 'CARD':
+        return 'Cartão';
+      case 'PIX':
+        return 'PIX';
+      default:
+        return 'Outro';
+    }
+  }
+
+  private appointmentCashNet(
+    entries: Array<{
+      type?: string | null;
+      amount?: number | string | null;
+      category?: string | null;
+    }>,
+  ): number {
+    let net = 0;
+
+    for (const entry of entries) {
+      const amount = this.roundCurrency(Number(entry.amount ?? 0));
+
+      if (entry.category === 'APPOINTMENT' && entry.type === 'REVENUE') {
+        net += amount;
+      }
+
+      if (
+        entry.category === 'APPOINTMENT_REVERSAL' &&
+        entry.type === 'EXPENSE'
+      ) {
+        net -= amount;
+      }
+    }
+
+    return this.roundCurrency(net);
   }
 
   private roundCurrency(value: number): number {

@@ -143,6 +143,13 @@ export class AsaasClient implements OnModuleInit {
     );
   }
 
+  async cancelCheckout(checkoutId: string): Promise<void> {
+    await this.request(
+      'POST',
+      `/checkouts/${encodeURIComponent(checkoutId)}/cancel`,
+    );
+  }
+
   async createCheckout(payload: {
     billingTypes: Array<'PIX' | 'CREDIT_CARD'>;
     chargeTypes: Array<'DETACHED'>;

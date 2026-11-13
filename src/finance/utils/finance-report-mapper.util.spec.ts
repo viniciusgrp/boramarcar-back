@@ -2,6 +2,7 @@ import {
   buildFinanceReportSummary,
   isValidFinanceReportStatus,
   mapFinanceReportAppointmentRow,
+  mapFinanceReportProductSale,
 } from './finance-report-mapper.util';
 
 describe('finance-report-mapper.util', () => {
@@ -29,11 +30,17 @@ describe('finance-report-mapper.util', () => {
     });
 
     expect(appointment.bookingSource).toBe('INTERNAL');
+    expect(appointment.recognizedRevenue).toBe(100);
     expect(buildFinanceReportSummary([appointment])).toEqual({
       totalRevenue: 100,
+      serviceRevenue: 100,
+      productRevenue: 0,
       totalCommissions: 20,
+      serviceCommissions: 20,
+      productCommissions: 0,
       netProfit: 80,
       appointmentCount: 1,
+      productSaleCount: 0,
     });
   });
 
@@ -66,11 +73,30 @@ describe('finance-report-mapper.util', () => {
       commission_amount: 9,
     });
 
-    expect(buildFinanceReportSummary([completed, cancelled])).toEqual({
-      totalRevenue: 100,
-      totalCommissions: 20,
-      netProfit: 80,
+    expect(cancelled.recognizedRevenue).toBe(0);
+    expect(cancelled.countsTowardRevenue).toBe(false);
+    const productSale = mapFinanceReportProductSale({
+      id: 'sale-1',
+      created_at: '2026-09-08T12:00:00.000Z',
+      status: 'COMPLETED',
+      customer_name: 'Ana',
+      professional_id: 'pro-1',
+      total_amount: 25,
+      commission_amount: 5,
+      professionals: { name: 'João' },
+    });
+    expect(
+      buildFinanceReportSummary([completed, cancelled], [productSale]),
+    ).toEqual({
+      totalRevenue: 125,
+      serviceRevenue: 100,
+      productRevenue: 25,
+      totalCommissions: 25,
+      serviceCommissions: 20,
+      productCommissions: 5,
+      netProfit: 100,
       appointmentCount: 1,
+      productSaleCount: 1,
     });
   });
 });

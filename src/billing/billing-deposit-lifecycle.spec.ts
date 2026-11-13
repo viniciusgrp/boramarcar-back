@@ -43,7 +43,7 @@ describe('BillingService deposit lifecycle', () => {
       { createCheckout } as never,
     );
 
-    const url = await service.createDepositCheckoutSession({
+    const checkout = await service.createDepositCheckoutSession({
       appointmentId: 'appt-1',
       tenantId: 'tenant-1',
       tenantName: 'Studio',
@@ -54,7 +54,8 @@ describe('BillingService deposit lifecycle', () => {
       customerPhone: '11999999999',
     });
 
-    expect(url).toBe('https://asaas.com/c/1');
+    expect(checkout.url).toBe('https://asaas.com/c/1');
+    expect(checkout.checkoutId).toBeNull();
     expect(createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         billingTypes: ['PIX', 'CREDIT_CARD'],
@@ -208,7 +209,10 @@ describe('BillingService deposit lifecycle', () => {
       },
     });
 
-    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith('appt-1');
+    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith(
+      'appt-1',
+      undefined,
+    );
   });
 
   it('does not enable charges when only the documents are approved', async () => {

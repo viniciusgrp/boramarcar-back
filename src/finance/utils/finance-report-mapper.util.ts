@@ -3,6 +3,7 @@ import { APPOINTMENT_STATUSES } from '../../appointments/entities/appointment.en
 import type { BookingSource } from '../../appointments/entities/booking-source.type';
 import type {
   FinanceReportAppointment,
+  FinanceReportProductSale,
   FinanceReportSummary,
 } from '../entities/finance-report.entity';
 
@@ -66,34 +67,99 @@ export function mapFinanceReportAppointmentRow(
     serviceId: lineItems.serviceId,
     serviceName: lineItems.serviceName,
     totalPrice: Number(row.total_price ?? lineItems.servicePrice),
+    ...recognizedAmountForStatus(
+      row.status,
+      Number(row.total_price ?? lineItems.servicePrice),
+    ),
     commissionAmount: Number(row.commission_amount ?? 0),
     bookingSource: normalizeBookingSource(row.booking_source),
   };
 }
 
+export function recognizedAmountForStatus(
+  status: string,
+  amount: number,
+): { recognizedRevenue: number; countsTowardRevenue: boolean } {
+  const countsTowardRevenue = status !== 'CANCELLED' && status !== 'NO_SHOW';
+
+  return {
+    countsTowardRevenue,
+    recognizedRevenue: countsTowardRevenue ? roundCurrency(amount) : 0,
+  };
+}
+
+export function mapFinanceReportProductSale(row: {
+  id: string;
+  created_at: string;
+  status: string;
+  customer_name?: string | null;
+  professional_id?: string | null;
+  total_amount?: number | null;
+  commission_amount?: number | null;
+  professionals?: RelationName;
+}): FinanceReportProductSale {
+  const totalAmount = roundCurrency(Number(row.total_amount ?? 0));
+  const counts = recognizedAmountForStatus(row.status, totalAmount);
+
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    status: row.status === 'CANCELLED' ? 'CANCELLED' : 'COMPLETED',
+    customerName: row.customer_name?.trim() || null,
+    professionalId: row.professional_id?.trim() || null,
+    professionalName: row.professionals
+      ? extractRelationName(row.professionals)
+      : null,
+    totalAmount,
+    commissionAmount: roundCurrency(Number(row.commission_amount ?? 0)),
+    recognizedRevenue: counts.recognizedRevenue,
+    countsTowardRevenue: counts.countsTowardRevenue,
+  };
+}
+
 export function buildFinanceReportSummary(
   appointments: FinanceReportAppointment[],
+  productSales: FinanceReportProductSale[] = [],
 ): FinanceReportSummary {
   const completed = appointments.filter(
     (appointment) => appointment.status === 'COMPLETED',
   );
-  const totals = completed.reduce(
-    (accumulator, appointment) => ({
-      totalRevenue: accumulator.totalRevenue + appointment.totalPrice,
-      totalCommissions:
-        accumulator.totalCommissions + appointment.commissionAmount,
-    }),
-    { totalRevenue: 0, totalCommissions: 0 },
+  const countedProducts = productSales.filter(
+    (sale) => sale.countsTowardRevenue,
   );
-
-  const totalRevenue = roundCurrency(totals.totalRevenue);
-  const totalCommissions = roundCurrency(totals.totalCommissions);
+  const serviceRevenue = roundCurrency(
+    completed.reduce(
+      (sum, appointment) => sum + appointment.recognizedRevenue,
+      0,
+    ),
+  );
+  const productRevenue = roundCurrency(
+    countedProducts.reduce((sum, sale) => sum + sale.recognizedRevenue, 0),
+  );
+  const serviceCommissions = roundCurrency(
+    completed.reduce(
+      (sum, appointment) => sum + appointment.commissionAmount,
+      0,
+    ),
+  );
+  const productCommissions = roundCurrency(
+    countedProducts.reduce((sum, sale) => sum + sale.commissionAmount, 0),
+  );
+  const totalRevenue = roundCurrency(serviceRevenue + productRevenue);
+  const totalCommissions = roundCurrency(
+    serviceCommissions + productCommissions,
+  );
 
   return {
     totalRevenue,
+    serviceRevenue,
+    productRevenue,
     totalCommissions,
+    serviceCommissions,
+    productCommissions,
     netProfit: roundCurrency(totalRevenue - totalCommissions),
     appointmentCount: completed.length,
+    productSaleCount: countedProducts.length,
   };
 }
 

@@ -11,6 +11,8 @@ import type {
   CashRegisterStatusResponse,
   CloseCashRegisterResponse,
   DailyCashRegister,
+  OpenCashRegistersResponse,
+  OpenCashRegisterSummary,
 } from './entities/daily-cash-register.entity';
 import type { CashRegisterMovementType } from './dto/cash-register-entry.dto';
 
@@ -221,6 +223,116 @@ export class CashRegisterService {
     const openRegister = await this.findOpenCashRegister(tenantId);
 
     return openRegister?.id ?? null;
+  }
+
+  async listOpenCashRegisters(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<OpenCashRegistersResponse> {
+    this.assertFinanceAccess(planTier);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('daily_cash_registers')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'OPEN')
+      .order('opened_at', { ascending: true });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const registers: OpenCashRegisterSummary[] = [];
+
+    for (const row of (data ?? []) as CashRegisterRow[]) {
+      registers.push(await this.toOpenSummary(row));
+    }
+
+    return { registers };
+  }
+
+  async requireOpenCashRegisterId(
+    tenantId: string,
+    cashRegisterId?: string | null,
+  ): Promise<string> {
+    const requestedId = cashRegisterId?.trim() ?? '';
+
+    if (requestedId) {
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('daily_cash_registers')
+        .select('id')
+        .eq('id', requestedId)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'OPEN')
+        .maybeSingle();
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      if (!data) {
+        throw new BadRequestException('O caixa escolhido não está aberto.');
+      }
+
+      return data.id as string;
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('daily_cash_registers')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'OPEN');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const openIds = (data ?? []).map((row) => row.id as string);
+
+    if (openIds.length === 0) {
+      throw new BadRequestException(
+        'Abra o caixa para registrar este pagamento.',
+      );
+    }
+
+    if (openIds.length > 1) {
+      throw new BadRequestException(
+        'Escolha o caixa para registrar este pagamento.',
+      );
+    }
+
+    const onlyOpenId = openIds[0];
+
+    if (!onlyOpenId) {
+      throw new BadRequestException(
+        'Abra o caixa para registrar este pagamento.',
+      );
+    }
+
+    return onlyOpenId;
+  }
+
+  private async toOpenSummary(
+    row: CashRegisterRow,
+  ): Promise<OpenCashRegisterSummary> {
+    const periodTotals = await this.calculatePeriodTotals(row.id);
+
+    return {
+      id: row.id,
+      openingBalance: Number(row.opening_balance),
+      openedAt: row.opened_at,
+      status: 'OPEN',
+      estimatedBalance: this.roundCurrency(
+        Number(row.opening_balance) +
+          periodTotals.revenue -
+          periodTotals.expenses,
+      ),
+      periodRevenue: periodTotals.revenue,
+      periodExpenses: periodTotals.expenses,
+    };
   }
 
   private async findOpenCashRegister(

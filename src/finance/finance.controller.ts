@@ -29,7 +29,10 @@ import { CreateRecurringExpenseTemplateDto } from './dto/create-recurring-expens
 import { FinanceService } from './finance.service';
 import { CashRegisterService } from './cash-register.service';
 import { RecurringExpensesService } from './recurring-expenses.service';
-import type { CashRegisterStatusResponse } from './entities/daily-cash-register.entity';
+import type {
+  CashRegisterStatusResponse,
+  OpenCashRegistersResponse,
+} from './entities/daily-cash-register.entity';
 import type { CloseCashRegisterResponse } from './entities/daily-cash-register.entity';
 import type { DailyCashRegister } from './entities/daily-cash-register.entity';
 import type { RecurringExpenseTemplate } from './entities/recurring-expense-template.entity';
@@ -114,9 +117,21 @@ export class FinanceController {
     );
   }
 
+  @Get('cash/open-registers')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  async listOpenCashRegisters(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<OpenCashRegistersResponse> {
+    return this.cashRegisterService.listOpenCashRegisters(
+      context.tenant.id,
+      context.tenant.plan_tier,
+    );
+  }
+
   @Post('cash/open')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER', 'ADMIN')
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async openCashRegister(
     @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: OpenCashRegisterDto,

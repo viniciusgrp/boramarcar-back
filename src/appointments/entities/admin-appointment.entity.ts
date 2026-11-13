@@ -1,5 +1,7 @@
 import type { AppointmentStatus } from './appointment.entity';
 import type { BookingSource } from './booking-source.type';
+import type { PaymentStatus } from './payment-status.type';
+import type { AppointmentPaymentBadge } from '../utils/appointment-payment.util';
 
 export interface AdminAppointment {
   id: string;
@@ -15,6 +17,13 @@ export interface AdminAppointment {
   serviceName: string;
   durationMinutes: number;
   servicePrice: number;
+  totalPrice: number;
+  depositAmount: number | null;
+  depositPaid: boolean;
+  depositPaidAmount: number;
+  balanceDue: number;
+  paymentStatus: PaymentStatus;
+  paymentBadge: AppointmentPaymentBadge;
   bookingSource: BookingSource;
   paidWithPoints: boolean;
   couponCode: string | null;

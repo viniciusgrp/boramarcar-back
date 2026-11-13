@@ -1,3 +1,5 @@
+import type { AsaasOnboardingStep } from '../utils/asaas-onboarding-steps.util';
+
 export interface AsaasAccountStatusResponse {
   accountId: string | null;
   walletId: string | null;
@@ -10,4 +12,6 @@ export interface AsaasAccountStatusResponse {
   onboardingRequired: boolean;
   applicationFeePercent: number;
   canOpenDashboard: boolean;
+  onboardingTitle?: string;
+  onboardingSteps?: AsaasOnboardingStep[];
 }

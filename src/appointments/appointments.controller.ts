@@ -507,6 +507,11 @@ export class AppointmentsController {
       dto.status,
       scopedProfessionalId,
       dto.loyaltyRewardId,
+      {
+        paymentMethod: dto.paymentMethod,
+        paymentAmount: dto.paymentAmount,
+        cashRegisterId: dto.cashRegisterId,
+      },
     );
   }
 

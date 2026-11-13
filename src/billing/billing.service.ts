@@ -90,6 +90,7 @@ import { tenantCanChargeDeposits } from '../tenants/utils/deposit-charges.util';
 import { DEPOSIT_CHARGE_ALERT_MESSAGE } from '../tenants/constants/deposit-feature.constants';
 import { isValidAsaasWebhookToken } from './utils/asaas-webhook-auth.util';
 import { mapAsaasAccountStatusUpdate } from './utils/asaas-account-status.util';
+import { buildAsaasOnboardingSteps } from './utils/asaas-onboarding-steps.util';
 import {
   decryptAsaasSubaccountApiKey,
   encryptAsaasSubaccountApiKey,
@@ -461,6 +462,7 @@ export class BillingService {
       const result =
         await this.appointmentsService.confirmDepositPaymentDetailed(
           appointmentId,
+          payment.id,
         );
 
       if (result.outcome === 'confirmed' || result.outcome === 'already_confirmed') {
@@ -618,7 +620,10 @@ export class BillingService {
     }
 
     const result =
-      await this.appointmentsService.confirmDepositPaymentDetailed(appointmentId);
+      await this.appointmentsService.confirmDepositPaymentDetailed(
+        appointmentId,
+        event.payment?.id,
+      );
 
     if (result.outcome === 'confirmed' || result.outcome === 'already_confirmed') {
       return;
@@ -1355,7 +1360,7 @@ export class BillingService {
 
   async createDepositCheckoutSession(
     params: CreateDepositCheckoutSessionParams,
-  ): Promise<string> {
+  ): Promise<{ url: string; checkoutId: string | null }> {
     this.ensureAsaasOutbound('checkouts.create (deposit)');
 
     if (params.depositAmountBrl <= 0) {
@@ -1412,7 +1417,10 @@ export class BillingService {
         );
       }
 
-      return checkout.link;
+      return {
+        url: checkout.link,
+        checkoutId: checkout.id?.trim() || null,
+      };
     } catch (error) {
       this.rethrowAsaasError(
         error,
@@ -1446,7 +1454,72 @@ export class BillingService {
 
   async getConnectStatus(tenantId: string): Promise<AsaasAccountStatusResponse> {
     const tenant = await this.requireTenant(tenantId);
-    return this.buildAsaasAccountStatus(tenant);
+    const onboarding = await this.resolveOnboardingSteps(tenant);
+
+    return {
+      ...this.buildAsaasAccountStatus(tenant),
+      onboardingTitle: onboarding.title,
+      onboardingSteps: onboarding.steps,
+    };
+  }
+
+  async cancelAbandonedDepositCharges(
+    targets: Array<{ appointmentId: string }>,
+  ): Promise<void> {
+    if (targets.length === 0 || !this.isAsaasOutboundEnabled()) {
+      return;
+    }
+
+    for (const target of targets) {
+      const appointmentId = target.appointmentId.trim();
+
+      if (!appointmentId) {
+        continue;
+      }
+
+      try {
+        const { data } = await this.supabaseService
+          .getClient()
+          .from('appointments')
+          .select('asaas_checkout_id, asaas_payment_id')
+          .eq('id', appointmentId)
+          .maybeSingle();
+        const checkoutId =
+          typeof data?.asaas_checkout_id === 'string'
+            ? data.asaas_checkout_id.trim()
+            : '';
+        const paymentId =
+          typeof data?.asaas_payment_id === 'string'
+            ? data.asaas_payment_id.trim()
+            : '';
+
+        if (checkoutId) {
+          await this.asaasClient.cancelCheckout(checkoutId);
+        }
+
+        if (paymentId) {
+          await this.asaasClient.deletePayment(paymentId);
+        }
+
+        const listed = await this.asaasClient.listPayments({
+          externalReference: buildDepositExternalReference(appointmentId),
+          limit: 20,
+        });
+
+        for (const payment of listed.data ?? []) {
+          const status = payment.status ?? '';
+
+          if (payment.id && (status === 'PENDING' || status === 'OVERDUE')) {
+            await this.asaasClient.deletePayment(payment.id);
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown';
+        this.logger.warn(
+          `Could not cancel the Asaas deposit charge for appointment ${appointmentId}: ${message}`,
+        );
+      }
+    }
   }
 
   async getBillingStatus(tenantId: string): Promise<BillingStatusResponse> {
@@ -1707,6 +1780,42 @@ export class BillingService {
     }
 
     return secret;
+  }
+
+  private async resolveOnboardingSteps(tenant: Tenant) {
+    const hasAccount = Boolean(tenant.asaas_account_id?.trim());
+    let commercialInfo: string | null = null;
+    let bankAccountInfo: string | null = null;
+    let documentation: string | null = null;
+    let general = tenant.asaas_account_status;
+
+    if (hasAccount && this.isAsaasOutboundEnabled()) {
+      try {
+        const subaccountKey = await this.readSubaccountApiKey(tenant.id);
+
+        if (subaccountKey) {
+          const status =
+            await this.asaasClient.getMyAccountStatus(subaccountKey);
+          commercialInfo = status.commercialInfo ?? null;
+          bankAccountInfo = status.bankAccountInfo ?? null;
+          documentation = status.documentation ?? null;
+          general = status.general ?? general;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown';
+        this.logger.warn(
+          `Could not read Asaas onboarding steps for tenant ${tenant.id}: ${message}`,
+        );
+      }
+    }
+
+    return buildAsaasOnboardingSteps({
+      hasAccount,
+      commercialInfo,
+      bankAccountInfo,
+      documentation,
+      general,
+    });
   }
 
   private async readSubaccountApiKey(tenantId: string): Promise<string | null> {

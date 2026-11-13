@@ -119,4 +119,43 @@ describe('DepositPaymentService', () => {
       service.confirmDepositPayment('appt-1'),
     ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
+
+  it('cancels expired holds and returns their ids', async () => {
+    const updates: unknown[] = [];
+    const fromMock = jest.fn(() => {
+      const api: Record<string, jest.Mock> = {};
+      const chain = () => api;
+      api.select = jest.fn(chain);
+      api.update = jest.fn((payload: unknown) => {
+        updates.push(payload);
+        return api;
+      });
+      api.eq = jest.fn(chain);
+      api.not = jest.fn(chain);
+      api.lt = jest.fn(chain);
+      api.in = jest.fn(chain);
+      api.then = jest.fn(
+        (resolve: (value: { data: unknown; error: null }) => unknown) =>
+          Promise.resolve(
+            updates.length === 0
+              ? { data: [{ id: 'appt-1' }], error: null }
+              : { data: null, error: null },
+          ).then(resolve),
+      );
+      return api;
+    });
+
+    const service = new DepositPaymentService({
+      getClient: () => ({ from: fromMock }),
+    } as unknown as SupabaseService);
+
+    await expect(service.expireAbandonedDepositHolds()).resolves.toEqual([
+      'appt-1',
+    ]);
+    expect(updates[0]).toEqual({
+      status: 'CANCELLED',
+      payment_status: 'EXPIRED',
+      hold_expires_at: null,
+    });
+  });
 });
