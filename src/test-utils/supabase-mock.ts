@@ -10,6 +10,7 @@ export interface ChainableQueryMock {
   upsert: jest.Mock;
   delete: jest.Mock;
   eq: jest.Mock;
+  not: jest.Mock;
   neq: jest.Mock;
   in: jest.Mock;
   is: jest.Mock;
@@ -39,6 +40,7 @@ export function createChainableQuery(
   api.upsert = jest.fn(chain);
   api.delete = jest.fn(chain);
   api.eq = jest.fn(chain);
+  api.not = jest.fn(chain);
   api.neq = jest.fn(chain);
   api.in = jest.fn(chain);
   api.is = jest.fn(chain);

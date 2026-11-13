@@ -1,12 +1,11 @@
+import { hasPendingTrialPaymentGrace } from '../../billing/utils/billing-grace.util';
 import type { SubscriptionStatus } from '../entities/subscription-status.type';
 import type { Tenant } from '../entities/tenant.entity';
 
 export const TRIAL_EXPIRED_MESSAGE = 'Período de testes expirou';
 
-type TenantAccessFields = Pick<
-  Tenant,
-  'subscription_status' | 'trial_ends_at'
->;
+type TenantAccessFields = Pick<Tenant, 'subscription_status' | 'trial_ends_at'> &
+  Partial<Pick<Tenant, 'asaas_pending_payment_id'>>;
 
 export function parseUtcInstant(value: string | null | undefined): Date | null {
   if (!value?.trim()) {
@@ -62,7 +61,11 @@ export function hasTenantAdminAccess(
     return true;
   }
 
-  return isTrialActive(tenant, now);
+  if (isTrialActive(tenant, now)) {
+    return true;
+  }
+
+  return hasPendingTrialPaymentGrace(tenant, now);
 }
 
 export function getTrialDaysRemaining(

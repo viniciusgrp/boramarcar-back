@@ -74,7 +74,10 @@ export function mapFinanceReportAppointmentRow(
 export function buildFinanceReportSummary(
   appointments: FinanceReportAppointment[],
 ): FinanceReportSummary {
-  const totals = appointments.reduce(
+  const completed = appointments.filter(
+    (appointment) => appointment.status === 'COMPLETED',
+  );
+  const totals = completed.reduce(
     (accumulator, appointment) => ({
       totalRevenue: accumulator.totalRevenue + appointment.totalPrice,
       totalCommissions:
@@ -90,7 +93,7 @@ export function buildFinanceReportSummary(
     totalRevenue,
     totalCommissions,
     netProfit: roundCurrency(totalRevenue - totalCommissions),
-    appointmentCount: appointments.length,
+    appointmentCount: completed.length,
   };
 }
 

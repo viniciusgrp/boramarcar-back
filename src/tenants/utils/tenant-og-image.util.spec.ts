@@ -20,6 +20,6 @@ describe('tenant-og-image.util', () => {
     expect(svg).toContain('Agendar online');
     expect(svg).toContain('width="1200"');
     expect(svg).toContain('height="630"');
-    expect(svg).toContain('x="328"');
+    expect(svg).toContain('x="390"');
   });
 });

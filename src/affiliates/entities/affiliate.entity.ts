@@ -42,7 +42,7 @@ export interface AffiliateCommissionItem {
   id: string;
   affiliate_id: string;
   tenant_id: string;
-  stripe_invoice_id: string;
+  provider_payment_id: string;
   invoice_paid_at: string;
   gross_amount_cents: number;
   commission_amount_cents: number;

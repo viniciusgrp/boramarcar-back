@@ -59,6 +59,19 @@ describe('tenant-access.util', () => {
     ).toBe(false);
   });
 
+  it('keeps access for 5 days after trial when a pending Asaas payment exists', () => {
+    expect(
+      hasTenantAdminAccess(
+        {
+          subscription_status: 'INACTIVE',
+          trial_ends_at: '2026-09-04T12:00:00.000Z',
+          asaas_pending_payment_id: 'pay_1',
+        },
+        now,
+      ),
+    ).toBe(true);
+  });
+
   it('allows access while trial is still running', () => {
     expect(
       hasTenantAdminAccess(

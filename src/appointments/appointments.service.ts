@@ -580,11 +580,10 @@ export class AppointmentsService {
 
     if (
       requiresDepositPayment &&
-      (!tenant.stripe_connect_account_id?.trim() ||
-        !tenant.stripe_connect_charges_enabled)
+      (!tenant.asaas_wallet_id?.trim() || !tenant.asaas_charges_enabled)
     ) {
       throw new BadRequestException(
-        'Este estabelecimento ainda não configurou a conta Stripe para receber sinais.',
+        'Este estabelecimento ainda não configurou a conta Asaas para receber sinais.',
       );
     }
 
@@ -614,7 +613,7 @@ export class AppointmentsService {
         isNewCustomer,
       );
 
-    // Checkout do Stripe expira em 30 min; após isso o slot é liberado pelo cron.
+    // Checkout do Asaas expira em 30 min; após isso o slot é liberado.
     const holdExpiresAt = requiresDepositPayment
       ? addMinutes(new Date(), DEPOSIT_HOLD_MINUTES).toISOString()
       : null;
@@ -740,6 +739,9 @@ export class AppointmentsService {
         tenantSlug: tenant.slug,
         depositAmountBrl: booking.totalDepositAmount,
         accessToken: guestAccessToken as string,
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        customerEmail: customer.email,
       });
     } catch (checkoutError: unknown) {
       await this.depositPaymentService.releasePendingDepositHold(appointment.id);
@@ -2508,6 +2510,70 @@ export class AppointmentsService {
     });
   }
 
+  async rescheduleForTenant(
+    tenantId: string,
+    appointmentId: string,
+    dto: RescheduleAppointmentDto,
+    scopedProfessionalId?: string,
+  ): Promise<AdminAppointment> {
+    const tenant = await this.tenantsService.findById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException('Estabelecimento não encontrado.');
+    }
+
+    const { data: existing, error: fetchError } = await this.supabaseService
+      .getClient()
+      .from('appointments')
+      .select(ADMIN_APPOINTMENT_SELECT)
+      .eq('id', appointmentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new InternalServerErrorException(fetchError.message);
+    }
+
+    if (!existing) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    const row = existing as SupabaseAppointmentWithRelations & {
+      cancellation_requested_at?: string | null;
+    };
+
+    this.assertAppointmentProfessionalScope(
+      scopedProfessionalId,
+      row.professional_id,
+      true,
+    );
+
+    if (!this.canCustomerReschedule(row, getWallClockNow())) {
+      throw new BadRequestException(
+        'Este agendamento não pode mais ser reagendado por aqui.',
+      );
+    }
+
+    await this.applyCustomerReschedule({
+      tenant,
+      appointmentId,
+      row,
+      dto,
+    });
+
+    const mapped = await this.findAdminById(tenantId, appointmentId);
+
+    if (!mapped) {
+      throw new NotFoundException(
+        `Appointment with id "${appointmentId}" was not found for this tenant`,
+      );
+    }
+
+    return mapped;
+  }
+
   private async applyCustomerReschedule(params: {
     tenant: Tenant;
     appointmentId: string;
@@ -3177,6 +3243,7 @@ export class AppointmentsService {
       status: row.status as AppointmentStatus,
       professionalId: row.professional_id,
       professionalName: this.extractRelationName(row.professionals),
+      serviceIds: lineItems.serviceIds,
       serviceName: lineItems.serviceName,
       durationMinutes: lineItems.durationMinutes,
       servicePrice: lineItems.servicePrice,
@@ -3188,6 +3255,7 @@ export class AppointmentsService {
   }
 
   private extractAppointmentLineItems(row: SupabaseAppointmentWithRelations): {
+    serviceIds: string[];
     serviceName: string;
     durationMinutes: number;
     servicePrice: number;
@@ -3211,6 +3279,9 @@ export class AppointmentsService {
       );
 
       return {
+        serviceIds: sorted
+          .map((item) => item.service_id)
+          .filter((id): id is string => Boolean(id)),
         serviceName: sorted
           .map((item) => this.extractRelationName(item.services))
           .join(' + '),
@@ -3221,6 +3292,7 @@ export class AppointmentsService {
     }
 
     return {
+      serviceIds: row.service_id ? [row.service_id] : [],
       serviceName: this.extractRelationName(row.services),
       durationMinutes: this.extractServiceDuration(row.services),
       servicePrice: this.extractServicePrice(row.services),
@@ -3230,6 +3302,7 @@ export class AppointmentsService {
   private normalizeAppointmentServices(
     relation: AppointmentServiceRelation | null | undefined,
   ): {
+    service_id?: string;
     sort_order: number;
     duration_minutes: number;
     price: number;
@@ -3841,11 +3914,15 @@ export class AppointmentsService {
       booking_acceptance_type: 'AUTOMATIC',
       booking_slot_interval_minutes: 15,
       owner_id: null,
-      stripe_customer_id: null,
-      stripe_subscription_id: null,
-      stripe_connect_account_id: null,
-      stripe_connect_charges_enabled: false,
-      stripe_connect_details_submitted: false,
+      asaas_customer_id: null,
+      asaas_subscription_id: null,
+      asaas_pending_payment_id: null,
+      asaas_open_invoice_url: null,
+      asaas_account_id: null,
+      asaas_wallet_id: null,
+      asaas_account_status: null,
+      asaas_charges_enabled: false,
+      asaas_details_submitted: false,
       subscription_status: 'INACTIVE',
       subscription_expires_at: null,
       trial_starts_at: null,
@@ -3869,7 +3946,7 @@ export class AppointmentsService {
       initial_setup_hours_reviewed_at: null,
       initial_setup_first_appointment_at: null,
       support_ai_enabled: false,
-      support_ai_stripe_subscription_item_id: null,
+      support_ai_asaas_subscription_id: null,
       support_ai_status: null,
       utm_source: null,
       utm_medium: null,

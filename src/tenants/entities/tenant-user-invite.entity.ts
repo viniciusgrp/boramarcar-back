@@ -17,6 +17,7 @@ export interface TenantUserInvitePreview {
   email: string;
   role: UserRole;
   tenantName: string;
+  invitedByName: string;
   expiresAt: string;
 }
 
@@ -29,4 +30,5 @@ export interface TenantUserInviteListItem {
   expiresAt: string;
   createdAt: string;
   isExpired: boolean;
+  acceptUrl: string;
 }

@@ -28,7 +28,7 @@ function readyTenant(overrides: Partial<Tenant> = {}): Tenant {
     initial_setup_settings_visited_at: '2026-01-01T00:00:00.000Z',
     initial_setup_customer_account_decided_at: '2026-01-01T00:00:00.000Z',
     reviews_enabled: true,
-    stripe_connect_charges_enabled: false,
+    asaas_charges_enabled: false,
     subscription_status: 'ACTIVE',
     initial_setup_completed_at: null,
     initial_setup_version: null,

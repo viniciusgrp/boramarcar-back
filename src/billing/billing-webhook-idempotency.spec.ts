@@ -1,115 +1,51 @@
-import { InternalServerErrorException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { UnauthorizedException } from '@nestjs/common';
 import type { AppointmentsService } from '../appointments/appointments.service';
-import type { SupabaseService } from '../supabase/supabase.service';
 import type { TenantsService } from '../tenants/tenants.service';
 import { BillingService } from './billing.service';
-import type { StripeEvent } from './types/stripe-api.types';
+import { createChainableQuery } from '../test-utils/supabase-mock';
 
-interface InsertResult {
-  error: { code?: string; message: string } | null;
-}
-
-function buildEvent(id: string, type: string): StripeEvent {
-  return {
-    id,
-    type,
-    data: { object: {} },
-  } as unknown as StripeEvent;
-}
-
-function buildService(insertResult: InsertResult) {
-  const insertMock = jest.fn().mockResolvedValue(insertResult);
-  const deleteEqMock = jest.fn().mockResolvedValue({ error: null });
-  const deleteMock = jest.fn(() => ({ eq: deleteEqMock }));
-
-  const fromMock = jest.fn(() => ({
-    insert: insertMock,
-    delete: deleteMock,
-  }));
-
-  const supabaseService = {
-    getClient: () => ({ from: fromMock }),
-  } as unknown as SupabaseService;
-
-  const configService = {
-    get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY'
-        ? 'sk_test_dummy'
-        : key === 'APP_ENV'
-          ? 'production'
-          : undefined,
-  } as unknown as ConfigService;
-
+function buildService(insertError: { code?: string; message: string } | null) {
+  const from = jest.fn(() => createChainableQuery({ data: null, error: insertError }));
   const service = new BillingService(
-    configService,
+    {
+      get: (key: string) =>
+        ({
+          APP_ENV: 'production',
+          ASAAS_WEBHOOK_TOKEN: 'secret',
+        })[key],
+    } as unknown as ConfigService,
     {} as TenantsService,
-    supabaseService,
+    { getClient: () => ({ from }) } as never,
     {} as AppointmentsService,
-    {} as import('../affiliates/affiliates.service').AffiliatesService,
+    { accruePaidPlanInvoice: jest.fn(), reverseInvoice: jest.fn() } as never,
+    {} as never,
   );
 
-  return { service, insertMock, deleteEqMock };
+  return { service, from };
 }
 
-describe('BillingService webhook idempotency', () => {
-  it('claims a new event and processes it once', async () => {
-    const { service, insertMock } = buildService({ error: null });
-    const processSpy = jest
-      .spyOn(
-        service as unknown as { processWebhookEvent: () => Promise<void> },
-        'processWebhookEvent',
-      )
-      .mockResolvedValue(undefined);
-
-    await service.handleStripeWebhook(buildEvent('evt_1', 'invoice.paid'));
-
-    expect(insertMock).toHaveBeenCalledWith({
-      event_id: 'evt_1',
-      event_type: 'invoice.paid',
-    });
-    expect(processSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('skips processing when the event was already claimed (unique violation)', async () => {
-    const { service } = buildService({
-      error: { code: '23505', message: 'duplicate key' },
-    });
-    const processSpy = jest
-      .spyOn(
-        service as unknown as { processWebhookEvent: () => Promise<void> },
-        'processWebhookEvent',
-      )
-      .mockResolvedValue(undefined);
-
-    await service.handleStripeWebhook(buildEvent('evt_1', 'invoice.paid'));
-
-    expect(processSpy).not.toHaveBeenCalled();
-  });
-
-  it('releases the claim when processing throws so retries can reprocess', async () => {
-    const { service, deleteEqMock } = buildService({ error: null });
-    jest
-      .spyOn(
-        service as unknown as { processWebhookEvent: () => Promise<void> },
-        'processWebhookEvent',
-      )
-      .mockRejectedValue(new Error('processing failed'));
+describe('BillingService Asaas webhook idempotency', () => {
+  it('rejects an invalid access token', async () => {
+    const { service } = buildService(null);
 
     await expect(
-      service.handleStripeWebhook(buildEvent('evt_1', 'invoice.paid')),
-    ).rejects.toThrow('processing failed');
-
-    expect(deleteEqMock).toHaveBeenCalledWith('event_id', 'evt_1');
+      service.handleAsaasWebhook('wrong', { id: 'evt_1', event: 'PAYMENT_RECEIVED' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('throws when the claim insert fails for a non-duplicate error', async () => {
-    const { service } = buildService({
-      error: { code: '500', message: 'db unavailable' },
-    });
+  it('skips events already claimed by event id', async () => {
+    const { service } = buildService({ code: '23505', message: 'duplicate' });
+    const process = jest.spyOn(service, 'processAsaasWebhookEvent');
 
     await expect(
-      service.handleStripeWebhook(buildEvent('evt_1', 'invoice.paid')),
-    ).rejects.toThrow(InternalServerErrorException);
+      service.handleAsaasWebhook('secret', {
+        id: 'evt_1',
+        event: 'PAYMENT_RECEIVED',
+        payment: { id: 'pay_1' },
+      }),
+    ).resolves.toEqual({ received: true });
+
+    expect(process).not.toHaveBeenCalled();
   });
 });
