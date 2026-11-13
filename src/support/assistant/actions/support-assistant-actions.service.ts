@@ -8,7 +8,6 @@ import {
 import { AppointmentsService } from '../../../appointments/appointments.service';
 import { ProfessionalAbsencesService } from '../../../professional-absences/professional-absences.service';
 import { ProfessionalsService } from '../../../professionals/professionals.service';
-import { bookingDayBoundsIso } from '../../../schedule/utils/booking-datetime.util';
 import { SupabaseService } from '../../../supabase/supabase.service';
 import type { TenantAccessContext } from '../../../tenants/entities/tenant-access-context.entity';
 import {
@@ -256,8 +255,7 @@ export class SupportAssistantActionsService {
       },
     });
 
-    const isAllDay =
-      payload.allDay !== false && (!payload.startTime || !payload.endTime);
+    const isAllDay = payload.allDay !== false && (!payload.startTime || !payload.endTime);
     const periodLabel = isAllDay
       ? `Dia inteiro em ${payload.date}`
       : `${payload.date} das ${payload.startTime} às ${payload.endTime}`;
@@ -721,14 +719,8 @@ export class SupportAssistantActionsService {
       )
       .eq('tenant_id', context.tenant.id)
       .in('status', [...CANCELLABLE_STATUSES])
-      .gte(
-        'start_time',
-        bookingDayBoundsIso(payload.date, context.tenant.timezone).start,
-      )
-      .lte(
-        'start_time',
-        bookingDayBoundsIso(payload.date, context.tenant.timezone).end,
-      )
+      .gte('start_time', `${payload.date}T00:00:00`)
+      .lte('start_time', `${payload.date}T23:59:59`)
       .order('start_time', { ascending: true })
       .limit(20);
 
@@ -812,15 +804,16 @@ export class SupportAssistantActionsService {
   }
 
   private resolvePreviewErrorMessage(error: unknown): string {
-    if (
-      error instanceof BadRequestException ||
-      error instanceof NotFoundException
-    ) {
+    if (error instanceof BadRequestException || error instanceof NotFoundException) {
       const response = error.getResponse();
       if (typeof response === 'string' && response.trim()) {
         return response;
       }
-      if (response && typeof response === 'object' && 'message' in response) {
+      if (
+        response &&
+        typeof response === 'object' &&
+        'message' in response
+      ) {
         const nested = (response as { message?: unknown }).message;
         if (typeof nested === 'string' && nested.trim()) {
           return nested;

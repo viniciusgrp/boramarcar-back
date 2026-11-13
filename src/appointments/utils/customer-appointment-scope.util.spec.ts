@@ -12,7 +12,7 @@ describe('customer-appointment-scope.util', () => {
       isUpcomingCustomerAppointment(
         {
           status: 'CONFIRMED',
-          start_time: '2026-07-16T18:00:00.000Z',
+          start_time: '2026-07-16T15:00:00.000Z',
         },
         now,
       ),
@@ -24,7 +24,7 @@ describe('customer-appointment-scope.util', () => {
       matchesCustomerAppointmentScope(
         {
           status: 'CONFIRMED',
-          start_time: '2026-07-16T16:00:00.000Z',
+          start_time: '2026-07-16T13:00:00.000Z',
         },
         'past',
         now,
@@ -49,7 +49,7 @@ describe('customer-appointment-scope.util', () => {
       isCustomerReschedulableAppointment(
         {
           status: 'CONFIRMED',
-          start_time: '2026-07-16T18:00:00.000Z',
+          start_time: '2026-07-16T15:00:00.000Z',
         },
         now,
       ),
@@ -61,7 +61,7 @@ describe('customer-appointment-scope.util', () => {
       isCustomerReschedulableAppointment(
         {
           status: 'PENDING_PAYMENT',
-          start_time: '2026-07-16T18:00:00.000Z',
+          start_time: '2026-07-16T15:00:00.000Z',
         },
         now,
       ),
@@ -73,7 +73,7 @@ describe('customer-appointment-scope.util', () => {
       isCustomerReschedulableAppointment(
         {
           status: 'CONFIRMED',
-          start_time: '2026-07-16T16:00:00.000Z',
+          start_time: '2026-07-16T13:00:00.000Z',
         },
         now,
       ),

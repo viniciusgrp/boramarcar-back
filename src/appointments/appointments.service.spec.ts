@@ -33,12 +33,6 @@ function stub<T extends object>(overrides: Partial<T> = {}): T {
   return overrides as T;
 }
 
-type PrivateMethod = (...args: never[]) => Promise<unknown>;
-
-function asPrivate(target: object): Record<string, PrivateMethod> {
-  return target as unknown as Record<string, PrivateMethod>;
-}
-
 function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
   return {
     id: 'tenant-1',
@@ -83,9 +77,7 @@ function buildService() {
     findOrCreateCustomerForAppointment: jest.fn(),
     validateRewardForAppointmentBooking: jest.fn(),
     buildBookingLoyaltyFeedback: jest.fn().mockResolvedValue(null),
-    resolveCustomerReferralCodeForAppointment: jest
-      .fn()
-      .mockResolvedValue(null),
+    resolveCustomerReferralCodeForAppointment: jest.fn().mockResolvedValue(null),
     redeemRewardForAppointment: jest.fn(),
     refundRedeemedPointsForAppointment: jest.fn(),
     restoreRedeemedPointsForAppointment: jest.fn(),
@@ -153,28 +145,20 @@ describe('AppointmentsService', () => {
       ]);
 
       await expect(
-        service.getAvailableDays('tenant-1', ['svc-1'], {
-          professionalId: 'pro-1',
-        }),
+        service.getAvailableDays('tenant-1', ['svc-1'], { professionalId: 'pro-1' }),
       ).resolves.toEqual([]);
     });
 
     it('returns no slots when no professional performs the services', async () => {
       const { service, professionalsService, tenantsService } = buildService();
-      professionalsService.findActivePerformingAllServices.mockResolvedValue(
-        [],
-      );
+      professionalsService.findActivePerformingAllServices.mockResolvedValue([]);
       tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(service), 'resolveBookingServices')
+        .spyOn(service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
 
       await expect(
-        service.getAvailabilityForAnyProfessional(
-          'tenant-1',
-          ['svc-1'],
-          '2099-01-15',
-        ),
+        service.getAvailabilityForAnyProfessional('tenant-1', ['svc-1'], '2099-01-15'),
       ).resolves.toEqual([]);
     });
 
@@ -182,21 +166,14 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: true,
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: true,
+      });
 
       await expect(
-        ctx.service.getAvailability(
-          'tenant-1',
-          'pro-1',
-          ['svc-1'],
-          '2099-01-15',
-        ),
+        ctx.service.getAvailability('tenant-1', 'pro-1', ['svc-1'], '2099-01-15'),
       ).resolves.toEqual([]);
     });
 
@@ -204,22 +181,20 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '09:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '12:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '09:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '12:00'),
+      });
       ctx.from.mockReturnValue(
         createChainableQuery({
           data: [
             {
               id: 'hold-1',
-              start_time: '2099-01-15T13:00:00.000Z',
-              end_time: '2099-01-15T14:00:00.000Z',
+              start_time: '2099-01-15T10:00:00.000Z',
+              end_time: '2099-01-15T11:00:00.000Z',
             },
           ],
           error: null,
@@ -253,7 +228,7 @@ describe('AppointmentsService', () => {
         service.create({
           tenantId: 'tenant-1',
           professionalId: 'pro-1',
-          startTime: '2099-01-15T09:00:00',
+          startTime: '2099-01-15T09:00:00.000Z',
           customerName: 'Ana',
           customerPhone: '11999999999',
           serviceIds: ['svc-1'],
@@ -271,7 +246,7 @@ describe('AppointmentsService', () => {
         service.create({
           tenantId: 'tenant-1',
           professionalId: 'pro-1',
-          startTime: '2099-01-15T09:00:00',
+          startTime: '2099-01-15T09:00:00.000Z',
           customerName: 'Ana',
           customerPhone: '11999999999',
           serviceIds: ['svc-1'],
@@ -283,17 +258,17 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
         .mockResolvedValue(true);
 
       await expect(
         ctx.service.create({
           tenantId: 'tenant-1',
           professionalId: 'pro-1',
-          startTime: '2099-01-15T09:00:00',
+          startTime: '2099-01-15T09:00:00.000Z',
           customerName: 'Ana',
           customerPhone: '11999999999',
           serviceIds: ['svc-1'],
@@ -305,32 +280,36 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
         .mockResolvedValue(false);
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveProfessionalBookingSettings')
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
         .mockResolvedValue({
           name: 'João',
           contact_phone: '11988888888',
           bookingAcceptanceType: 'DEFAULT',
         });
       jest
-        .spyOn(asPrivate(ctx.service), 'insertAppointmentServices')
+        .spyOn(ctx.service as never as { insertAppointmentServices: () => Promise<void> }, 'insertAppointmentServices')
         .mockResolvedValue(undefined);
       jest
-        .spyOn(asPrivate(ctx.service), 'dispatchAppointmentEmails')
-        .mockResolvedValue(undefined);
+        .spyOn(ctx.service as never as { dispatchAppointmentEmails: () => void }, 'dispatchAppointmentEmails')
+        .mockReturnValue(undefined);
 
       ctx.loyaltyService.findOrCreateCustomerForAppointment.mockResolvedValue({
-        customer: {
-          id: 'cust-1',
-          name: 'Ana',
-          phone: '11999999999',
-          email: null,
-        },
+        customer: { id: 'cust-1', name: 'Ana', phone: '11999999999', email: null },
         isNew: true,
       });
 
@@ -352,13 +331,14 @@ describe('AppointmentsService', () => {
         guest_access_token: 'secret-token',
       } as Appointment;
 
-      const chain = createChainableQuery({ data: inserted, error: null });
-      ctx.from.mockReturnValue(chain);
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: inserted, error: null }),
+      );
 
       const result = await ctx.service.create({
         tenantId: 'tenant-1',
         professionalId: 'pro-1',
-        startTime: '2099-01-15T09:00:00',
+        startTime: '2099-01-15T09:00:00.000Z',
         customerName: 'Ana',
         customerPhone: '11999999999',
         serviceIds: ['svc-1'],
@@ -367,44 +347,42 @@ describe('AppointmentsService', () => {
       expect(result.appointment.status).toBe('CONFIRMED');
       expect(result.appointment.guest_access_token).toBeNull();
       expect(result.checkoutUrl).toBeUndefined();
-      expect(chain.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          start_time: '2099-01-15T12:00:00.000Z',
-          end_time: '2099-01-15T13:00:00.000Z',
-        }),
-      );
     });
 
     it('marks the first-appointment onboarding milestone after a successful booking', async () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
         .mockResolvedValue(false);
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveProfessionalBookingSettings')
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
         .mockResolvedValue({
           name: 'João',
           contact_phone: '11988888888',
           bookingAcceptanceType: 'DEFAULT',
         });
       jest
-        .spyOn(asPrivate(ctx.service), 'insertAppointmentServices')
+        .spyOn(ctx.service as never as { insertAppointmentServices: () => Promise<void> }, 'insertAppointmentServices')
         .mockResolvedValue(undefined);
       jest
-        .spyOn(asPrivate(ctx.service), 'dispatchAppointmentEmails')
-        .mockResolvedValue(undefined);
+        .spyOn(ctx.service as never as { dispatchAppointmentEmails: () => void }, 'dispatchAppointmentEmails')
+        .mockReturnValue(undefined);
 
       ctx.loyaltyService.findOrCreateCustomerForAppointment.mockResolvedValue({
-        customer: {
-          id: 'cust-1',
-          name: 'Ana',
-          phone: '11999999999',
-          email: null,
-        },
+        customer: { id: 'cust-1', name: 'Ana', phone: '11999999999', email: null },
         isNew: true,
       });
 
@@ -432,7 +410,7 @@ describe('AppointmentsService', () => {
       await ctx.service.create({
         tenantId: 'tenant-1',
         professionalId: 'pro-1',
-        startTime: '2099-01-15T09:00:00',
+        startTime: '2099-01-15T09:00:00.000Z',
         customerName: 'Ana',
         customerPhone: '11999999999',
         serviceIds: ['svc-1'],
@@ -454,13 +432,22 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       ctx.tenantsService.findById.mockResolvedValue(buildTenant());
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
         .mockResolvedValue(false);
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveProfessionalBookingSettings')
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
         .mockResolvedValue({
           name: 'João',
           contact_phone: null,
@@ -481,7 +468,7 @@ describe('AppointmentsService', () => {
         ctx.service.create({
           tenantId: 'tenant-1',
           professionalId: 'pro-1',
-          startTime: '2099-01-15T09:00:00',
+          startTime: '2099-01-15T09:00:00.000Z',
           customerName: 'Ana',
           customerPhone: '11999999999',
           serviceIds: ['svc-1'],
@@ -494,7 +481,14 @@ describe('AppointmentsService', () => {
     it('approves only PENDING_APPROVAL appointments', async () => {
       const { service } = buildService();
       jest
-        .spyOn(asPrivate(service), 'loadAppointmentEmailContext')
+        .spyOn(
+          service as never as {
+            loadAppointmentEmailContext: () => Promise<{
+              appointment: { professional_id: string; status: string };
+            }>;
+          },
+          'loadAppointmentEmailContext',
+        )
         .mockResolvedValue({
           appointment: { professional_id: 'pro-1', status: 'CONFIRMED' },
         });
@@ -507,7 +501,14 @@ describe('AppointmentsService', () => {
     it('rejects only PENDING_APPROVAL appointments', async () => {
       const { service } = buildService();
       jest
-        .spyOn(asPrivate(service), 'loadAppointmentEmailContext')
+        .spyOn(
+          service as never as {
+            loadAppointmentEmailContext: () => Promise<{
+              appointment: { professional_id: string; status: string };
+            }>;
+          },
+          'loadAppointmentEmailContext',
+        )
         .mockResolvedValue({
           appointment: { professional_id: 'pro-1', status: 'CONFIRMED' },
         });
@@ -524,10 +525,7 @@ describe('AppointmentsService', () => {
         service.findConflictingAppointmentsForAbsenceRange(
           'tenant-1',
           'pro-2',
-          {
-            startsAt: '2099-01-15T09:00:00.000Z',
-            endsAt: '2099-01-15T12:00:00.000Z',
-          },
+          { startsAt: '2099-01-15T09:00:00.000Z', endsAt: '2099-01-15T12:00:00.000Z' },
           'pro-1',
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -536,11 +534,7 @@ describe('AppointmentsService', () => {
     it('rejects invalid status updates', async () => {
       const { service } = buildService();
       await expect(
-        service.updateStatusForTenant(
-          'tenant-1',
-          'appt-1',
-          'NOT_A_STATUS' as never,
-        ),
+        service.updateStatusForTenant('tenant-1', 'appt-1', 'NOT_A_STATUS' as never),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
@@ -560,7 +554,7 @@ describe('AppointmentsService', () => {
           'tenant-1',
           {
             professionalId: 'pro-2',
-            startTime: '2099-01-15T09:00:00',
+            startTime: '2099-01-15T09:00:00.000Z',
             serviceIds: ['svc-1'],
             customerName: 'Ana',
             customerPhone: '11999999999',
@@ -573,28 +567,46 @@ describe('AppointmentsService', () => {
     it('stores a custom duration and blocks the agenda until that end time', async () => {
       const ctx = buildService();
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(
+          ctx.service as never as {
+            resolveBookingServices: () => Promise<ResolvedBookingServices>;
+          },
+          'resolveBookingServices',
+        )
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveCustomerForInternal')
+        .spyOn(
+          ctx.service as never as {
+            resolveCustomerForInternal: () => Promise<{
+              customerId: string | null;
+              name: string;
+              phone: string;
+            }>;
+          },
+          'resolveCustomerForInternal',
+        )
         .mockResolvedValue({
           customerId: null,
           name: 'Ana',
           phone: '11999999999',
         });
       const hasConflict = jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
         .mockResolvedValue(false);
       jest
-        .spyOn(asPrivate(ctx.service), 'insertAppointmentServices')
+        .spyOn(
+          ctx.service as never as { insertAppointmentServices: () => Promise<void> },
+          'insertAppointmentServices',
+        )
         .mockResolvedValue(undefined);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '08:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
 
       const chain = createChainableQuery({
         data: {
@@ -629,7 +641,7 @@ describe('AppointmentsService', () => {
 
       const created = await ctx.service.createInternal('tenant-1', {
         professionalId: 'pro-1',
-        startTime: '2099-01-15T09:00:00',
+        startTime: '2099-01-15T09:00:00.000Z',
         serviceIds: ['svc-1'],
         customerName: 'Ana',
         customerPhone: '11999999999',
@@ -639,8 +651,7 @@ describe('AppointmentsService', () => {
       expect(chain.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           total_duration_minutes: 45,
-          start_time: '2099-01-15T12:00:00.000Z',
-          end_time: '2099-01-15T12:45:00.000Z',
+          end_time: '2099-01-15T09:45:00.000Z',
           total_price: 50,
         }),
       );
@@ -655,28 +666,46 @@ describe('AppointmentsService', () => {
     it('keeps the catalog duration when the internal booking omits an override', async () => {
       const ctx = buildService();
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveBookingServices')
+        .spyOn(
+          ctx.service as never as {
+            resolveBookingServices: () => Promise<ResolvedBookingServices>;
+          },
+          'resolveBookingServices',
+        )
         .mockResolvedValue(booking);
       jest
-        .spyOn(asPrivate(ctx.service), 'resolveCustomerForInternal')
+        .spyOn(
+          ctx.service as never as {
+            resolveCustomerForInternal: () => Promise<{
+              customerId: string | null;
+              name: string;
+              phone: string;
+            }>;
+          },
+          'resolveCustomerForInternal',
+        )
         .mockResolvedValue({
           customerId: null,
           name: 'Ana',
           phone: '11999999999',
         });
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
         .mockResolvedValue(false);
       jest
-        .spyOn(asPrivate(ctx.service), 'insertAppointmentServices')
+        .spyOn(
+          ctx.service as never as { insertAppointmentServices: () => Promise<void> },
+          'insertAppointmentServices',
+        )
         .mockResolvedValue(undefined);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '08:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
 
       const chain = createChainableQuery({
         data: {
@@ -701,7 +730,7 @@ describe('AppointmentsService', () => {
 
       await ctx.service.createInternal('tenant-1', {
         professionalId: 'pro-1',
-        startTime: '2099-01-15T09:00:00',
+        startTime: '2099-01-15T09:00:00.000Z',
         serviceIds: ['svc-1'],
         customerName: 'Ana',
         customerPhone: '11999999999',
@@ -710,37 +739,8 @@ describe('AppointmentsService', () => {
       expect(chain.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           total_duration_minutes: 60,
-          start_time: '2099-01-15T12:00:00.000Z',
-          end_time: '2099-01-15T13:00:00.000Z',
+          end_time: '2099-01-15T10:00:00.000Z',
         }),
-      );
-
-      await ctx.service.createInternal('tenant-1', {
-        professionalId: 'pro-1',
-        startTime: '2099-01-15T09:00:00-03:00',
-        serviceIds: ['svc-1'],
-        customerName: 'Ana',
-        customerPhone: '11999999999',
-      });
-      await ctx.service.createInternal('tenant-1', {
-        professionalId: 'pro-1',
-        startTime: '2099-01-15T12:00:00.000Z',
-        serviceIds: ['svc-1'],
-        customerName: 'Ana',
-        customerPhone: '11999999999',
-      });
-
-      expect(chain.insert).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({ start_time: '2099-01-15T12:00:00.000Z' }),
-      );
-      expect(chain.insert).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({ start_time: '2099-01-15T12:00:00.000Z' }),
-      );
-      expect(chain.insert).toHaveBeenNthCalledWith(
-        3,
-        expect.objectContaining({ start_time: '2099-01-15T12:00:00.000Z' }),
       );
     });
 
@@ -750,7 +750,7 @@ describe('AppointmentsService', () => {
       await expect(
         service.createInternal('tenant-1', {
           professionalId: 'pro-1',
-          startTime: '2099-01-15T09:00:00',
+          startTime: '2099-01-15T09:00:00.000Z',
           serviceIds: ['svc-1'],
           customerName: 'Ana',
           customerPhone: '11999999999',
@@ -765,8 +765,8 @@ describe('AppointmentsService', () => {
       id: 'appt-1',
       status: 'CONFIRMED',
       professional_id: 'pro-1',
-      start_time: '2099-01-15T12:00:00.000Z',
-      end_time: '2099-01-15T13:00:00.000Z',
+      start_time: '2099-01-15T09:00:00.000Z',
+      end_time: '2099-01-15T10:00:00.000Z',
       total_duration_minutes: 60,
     };
 
@@ -776,8 +776,8 @@ describe('AppointmentsService', () => {
       professional_id: 'pro-1',
       customer_name: 'Ana',
       customer_phone: '11999999999',
-      start_time: '2099-01-15T12:00:00.000Z',
-      end_time: '2099-01-15T13:30:00.000Z',
+      start_time: '2099-01-15T09:00:00.000Z',
+      end_time: '2099-01-15T10:30:00.000Z',
       status: 'CONFIRMED',
       booking_source: 'INTERNAL',
       total_duration_minutes: 90,
@@ -803,13 +803,11 @@ describe('AppointmentsService', () => {
       });
       chain.single.mockResolvedValue({ data: updatedAdminRow, error: null });
       ctx.from.mockReturnValue(chain);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '08:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
       return chain;
     }
 
@@ -824,19 +822,16 @@ describe('AppointmentsService', () => {
       );
 
       expect(chain.update).toHaveBeenCalledWith({
-        end_time: '2099-01-15T13:30:00.000Z',
+        end_time: '2099-01-15T10:30:00.000Z',
         total_duration_minutes: 90,
       });
       expect(updated.durationMinutes).toBe(90);
-      expect(updated.endTime).toBe('2099-01-15T10:30:00.000-03:00');
+      expect(updated.endTime).toBe('2099-01-15T10:30:00.000Z');
     });
 
     it('does not write when the duration is already the stored value', async () => {
       const ctx = buildService();
-      const chain = createChainableQuery({
-        data: updatedAdminRow,
-        error: null,
-      });
+      const chain = createChainableQuery({ data: updatedAdminRow, error: null });
       chain.maybeSingle
         .mockResolvedValueOnce({ data: existingAppointment, error: null })
         .mockResolvedValueOnce({
@@ -863,7 +858,10 @@ describe('AppointmentsService', () => {
       const ctx = buildService();
       const chain = mockEditableAppointment(ctx);
       jest
-        .spyOn(asPrivate(ctx.service), 'hasBookingConflict')
+        .spyOn(
+          ctx.service as never as { hasBookingConflict: () => Promise<boolean> },
+          'hasBookingConflict',
+        )
         .mockResolvedValue(true);
 
       await expect(
@@ -875,13 +873,11 @@ describe('AppointmentsService', () => {
     it('rejects a duration that ends after the professional closes', async () => {
       const ctx = buildService();
       const chain = mockEditableAppointment(ctx);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '08:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '10:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '10:00'),
+      });
 
       await expect(
         ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 90),
@@ -895,8 +891,8 @@ describe('AppointmentsService', () => {
       chain.maybeSingle.mockResolvedValue({
         data: {
           ...existingAppointment,
-          start_time: '2099-01-15T20:00:00.000Z',
-          end_time: '2099-01-15T22:00:00.000Z',
+          start_time: '2099-01-15T17:00:00.000Z',
+          end_time: '2099-01-15T19:00:00.000Z',
           total_duration_minutes: 120,
         },
         error: null,
@@ -904,25 +900,23 @@ describe('AppointmentsService', () => {
       chain.single.mockResolvedValue({
         data: {
           ...updatedAdminRow,
-          start_time: '2099-01-15T20:00:00.000Z',
-          end_time: '2099-01-15T21:30:00.000Z',
+          start_time: '2099-01-15T17:00:00.000Z',
+          end_time: '2099-01-15T18:30:00.000Z',
           total_duration_minutes: 90,
         },
         error: null,
       });
       ctx.from.mockReturnValue(chain);
-      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue(
-        {
-          isClosed: false,
-          openAt: buildWallClockDateTime('2099-01-15', '08:00'),
-          closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
-        },
-      );
+      ctx.professionalHoursService.getEffectiveScheduleForDate.mockResolvedValue({
+        isClosed: false,
+        openAt: buildWallClockDateTime('2099-01-15', '08:00'),
+        closeAt: buildWallClockDateTime('2099-01-15', '18:00'),
+      });
 
       await ctx.service.updateDurationForTenant('tenant-1', 'appt-1', 90);
 
       expect(chain.update).toHaveBeenCalledWith({
-        end_time: '2099-01-15T21:30:00.000Z',
+        end_time: '2099-01-15T18:30:00.000Z',
         total_duration_minutes: 90,
       });
     });
@@ -1037,10 +1031,20 @@ describe('AppointmentsService', () => {
         createChainableQuery({ data: futureRow, error: null }),
       );
       const apply = jest
-        .spyOn(asPrivate(ctx.service), 'applyCustomerReschedule')
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
         .mockResolvedValue({});
       jest
-        .spyOn(asPrivate(ctx.service), 'findAdminById')
+        .spyOn(
+          ctx.service as never as {
+            findAdminById: () => Promise<{ id: string }>;
+          },
+          'findAdminById',
+        )
         .mockResolvedValue({ id: 'appt-1' });
 
       await expect(
@@ -1080,7 +1084,12 @@ describe('AppointmentsService', () => {
         createChainableQuery({ data: futureRow, error: null }),
       );
       jest
-        .spyOn(asPrivate(ctx.service), 'applyCustomerReschedule')
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
         .mockRejectedValue(new ConflictException('ocupado'));
 
       await expect(

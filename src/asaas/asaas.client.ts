@@ -62,10 +62,7 @@ export class AsaasClient {
   }
 
   async deleteSubscription(subscriptionId: string): Promise<void> {
-    await this.request(
-      'DELETE',
-      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    );
+    await this.request('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`);
   }
 
   async getSubscription(subscriptionId: string): Promise<AsaasSubscription> {
@@ -137,9 +134,7 @@ export class AsaasClient {
     return this.request<AsaasCheckout>('POST', '/checkouts', payload);
   }
 
-  async createAccount(
-    payload: CreateAsaasAccountPayload,
-  ): Promise<AsaasAccount> {
+  async createAccount(payload: CreateAsaasAccountPayload): Promise<AsaasAccount> {
     return this.request<AsaasAccount>('POST', '/accounts', payload);
   }
 

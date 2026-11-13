@@ -1,7 +1,7 @@
 import { isAfter } from 'date-fns';
 import type { AppointmentStatus } from '../entities/appointment.entity';
 import type { CustomerAppointmentScope } from '../entities/customer-appointment.entity';
-import { storedBookingInstantToWallClock } from '../../schedule/utils/booking-datetime.util';
+import { parseWallClockDateTime } from '../../schedule/utils/wall-clock-datetime.util';
 
 export const CUSTOMER_CANCELLABLE_STATUSES: AppointmentStatus[] = [
   'PENDING',
@@ -21,13 +21,11 @@ export function isUpcomingCustomerAppointment(
   row: { start_time: string; status: string },
   now: Date,
 ): boolean {
-  if (
-    !CUSTOMER_CANCELLABLE_STATUSES.includes(row.status as AppointmentStatus)
-  ) {
+  if (!CUSTOMER_CANCELLABLE_STATUSES.includes(row.status as AppointmentStatus)) {
     return false;
   }
 
-  return !isAfter(now, storedBookingInstantToWallClock(row.start_time));
+  return !isAfter(now, parseWallClockDateTime(row.start_time));
 }
 
 export function isCustomerReschedulableAppointment(
@@ -40,7 +38,7 @@ export function isCustomerReschedulableAppointment(
     return false;
   }
 
-  return !isAfter(now, storedBookingInstantToWallClock(row.start_time));
+  return !isAfter(now, parseWallClockDateTime(row.start_time));
 }
 
 export function matchesCustomerAppointmentScope(

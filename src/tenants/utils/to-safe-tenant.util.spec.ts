@@ -19,7 +19,7 @@ describe('toSafeTenantForRole', () => {
   it.each(['ADMIN', 'PROFESSIONAL', null, undefined] as const)(
     'strips Asaas IDs for role %s',
     (role) => {
-      const safe = toSafeTenantForRole(tenant, role);
+      const safe = toSafeTenantForRole(tenant, role as UserRole | null | undefined);
       expect(safe.asaas_customer_id).toBeNull();
       expect(safe.asaas_subscription_id).toBeNull();
       expect(safe.asaas_account_id).toBeNull();

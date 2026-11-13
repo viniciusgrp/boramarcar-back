@@ -9,6 +9,10 @@ import type { User } from '@supabase/supabase-js';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { ReferralService } from '../loyalty/referral.service';
 import { normalizePhoneKey } from '../loyalty/utils/loyalty-points.util';
+import {
+  getWallClockNow,
+  wallClockToStorageIso,
+} from '../schedule/utils/wall-clock-datetime.util';
 import { SupabaseService } from '../supabase/supabase.service';
 import { TenantsService } from '../tenants/tenants.service';
 import type { CompleteCustomerProfileDto } from './dto/complete-customer-profile.dto';
@@ -97,10 +101,7 @@ export class CustomersService {
     }
   }
 
-  async getMe(
-    authUserId: string,
-    tenantId: string,
-  ): Promise<CustomerMeResponse> {
+  async getMe(authUserId: string, tenantId: string): Promise<CustomerMeResponse> {
     const customer = await this.findByAuthUserForTenant(tenantId, authUserId);
 
     return {
@@ -164,9 +165,7 @@ export class CustomersService {
           isProfileComplete: isCustomerProfileComplete(customer),
         };
       })
-      .filter(
-        (context): context is CustomerWithTenantSummary => context !== null,
-      );
+      .filter((context): context is CustomerWithTenantSummary => context !== null);
   }
 
   async updateProfile(
@@ -182,9 +181,7 @@ export class CustomersService {
     const existing = await this.findByAuthUserForTenant(tenantId, authUserId);
 
     if (!existing) {
-      throw new NotFoundException(
-        'Perfil não encontrado neste estabelecimento.',
-      );
+      throw new NotFoundException('Perfil não encontrado neste estabelecimento.');
     }
 
     const profilePictureUrl =
@@ -194,7 +191,7 @@ export class CustomersService {
     const displayName =
       dto.name === undefined
         ? existing.name
-        : (normalizeCustomerDisplayName(dto.name) ?? existing.name);
+        : normalizeCustomerDisplayName(dto.name) ?? existing.name;
     const instagramHandle =
       dto.instagramHandle === undefined
         ? existing.instagram_handle
@@ -329,7 +326,10 @@ export class CustomersService {
 
     const created = this.mapCustomerRow(data as Customer);
 
-    await this.loyaltyService.applyWelcomeBonusIfEligible(tenantId, created.id);
+    await this.loyaltyService.applyWelcomeBonusIfEligible(
+      tenantId,
+      created.id,
+    );
 
     const refreshed = await this.findByIdForTenant(tenantId, created.id);
 
@@ -488,11 +488,10 @@ export class CustomersService {
       referralCode: string | null;
     },
   ): Promise<Customer> {
-    const withReferralCode =
-      await this.referralService.ensureReferralCodeForCustomer(
-        params.tenantId,
-        customer,
-      );
+    const withReferralCode = await this.referralService.ensureReferralCodeForCustomer(
+      params.tenantId,
+      customer,
+    );
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -563,9 +562,7 @@ export class CustomersService {
       return { customerIds: [], tenantByCustomerId: new Map() };
     }
 
-    const tenantIds = [
-      ...new Set(customers.map((customer) => customer.tenantId)),
-    ];
+    const tenantIds = [...new Set(customers.map((customer) => customer.tenantId))];
     const phoneKeyByTenantAndPrimary = new Map<string, string>();
 
     for (const customer of customers) {
@@ -753,7 +750,7 @@ export class CustomersService {
       }
     }
 
-    const nowStorageIso = new Date().toISOString();
+    const nowStorageIso = wallClockToStorageIso(getWallClockNow());
 
     const [linkedResult, orphanResult] = await Promise.all([
       this.supabaseService
@@ -849,9 +846,7 @@ export class CustomersService {
         .limit(2000);
 
       if (phoneFallbackResult.error) {
-        throw new InternalServerErrorException(
-          phoneFallbackResult.error.message,
-        );
+        throw new InternalServerErrorException(phoneFallbackResult.error.message);
       }
 
       ingestRows(phoneFallbackResult.data ?? [], true);

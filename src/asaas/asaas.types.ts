@@ -125,7 +125,11 @@ export interface AsaasWebhookConfig {
   events: string[];
 }
 
-export type AsaasCompanyType = 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION';
+export type AsaasCompanyType =
+  | 'MEI'
+  | 'LIMITED'
+  | 'INDIVIDUAL'
+  | 'ASSOCIATION';
 
 export interface CreateAsaasAccountPayload {
   name: string;
