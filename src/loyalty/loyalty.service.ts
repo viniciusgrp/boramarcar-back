@@ -1153,19 +1153,41 @@ export class LoyaltyService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('loyalty_transactions')
-      .select('id')
+      .select('type, points, description')
       .eq('tenant_id', tenantId)
-      .eq('appointment_id', appointmentId)
-      .eq('type', 'EARNED')
-      .eq('description', LOYALTY_COMPLETION_EARN_DESCRIPTION)
-      .limit(1)
-      .maybeSingle();
+      .eq('appointment_id', appointmentId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return Boolean(data);
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    let netEarned = 0;
+
+    for (const row of rows) {
+      const points = Number(row.points ?? 0);
+      const description = String(row.description ?? '');
+
+      if (points <= 0) {
+        continue;
+      }
+
+      if (
+        row.type === 'EARNED' &&
+        isCompletionEarnDescription(description)
+      ) {
+        netEarned += points;
+      }
+
+      if (
+        row.type === 'REDEEMED' &&
+        isCompletionReverseDescription(description)
+      ) {
+        netEarned -= points;
+      }
+    }
+
+    return netEarned > 0;
   }
 
   private async debitCustomerPointsAtomic(params: {

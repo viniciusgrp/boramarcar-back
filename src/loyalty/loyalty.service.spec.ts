@@ -7,6 +7,7 @@ import { LoyaltyService } from './loyalty.service';
 import type { ReferralService } from './referral.service';
 import {
   LOYALTY_COMPLETION_EARN_DESCRIPTION,
+  LOYALTY_COMPLETION_REVERSE_DESCRIPTION,
   LOYALTY_REFUND_REDEEM_DESCRIPTION,
   LOYALTY_RESTORE_REDEEM_DESCRIPTION,
 } from './utils/loyalty-ledger.constants';
@@ -298,7 +299,13 @@ describe('LoyaltyService', () => {
       }
       if (table === 'loyalty_transactions') {
         return createChain({
-          data: { id: 'existing-earn' },
+          data: [
+            {
+              type: 'EARNED',
+              points: 100,
+              description: LOYALTY_COMPLETION_EARN_DESCRIPTION,
+            },
+          ],
         });
       }
       return createChain();
@@ -503,5 +510,77 @@ describe('LoyaltyService', () => {
       p_points: 100,
     });
     expect(inserted[0]?.description).toBe(LOYALTY_COMPLETION_EARN_DESCRIPTION);
+  });
+
+  it('awards completion points again after a reverse left net earn at zero', async () => {
+    const rpc = jest.fn(async () => ({ data: 40, error: null }));
+    let txCalls = 0;
+    const inserted: Record<string, unknown>[] = [];
+    const from = jest.fn((table: string) => {
+      if (table === 'loyalty_settings') {
+        return createChain({ data: settingsRow });
+      }
+      if (table === 'customers') {
+        return createChain({ data: { ...customerRow, points_balance: 0 } });
+      }
+      if (table === 'loyalty_transactions') {
+        txCalls += 1;
+        if (txCalls === 1) {
+          return createChain({
+            data: [
+              {
+                type: 'EARNED',
+                points: 40,
+                description: LOYALTY_COMPLETION_EARN_DESCRIPTION,
+              },
+              {
+                type: 'REDEEMED',
+                points: 40,
+                description: LOYALTY_COMPLETION_REVERSE_DESCRIPTION,
+              },
+            ],
+          });
+        }
+        const chain = createChain({
+          data: {
+            id: 'tx-earn-2',
+            tenant_id: tenantId,
+            customer_id: customerId,
+            type: 'EARNED',
+            points: 40,
+            description: LOYALTY_COMPLETION_EARN_DESCRIPTION,
+            appointment_id: appointmentId,
+            created_at: '2026-01-01T00:00:00.000Z',
+          },
+        });
+        chain.insert = jest.fn((payload: Record<string, unknown>) => {
+          inserted.push(payload);
+          return chain;
+        });
+        return chain;
+      }
+      return createChain();
+    });
+
+    const service = new LoyaltyService(
+      { getClient: () => ({ from, rpc }) } as unknown as SupabaseService,
+      {} as ReferralService,
+    );
+
+    await service.awardPointsForCompletedAppointment({
+      tenantId,
+      appointmentId,
+      customerId,
+      customerName: 'Ana',
+      customerPhone: '11999999999',
+      totalPrice: 40,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('credit_customer_loyalty_points', {
+      p_customer_id: customerId,
+      p_tenant_id: tenantId,
+      p_points: 40,
+    });
+    expect(inserted).toHaveLength(1);
   });
 });

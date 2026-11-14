@@ -51,10 +51,11 @@ export class ServicesController {
 
   @Get('managed')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER')
-  async findManaged(@CurrentUser() user: User): Promise<Service[]> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.servicesService.findAllManagedByTenant(tenant.id);
+  @Roles('OWNER', 'ADMIN')
+  async findManaged(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<Service[]> {
+    return this.servicesService.findAllManagedByTenant(context.tenant.id);
   }
 
   @Get('agenda')

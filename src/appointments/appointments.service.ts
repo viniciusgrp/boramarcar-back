@@ -3116,6 +3116,7 @@ export class AppointmentsService {
       serviceIds: this.extractAppointmentServiceIds(row),
       serviceName: adminAppointment.serviceName,
       durationMinutes: adminAppointment.durationMinutes,
+      totalPrice: adminAppointment.totalPrice,
       depositPaid: adminAppointment.depositPaid,
       depositPaidAmount: adminAppointment.depositPaidAmount,
       balanceDue: adminAppointment.balanceDue,
