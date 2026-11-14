@@ -201,7 +201,10 @@ export class EmailFunnelService {
 
     const rendered = this.renderStep(step, {
       token: tenant?.trial_email_funnel_opt_out_token || 'test-token',
-      trialEndsAt: tenant?.trial_ends_at || resolvePreviewTrialEndsAt(step),
+      // Always use the step-relative preview window so {{dias_restantes}}
+      // matches the trial_mid / trial copy (e.g. 7 days), even for old tenants
+      // with a longer complimentary trial_ends_at.
+      trialEndsAt: resolvePreviewTrialEndsAt(step),
       useSetupCopy: false,
       ownerFirstName: ownerDetails.firstName,
       tenantName: tenant?.name || 'Estabelecimento Exemplo',

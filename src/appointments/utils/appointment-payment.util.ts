@@ -65,7 +65,11 @@ export function resolveAppointmentPaymentView(input: {
     Math.max(0, totalPrice - depositPaidAmount),
   );
   const balanceDue =
-    input.status === 'COMPLETED' ? 0 : openBalance;
+    input.status === 'COMPLETED' ||
+    input.status === 'CANCELLED' ||
+    input.status === 'NO_SHOW'
+      ? 0
+      : openBalance;
 
   let paymentBadge: AppointmentPaymentBadge = 'NONE';
 

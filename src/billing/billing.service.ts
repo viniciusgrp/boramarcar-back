@@ -1170,7 +1170,13 @@ export class BillingService {
     }
 
     const planTier = normalizePlanTier(tenant.plan_tier);
-    const value = resolvePlanValueBrl(this.configService, planTier);
+    // Scheduled downgrade keeps the current plan until effective_at, but Asaas
+    // already charges the lower tier — recreate the subscription at that price.
+    const asaasPlanTier =
+      tenant.pending_plan_tier && !tenant.pending_plan_payment_id
+        ? normalizePlanTier(tenant.pending_plan_tier)
+        : planTier;
+    const value = resolvePlanValueBrl(this.configService, asaasPlanTier);
     let subscription: AsaasSubscription;
 
     try {
@@ -1180,8 +1186,8 @@ export class BillingService {
         value,
         nextDueDate: toAsaasDate(new Date(tenant.subscription_expires_at)),
         cycle: 'MONTHLY',
-        description: `Horário Certo ${planTier}`,
-        externalReference: buildPlanExternalReference(tenant.id, planTier),
+        description: `Horário Certo ${asaasPlanTier}`,
+        externalReference: buildPlanExternalReference(tenant.id, asaasPlanTier),
       });
     } catch (error) {
       this.rethrowAsaasError(
@@ -2390,13 +2396,21 @@ export class BillingService {
       );
     }
 
+    // Keep a scheduled downgrade (pending_plan_tier without payment). Only clear
+    // pending upgrade invoices that were deleted above.
+    const clearsPendingUpgrade = Boolean(tenant.pending_plan_payment_id);
+
     return this.requireSubscriptionUpdate(tenant.id, {
       subscriptionStatus: tenant.subscription_status,
       subscriptionCancelAt: cancelAt,
-      pendingPlanTier: null,
-      pendingPlanPaymentId: null,
-      pendingPlanInvoiceUrl: null,
-      pendingPlanEffectiveAt: null,
+      ...(clearsPendingUpgrade
+        ? {
+            pendingPlanTier: null,
+            pendingPlanPaymentId: null,
+            pendingPlanInvoiceUrl: null,
+            pendingPlanEffectiveAt: null,
+          }
+        : {}),
     });
   }
 

@@ -150,26 +150,24 @@ export class ProfessionalsController {
 
   @Get('managed')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER')
+  @Roles('OWNER', 'ADMIN')
   async findManaged(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Query('archived') archived?: string,
   ): Promise<Professional[]> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.findAllManagedByTenant(tenant.id, {
+    return this.professionalsService.findAllManagedByTenant(context.tenant.id, {
       archived: archived === 'true' || archived === '1',
     });
   }
 
   @Get('managed/:id')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER')
+  @Roles('OWNER', 'ADMIN')
   async findManagedOne(
-    @CurrentUser() user: User,
+    @CurrentTenantContext() context: TenantAccessContext,
     @Param('id') id: string,
   ): Promise<Professional> {
-    const tenant = await this.resolveOwnerTenant(user.id);
-    return this.professionalsService.findOneWithServices(id, tenant.id);
+    return this.professionalsService.findOneWithServices(id, context.tenant.id);
   }
 
   @Post()

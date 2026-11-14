@@ -608,40 +608,18 @@ export class FinanceService {
     appointmentId: string;
   }): Promise<void> {
     const client = this.supabaseService.getClient();
-    const { data: entries, error } = await client
+
+    // Remove the original revenue (and any legacy reversal rows) instead of
+    // inserting a compensating expense that inflates cash-register totals.
+    const { error: deleteEntriesError } = await client
       .from('cash_flow_entries')
-      .select('type, amount, category, cash_register_id, payment_method')
+      .delete()
       .eq('tenant_id', params.tenantId)
       .eq('appointment_id', params.appointmentId)
       .in('category', ['APPOINTMENT', 'APPOINTMENT_REVERSAL']);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    const net = this.appointmentCashNet(entries ?? []);
-
-    if (net > 0) {
-      const source = (entries ?? []).find(
-        (entry) => entry.category === 'APPOINTMENT' && entry.type === 'REVENUE',
-      );
-      const { error: reversalError } = await client
-        .from('cash_flow_entries')
-        .insert({
-          tenant_id: params.tenantId,
-          cash_register_id: source?.cash_register_id ?? null,
-          appointment_id: params.appointmentId,
-          payment_method: source?.payment_method ?? null,
-          type: 'EXPENSE',
-          amount: net,
-          description: 'Estorno de atendimento revertido',
-          category: 'APPOINTMENT_REVERSAL',
-          is_recurring: false,
-        });
-
-      if (reversalError) {
-        throw new InternalServerErrorException(reversalError.message);
-      }
+    if (deleteEntriesError) {
+      throw new InternalServerErrorException(deleteEntriesError.message);
     }
 
     const { error: deleteError } = await client

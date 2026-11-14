@@ -1288,6 +1288,7 @@ describe('AppointmentsService', () => {
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         id: 'appt-1',
+        totalPrice: 80,
         depositPaid: true,
         depositPaidAmount: 20,
         balanceDue: 60,
@@ -1328,6 +1329,7 @@ describe('AppointmentsService', () => {
       expect(groups[0].appointments).toHaveLength(1);
       expect(groups[0].appointments[0]).toMatchObject({
         id: 'appt-1',
+        totalPrice: 80,
         depositPaid: true,
         depositPaidAmount: 20,
         balanceDue: 60,

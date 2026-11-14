@@ -212,6 +212,86 @@ describe('BillingService plan changes and period-end cancel', () => {
     );
   });
 
+  it('keeps a scheduled Solo downgrade across cancel and reactivate', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
+      buildTenant({
+        plan_tier: 'ELITE',
+        pending_plan_tier: 'SOLO',
+        pending_plan_payment_id: null,
+        pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+        subscription_cancel_at: '2026-12-27T03:00:00.000Z',
+      }),
+    );
+    const createSubscription = jest.fn().mockResolvedValue({ id: 'sub_new' });
+    const deleteSubscription = jest.fn().mockResolvedValue(undefined);
+    const listPayments = jest.fn().mockResolvedValue({ data: [] });
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            plan_tier: 'ELITE',
+            pending_plan_tier: 'SOLO',
+            pending_plan_payment_id: null,
+            pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      { createSubscription, deleteSubscription, listPayments },
+    );
+
+    await service.cancelSubscription('tenant-1');
+
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionCancelAt: '2026-12-27T03:00:00.000Z',
+      }),
+    );
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ pendingPlanTier: null }),
+    );
+
+    updateSubscriptionByTenantId.mockClear();
+    const { service: reactivation } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            plan_tier: 'ELITE',
+            pending_plan_tier: 'SOLO',
+            pending_plan_payment_id: null,
+            pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+            subscription_cancel_at: '2026-12-27T03:00:00.000Z',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      { createSubscription },
+    );
+
+    await reactivation.reactivateSubscription('tenant-1');
+
+    expect(createSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 34.9,
+        externalReference: 'plan:tenant-1:SOLO',
+      }),
+    );
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        planTier: 'ELITE',
+        subscriptionCancelAt: null,
+        subscriptionStatus: 'ACTIVE',
+      }),
+    );
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ pendingPlanTier: null }),
+    );
+  });
+
   it('previews an upgrade difference and a Solo downgrade without an extra charge', async () => {
     const { service } = buildService({
       findById: jest.fn().mockResolvedValue(buildTenant()),

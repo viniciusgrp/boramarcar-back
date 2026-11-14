@@ -54,6 +54,22 @@ describe('appointment payment view', () => {
     });
   });
 
+  it('clears the balance for cancelled appointments even with a paid deposit', () => {
+    expect(
+      resolveAppointmentPaymentView({
+        status: 'CANCELLED',
+        totalPrice: 40,
+        depositAmount: 20,
+        depositPaid: true,
+        paymentStatus: 'PAID',
+      }),
+    ).toMatchObject({
+      depositPaidAmount: 20,
+      balanceDue: 0,
+      paymentBadge: 'DEPOSIT_PAID',
+    });
+  });
+
   it('hides the payment badge when nothing was collected', () => {
     expect(
       resolveAppointmentPaymentView({
