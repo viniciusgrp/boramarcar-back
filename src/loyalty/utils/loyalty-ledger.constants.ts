@@ -4,6 +4,10 @@ export const LOYALTY_COMPLETION_EARN_DESCRIPTION =
   'Pontos pelo atendimento concluído';
 
 export const LOYALTY_COMPLETION_REVERSE_DESCRIPTION =
+  'Estorno e conclusão revertida';
+
+/** Legacy ledger copy (em dash) kept for matching older rows. */
+export const LOYALTY_COMPLETION_REVERSE_DESCRIPTION_LEGACY =
   'Estorno — conclusão revertida';
 
 export const LOYALTY_WELCOME_BONUS_DESCRIPTION = 'Bônus de cadastro';
@@ -59,7 +63,10 @@ export function isCompletionEarnDescription(description: string): boolean {
 }
 
 export function isCompletionReverseDescription(description: string): boolean {
-  return description === LOYALTY_COMPLETION_REVERSE_DESCRIPTION;
+  return (
+    description === LOYALTY_COMPLETION_REVERSE_DESCRIPTION ||
+    description === LOYALTY_COMPLETION_REVERSE_DESCRIPTION_LEGACY
+  );
 }
 
 export function isWelcomeBonusDescription(description: string): boolean {

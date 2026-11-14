@@ -26,6 +26,10 @@ export interface AdminAppointment {
   paymentBadge: AppointmentPaymentBadge;
   bookingSource: BookingSource;
   paidWithPoints: boolean;
+  /** Points expected if the appointment is completed now (0 when loyalty is off or paid with points). */
+  estimatedEarnPoints: number;
+  /** Points actually credited for a COMPLETED appointment (0 otherwise). */
+  pointsAwarded: number;
   couponCode: string | null;
   couponDiscountAmount: number | null;
 }

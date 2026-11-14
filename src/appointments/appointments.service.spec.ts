@@ -83,6 +83,11 @@ function buildService() {
     redeemRewardForAppointment: jest.fn(),
     refundRedeemedPointsForAppointment: jest.fn(),
     restoreRedeemedPointsForAppointment: jest.fn(),
+    getSettingsForTenant: jest.fn().mockResolvedValue({
+      is_active: false,
+      points_per_currency: 1,
+      default_service_points: 0,
+    }),
   };
   const couponsService = {
     validateCouponForBooking: jest.fn(),

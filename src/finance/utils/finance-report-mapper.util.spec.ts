@@ -44,7 +44,7 @@ describe('finance-report-mapper.util', () => {
     });
   });
 
-  it('keeps cancelled rows out of revenue, profit and appointment count', () => {
+  it('keeps future confirmed and cancelled rows out of billing', () => {
     const row = {
       professional_id: 'pro-1',
       service_id: 'svc-1',
@@ -64,6 +64,14 @@ describe('finance-report-mapper.util', () => {
       total_price: 100,
       commission_amount: 20,
     });
+    const confirmed = mapFinanceReportAppointmentRow({
+      ...row,
+      id: 'appt-future',
+      customer_name: 'Carla',
+      status: 'CONFIRMED',
+      total_price: 80,
+      commission_amount: 0,
+    });
     const cancelled = mapFinanceReportAppointmentRow({
       ...row,
       id: 'appt-cancelled',
@@ -73,6 +81,8 @@ describe('finance-report-mapper.util', () => {
       commission_amount: 9,
     });
 
+    expect(confirmed.countsTowardRevenue).toBe(false);
+    expect(confirmed.recognizedRevenue).toBe(0);
     expect(cancelled.recognizedRevenue).toBe(0);
     expect(cancelled.countsTowardRevenue).toBe(false);
     const productSale = mapFinanceReportProductSale({
@@ -86,7 +96,10 @@ describe('finance-report-mapper.util', () => {
       professionals: { name: 'João' },
     });
     expect(
-      buildFinanceReportSummary([completed, cancelled], [productSale]),
+      buildFinanceReportSummary(
+        [completed, confirmed, cancelled],
+        [productSale],
+      ),
     ).toEqual({
       totalRevenue: 125,
       serviceRevenue: 100,
@@ -98,5 +111,32 @@ describe('finance-report-mapper.util', () => {
       appointmentCount: 1,
       productSaleCount: 1,
     });
+  });
+
+  it('exposes appointmentStartTime without rewriting createdAt (B4)', () => {
+    const productSale = mapFinanceReportProductSale({
+      id: 'sale-1',
+      created_at: '2026-09-10T18:00:00.000Z',
+      status: 'COMPLETED',
+      total_amount: 25,
+      commission_amount: 5,
+      appointments: { start_time: '2026-09-08T14:00:00' },
+    });
+
+    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
+    expect(productSale.appointmentStartTime).toBe('2026-09-08T14:00:00');
+  });
+
+  it('leaves appointmentStartTime null for standalone sales', () => {
+    const productSale = mapFinanceReportProductSale({
+      id: 'sale-2',
+      created_at: '2026-09-10T18:00:00.000Z',
+      status: 'COMPLETED',
+      total_amount: 10,
+      commission_amount: 0,
+    });
+
+    expect(productSale.appointmentStartTime).toBeNull();
+    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
   });
 });

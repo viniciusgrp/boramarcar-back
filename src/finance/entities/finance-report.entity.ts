@@ -34,7 +34,14 @@ export interface FinanceReportAppointment {
 
 export interface FinanceReportProductSale {
   id: string;
+  /** Sale row timestamp (when the product was sold). */
   createdAt: string;
+  /**
+   * Appointment wall-clock start when the sale is linked to a booking;
+   * null for walk-in / standalone sales. Prefer this over createdAt for
+   * “day of the appointment” UI (B4).
+   */
+  appointmentStartTime: string | null;
   status: 'COMPLETED' | 'CANCELLED';
   customerName: string | null;
   professionalId: string | null;
