@@ -113,18 +113,19 @@ describe('finance-report-mapper.util', () => {
     });
   });
 
-  it('exposes appointmentStartTime without rewriting createdAt (B4)', () => {
+  it('formats sale createdAt in America/Sao_Paulo without shifting appointmentStartTime (B4)', () => {
     const productSale = mapFinanceReportProductSale({
       id: 'sale-1',
+      // 18:00 UTC → 15:00 America/Sao_Paulo
       created_at: '2026-09-10T18:00:00.000Z',
       status: 'COMPLETED',
       total_amount: 25,
       commission_amount: 5,
-      appointments: { start_time: '2026-09-08T14:00:00' },
+      appointments: { start_time: '2026-09-08T14:00:00.000Z' },
     });
 
-    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
-    expect(productSale.appointmentStartTime).toBe('2026-09-08T14:00:00');
+    expect(productSale.createdAt).toBe('2026-09-10T15:00:00.000Z');
+    expect(productSale.appointmentStartTime).toBe('2026-09-08T14:00:00.000Z');
   });
 
   it('leaves appointmentStartTime null for standalone sales', () => {
@@ -137,6 +138,6 @@ describe('finance-report-mapper.util', () => {
     });
 
     expect(productSale.appointmentStartTime).toBeNull();
-    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
+    expect(productSale.createdAt).toBe('2026-09-10T15:00:00.000Z');
   });
 });

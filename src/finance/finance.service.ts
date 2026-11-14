@@ -38,6 +38,7 @@ import {
   mapFinanceReportProductSale,
   productSaleEffectiveAt,
 } from './utils/finance-report-mapper.util';
+import { formatAppInstantAsWallClockIso } from '../common/format-app-instant.util';
 import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { CashRegisterService } from './cash-register.service';
@@ -288,7 +289,10 @@ export class FinanceService {
         typeof row.product_sale_id === 'string' ? row.product_sale_id : null,
       cashRegisterId:
         typeof row.cash_register_id === 'string' ? row.cash_register_id : null,
-      createdAt: String(row.created_at ?? ''),
+      // Real timestamptz → SP wall-clock digits (same convention as product sale createdAt).
+      createdAt: formatAppInstantAsWallClockIso(
+        typeof row.created_at === 'string' ? row.created_at : '',
+      ),
     }));
   }
 

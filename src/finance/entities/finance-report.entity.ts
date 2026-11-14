@@ -34,12 +34,15 @@ export interface FinanceReportAppointment {
 
 export interface FinanceReportProductSale {
   id: string;
-  /** Sale row timestamp (when the product was sold). */
+  /**
+   * Real sale instant, formatted as America/Sao_Paulo wall-clock digits
+   * (`…THH:mm:ss.000Z`). Not the appointment clock.
+   */
   createdAt: string;
   /**
    * Appointment wall-clock start when the sale is linked to a booking;
-   * null for walk-in / standalone sales. Prefer this over createdAt for
-   * “day of the appointment” UI (B4).
+   * null for walk-in / standalone sales. Stored shop-clock digits — do not
+   * zone-convert. Use for “day of the appointment”, not sale time of day.
    */
   appointmentStartTime: string | null;
   status: 'COMPLETED' | 'CANCELLED';

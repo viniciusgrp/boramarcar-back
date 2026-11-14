@@ -1443,6 +1443,8 @@ export class BillingService {
     );
     const checkoutItem = buildDepositCheckoutItemCopy(params.tenantName);
 
+    const customerData = this.buildDepositCheckoutCustomerData(params);
+
     try {
       const checkout = await this.asaasClient.createCheckout({
         billingTypes: ['PIX', 'CREDIT_CARD'],
@@ -1463,6 +1465,7 @@ export class BillingService {
             ? [{ walletId, percentageValue: establishmentPercent }]
             : undefined,
         externalReference: buildDepositExternalReference(params.appointmentId),
+        ...(customerData ? { customerData } : {}),
       });
 
       if (!checkout.link) {
@@ -1481,6 +1484,25 @@ export class BillingService {
         'Não foi possível criar o pagamento do sinal no Asaas.',
       );
     }
+  }
+
+  private buildDepositCheckoutCustomerData(
+    params: CreateDepositCheckoutSessionParams,
+  ): { name?: string; email?: string; phone?: string } | null {
+    const name = params.customerName?.trim() || undefined;
+    const email = params.customerEmail?.trim() || undefined;
+    const phoneDigits = params.customerPhone?.replace(/\D/g, '') || '';
+    const phone = phoneDigits.length >= 10 ? phoneDigits : undefined;
+
+    if (!name && !email && !phone) {
+      return null;
+    }
+
+    return {
+      ...(name ? { name } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    };
   }
 
   buildAsaasAccountStatus(tenant: Tenant): AsaasAccountStatusResponse {
