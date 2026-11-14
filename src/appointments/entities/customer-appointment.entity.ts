@@ -13,6 +13,10 @@ export interface CustomerAppointment {
   serviceIds: string[];
   serviceName: string;
   durationMinutes: number;
+  totalPrice: number;
+  depositPaid: boolean;
+  depositPaidAmount: number;
+  balanceDue: number;
   cancellationRequestedAt: string | null;
   canRequestCancellation: boolean;
   allowsAutomaticCancellation: boolean;

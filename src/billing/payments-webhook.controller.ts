@@ -1,25 +1,23 @@
-import { Controller, Headers, Post, Req } from '@nestjs/common';
+import { Body, Controller, Headers, Post } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
-import type { RawBodyRequest } from '@nestjs/common';
-import type { Request } from 'express';
+import type { AsaasWebhookEvent } from '../asaas/asaas.types';
 import { BillingService } from './billing.service';
 import { WebhookAckResponse } from './entities/webhook-ack-response.entity';
 
 /**
- * Alias público usado no Stripe Dashboard e em docs
- * (`https://app.horariocerto.app/v1/payments/webhook`).
- * O handler canônico continua em POST /billing/webhook.
+ * Alias público cadastrado no painel Asaas
+ * (`https://app.horariocerto.app/v1/payments/asaas/webhook`).
  */
 @Controller('v1/payments')
 export class PaymentsWebhookController {
   constructor(private readonly billingService: BillingService) {}
 
-  @Post('webhook')
+  @Post('asaas/webhook')
   @SkipThrottle()
-  handleWebhook(
-    @Headers('stripe-signature') signature: string | undefined,
-    @Req() request: RawBodyRequest<Request>,
+  handleAsaasWebhook(
+    @Headers('asaas-access-token') accessToken: string | undefined,
+    @Body() body: AsaasWebhookEvent,
   ): Promise<WebhookAckResponse> {
-    return this.billingService.handleWebhook(signature, request.rawBody);
+    return this.billingService.handleAsaasWebhook(accessToken, body);
   }
 }

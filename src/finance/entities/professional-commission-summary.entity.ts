@@ -1,7 +1,9 @@
 export type CommissionPayoutStatus = 'PENDING' | 'PAID';
 
 export interface CommissionAppointmentItem {
+  source: 'APPOINTMENT' | 'PRODUCT_SALE';
   appointmentId: string;
+  productSaleId: string | null;
   serviceName: string;
   customerName: string;
   customerPhone: string;

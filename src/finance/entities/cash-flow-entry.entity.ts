@@ -17,3 +17,21 @@ export interface CashFlowSummary {
   totalExpenses: number;
   netProfit: number;
 }
+
+/** Public list row for the cash-flow ledger (B5). */
+export interface CashFlowLedgerEntry {
+  id: string;
+  type: CashFlowEntryType;
+  amount: number;
+  description: string;
+  /** Stable machine code (APPOINTMENT, PRODUCT_SALE, …). */
+  category: string;
+  /** Portuguese label for UI (Atendimento, Venda de produto, …). */
+  categoryLabel: string;
+  paymentMethod: string | null;
+  appointmentId: string | null;
+  productSaleId: string | null;
+  cashRegisterId: string | null;
+  /** Real timestamptz as UTC ISO — front formats in America/Sao_Paulo. */
+  createdAt: string;
+}

@@ -43,8 +43,8 @@ function buildTenant(overrides: Partial<Tenant> = {}): Tenant {
     plan_tier: 'SOLO',
     booking_acceptance_type: 'AUTOMATIC',
     booking_slot_interval_minutes: 60,
-    stripe_connect_account_id: null,
-    stripe_connect_charges_enabled: false,
+    asaas_wallet_id: null,
+    asaas_charges_enabled: false,
     ...overrides,
   } as Tenant;
 }
@@ -69,9 +69,11 @@ function buildService() {
   };
   const tenantsService = {
     findById: jest.fn(),
+    claimDailyDepositChargeAlert: jest.fn().mockResolvedValue(false),
   };
   const billingService = {
     createDepositCheckoutSession: jest.fn(),
+    cancelAbandonedDepositCharges: jest.fn().mockResolvedValue(undefined),
   };
   const loyaltyService = {
     findOrCreateCustomerForAppointment: jest.fn(),
@@ -81,6 +83,11 @@ function buildService() {
     redeemRewardForAppointment: jest.fn(),
     refundRedeemedPointsForAppointment: jest.fn(),
     restoreRedeemedPointsForAppointment: jest.fn(),
+    getSettingsForTenant: jest.fn().mockResolvedValue({
+      is_active: false,
+      points_per_currency: 1,
+      default_service_points: 0,
+    }),
   };
   const couponsService = {
     validateCouponForBooking: jest.fn(),
@@ -89,6 +96,8 @@ function buildService() {
   const customersService = {
     resolveForAuthenticatedBooking: jest.fn(),
     findByIdForTenant: jest.fn(),
+    findAllByAuthUserId: jest.fn(),
+    expandCustomerIdsByPhone: jest.fn(),
   };
   const depositPaymentService = {
     confirmDepositPayment: jest.fn(),
@@ -99,10 +108,20 @@ function buildService() {
   };
   const mailService = {
     sendAppointmentReminder: jest.fn().mockResolvedValue(undefined),
+    sendDepositChargeUnavailable: jest.fn().mockResolvedValue(undefined),
   };
+  const getUserById = jest.fn().mockResolvedValue({
+    data: { user: { email: 'owner@example.com' } },
+    error: null,
+  });
 
   const service = new AppointmentsService(
-    { getClient: () => ({ from }) } as never,
+    {
+      getClient: () => ({
+        from,
+        auth: { admin: { getUserById } },
+      }),
+    } as never,
     professionalHoursService as never,
     businessHoursService as never,
     professionalAbsencesService as never,
@@ -131,6 +150,7 @@ function buildService() {
     billingService,
     loyaltyService,
     couponsService,
+    customersService,
     depositPaymentService,
     mailService,
   };
@@ -347,6 +367,110 @@ describe('AppointmentsService', () => {
       expect(result.appointment.status).toBe('CONFIRMED');
       expect(result.appointment.guest_access_token).toBeNull();
       expect(result.checkoutUrl).toBeUndefined();
+    });
+
+    it('confirms a public booking without deposit when the subaccount cannot charge and emails the owner once', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({
+          plan_tier: 'ELITE',
+          owner_id: 'owner-1',
+          asaas_wallet_id: null,
+          asaas_charges_enabled: false,
+        }),
+      );
+      ctx.tenantsService.claimDailyDepositChargeAlert.mockResolvedValue(true);
+      const depositBooking: ResolvedBookingServices = {
+        ...booking,
+        requiresDeposit: true,
+        totalDepositAmount: 20,
+        items: [
+          {
+            ...booking.items[0],
+            requiresDeposit: true,
+            depositAmount: 20,
+          },
+        ],
+      };
+      jest
+        .spyOn(ctx.service as never as { resolveBookingServices: () => Promise<ResolvedBookingServices> }, 'resolveBookingServices')
+        .mockResolvedValue(depositBooking);
+      jest
+        .spyOn(ctx.service as never as { hasBookingConflict: () => Promise<boolean> }, 'hasBookingConflict')
+        .mockResolvedValue(false);
+      jest
+        .spyOn(
+          ctx.service as never as {
+            resolveProfessionalBookingSettings: () => Promise<{
+              name: string;
+              contact_phone: string | null;
+              bookingAcceptanceType: 'DEFAULT';
+            }>;
+          },
+          'resolveProfessionalBookingSettings',
+        )
+        .mockResolvedValue({
+          name: 'João',
+          contact_phone: '11988888888',
+          bookingAcceptanceType: 'DEFAULT',
+        });
+      jest
+        .spyOn(ctx.service as never as { insertAppointmentServices: () => Promise<void> }, 'insertAppointmentServices')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ctx.service as never as { dispatchAppointmentEmails: () => void }, 'dispatchAppointmentEmails')
+        .mockReturnValue(undefined);
+
+      ctx.loyaltyService.findOrCreateCustomerForAppointment.mockResolvedValue({
+        customer: { id: 'cust-1', name: 'Ana', phone: '11999999999', email: null },
+        isNew: true,
+      });
+
+      const inserted = {
+        id: 'appt-1',
+        tenant_id: 'tenant-1',
+        professional_id: 'pro-1',
+        service_id: 'svc-1',
+        customer_id: 'cust-1',
+        customer_name: 'Ana',
+        customer_phone: '11999999999',
+        start_time: '2099-01-15T09:00:00.000Z',
+        end_time: '2099-01-15T10:00:00.000Z',
+        status: 'CONFIRMED',
+        deposit_paid: false,
+        payment_status: 'PAID',
+        commission_amount: 0,
+        booking_source: 'PUBLIC',
+        guest_access_token: 'secret-token',
+      } as Appointment;
+
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: inserted, error: null }),
+      );
+
+      const result = await ctx.service.create({
+        tenantId: 'tenant-1',
+        professionalId: 'pro-1',
+        startTime: '2099-01-15T09:00:00.000Z',
+        customerName: 'Ana',
+        customerPhone: '11999999999',
+        serviceIds: ['svc-1'],
+      });
+
+      expect(result.appointment.status).toBe('CONFIRMED');
+      expect(result.appointment.payment_status).toBe('PAID');
+      expect(result.checkoutUrl).toBeUndefined();
+      expect(ctx.billingService.createDepositCheckoutSession).not.toHaveBeenCalled();
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(ctx.tenantsService.claimDailyDepositChargeAlert).toHaveBeenCalledWith(
+        'tenant-1',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      );
+      expect(ctx.mailService.sendDepositChargeUnavailable).toHaveBeenCalledWith(
+        'owner@example.com',
+        expect.objectContaining({ id: 'tenant-1' }),
+      );
     });
 
     it('marks the first-appointment onboarding milestone after a successful booking', async () => {
@@ -963,10 +1087,19 @@ describe('AppointmentsService', () => {
 
   describe('crons and deposit delegates', () => {
     it('delegates abandoned hold expiration', async () => {
-      const { service, depositPaymentService } = buildService();
-      depositPaymentService.expireAbandonedDepositHolds.mockResolvedValue(3);
+      const { service, depositPaymentService, billingService } = buildService();
+      depositPaymentService.expireAbandonedDepositHolds.mockResolvedValue([
+        'appt-1',
+        'appt-2',
+        'appt-3',
+      ]);
 
       await expect(service.expireAbandonedDepositHolds()).resolves.toBe(3);
+      expect(billingService.cancelAbandonedDepositCharges).toHaveBeenCalledWith([
+        { appointmentId: 'appt-1' },
+        { appointmentId: 'appt-2' },
+        { appointmentId: 'appt-3' },
+      ]);
     });
 
     it('sends reminders only for confirmed appointments with email', async () => {
@@ -1009,6 +1142,203 @@ describe('AppointmentsService', () => {
         }),
         expect.objectContaining({ id: 'tenant-1' }),
       );
+    });
+  });
+
+  describe('rescheduleForTenant', () => {
+    const futureRow = {
+      id: 'appt-1',
+      professional_id: 'pro-1',
+      status: 'CONFIRMED',
+      start_time: '2099-01-15T10:00:00',
+      end_time: '2099-01-15T11:00:00',
+      cancellation_requested_at: null,
+    };
+
+    it('lets the owner move a slot when customer reschedule is off', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ allow_customer_reschedule: false }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: futureRow, error: null }),
+      );
+      const apply = jest
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
+        .mockResolvedValue({});
+      jest
+        .spyOn(
+          ctx.service as never as {
+            findAdminById: () => Promise<{ id: string }>;
+          },
+          'findAdminById',
+        )
+        .mockResolvedValue({ id: 'appt-1' });
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+          serviceIds: ['svc-1'],
+        }),
+      ).resolves.toEqual({ id: 'appt-1' });
+      expect(apply).toHaveBeenCalled();
+    });
+
+    it('rejects a cancelled appointment', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(buildTenant());
+      ctx.from.mockReturnValue(
+        createChainableQuery({
+          data: { ...futureRow, status: 'CANCELLED' },
+          error: null,
+        }),
+      );
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a conflicting slot', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ allow_customer_reschedule: false }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: futureRow, error: null }),
+      );
+      jest
+        .spyOn(
+          ctx.service as never as {
+            applyCustomerReschedule: () => Promise<unknown>;
+          },
+          'applyCustomerReschedule',
+        )
+        .mockRejectedValue(new ConflictException('ocupado'));
+
+      await expect(
+        ctx.service.rescheduleForTenant('tenant-1', 'appt-1', {
+          professionalId: 'pro-1',
+          startTime: '2099-01-15T14:00:00',
+          serviceIds: ['svc-1'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('customer and guest payment fields', () => {
+    const paidDepositRow = {
+      id: 'appt-1',
+      customer_id: 'cust-1',
+      professional_id: 'pro-1',
+      service_id: 'svc-1',
+      customer_name: 'Ana',
+      customer_phone: '11999999999',
+      start_time: '2099-01-15T10:00:00',
+      end_time: '2099-01-15T11:00:00',
+      status: 'CONFIRMED',
+      booking_source: 'ONLINE',
+      total_duration_minutes: 60,
+      total_price: 80,
+      loyalty_reward_id: null,
+      coupon_id: null,
+      coupon_discount_amount: null,
+      deposit_paid: true,
+      deposit_amount: 20,
+      payment_status: 'PAID',
+      cancellation_requested_at: null,
+      guest_access_token: 'guest-token',
+      professionals: { name: 'João' },
+      services: { name: 'Corte', duration_minutes: 60, price: 80 },
+      coupons: null,
+      appointment_services: [
+        {
+          service_id: 'svc-1',
+          sort_order: 0,
+          duration_minutes: 60,
+          price: 80,
+          services: { name: 'Corte' },
+        },
+      ],
+    };
+
+    it('includes depositPaid fields on guest appointment lookup', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({
+          reviews_enabled: false,
+          allow_customer_self_cancellation: true,
+          allow_customer_reschedule: true,
+        }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: [paidDepositRow], error: null }),
+      );
+
+      const result = await ctx.service.findGuestAppointments({
+        tenantId: 'tenant-1',
+        entries: [{ appointmentId: 'appt-1', accessToken: 'guest-token' }],
+        scope: 'upcoming',
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        id: 'appt-1',
+        totalPrice: 80,
+        depositPaid: true,
+        depositPaidAmount: 20,
+        balanceDue: 60,
+      });
+    });
+
+    it('includes depositPaid fields on customer my/all groups', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ reviews_enabled: false }),
+      );
+      ctx.customersService.findAllByAuthUserId = jest.fn().mockResolvedValue([
+        {
+          isProfileComplete: true,
+          tenantId: 'tenant-1',
+          tenantName: 'Studio',
+          tenantSlug: 'studio',
+          allowCustomerSelfCancellation: true,
+          allowCustomerReschedule: true,
+          customer: { id: 'cust-1', phone: '11999999999' },
+        },
+      ]);
+      ctx.customersService.expandCustomerIdsByPhone = jest
+        .fn()
+        .mockResolvedValue({
+          customerIds: ['cust-1'],
+          tenantByCustomerId: new Map([
+            ['cust-1', { primaryCustomerId: 'cust-1' }],
+          ]),
+        });
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: [paidDepositRow], error: null }),
+      );
+
+      const groups = await ctx.service.findAllForCustomer('auth-1', 'upcoming');
+
+      expect(groups).toHaveLength(1);
+      expect(groups[0].appointments).toHaveLength(1);
+      expect(groups[0].appointments[0]).toMatchObject({
+        id: 'appt-1',
+        totalPrice: 80,
+        depositPaid: true,
+        depositPaidAmount: 20,
+        balanceDue: 60,
+      });
     });
   });
 });

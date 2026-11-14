@@ -30,7 +30,7 @@ export interface Tenant {
   contact_phone: string | null;
   deposit_feature_enabled: boolean;
   support_ai_enabled: boolean;
-  support_ai_stripe_subscription_item_id: string | null;
+  support_ai_asaas_subscription_id: string | null;
   support_ai_status: SupportAiStatus | null;
   deposit_application_fee_percent: number | null;
   require_customer_email_confirmation: boolean;
@@ -40,13 +40,25 @@ export interface Tenant {
   booking_acceptance_type: TenantBookingAcceptanceType;
   booking_slot_interval_minutes: number;
   owner_id: string | null;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  stripe_connect_account_id: string | null;
-  stripe_connect_charges_enabled: boolean;
-  stripe_connect_details_submitted: boolean;
+  asaas_customer_id: string | null;
+  asaas_subscription_id: string | null;
+  asaas_pending_payment_id: string | null;
+  asaas_open_invoice_url: string | null;
+  asaas_account_id: string | null;
+  asaas_wallet_id: string | null;
+  asaas_account_status: string | null;
+  asaas_charges_enabled: boolean;
+  asaas_details_submitted: boolean;
   subscription_status: SubscriptionStatus;
   subscription_expires_at: string | null;
+  /** Set while cancel-at-period-end is scheduled. Not applied until that instant. */
+  subscription_cancel_at: string | null;
+  pending_plan_tier: PlanTier | null;
+  pending_plan_payment_id: string | null;
+  pending_plan_invoice_url: string | null;
+  pending_plan_effective_at: string | null;
+  /** Computed from asaas_wallet_id and asaas_charges_enabled. Not a database column. */
+  can_charge_deposits: boolean;
   trial_starts_at: string | null;
   trial_ends_at: string | null;
   pre_subscription_trial_ends_at: string | null;

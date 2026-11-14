@@ -35,6 +35,56 @@ function normalizeRelationRows<T>(relation: T | T[] | null | undefined): T[] {
   return [relation];
 }
 
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Spreads the coupon across every line before currency points are calculated.
+ * Lines with fixed service points keep that fixed amount; only their price
+ * share of the coupon changes, and that price is ignored for those points.
+ * Professional and affiliate commission stay on the full line price.
+ */
+export function applyCouponDiscountToLoyaltyPrices(
+  lines: AppointmentLoyaltyServiceLine[],
+  couponDiscountAmount: number | null | undefined,
+): AppointmentLoyaltyServiceLine[] {
+  const discount = roundCurrency(Number(couponDiscountAmount ?? 0));
+
+  if (discount <= 0 || lines.length === 0) {
+    return lines;
+  }
+
+  const priced = lines.map((line, index) => ({
+    index,
+    cents: Math.max(0, Math.round(Number(line.price ?? 0) * 100)),
+  }));
+  const baseCents = priced.reduce((sum, line) => sum + line.cents, 0);
+
+  if (baseCents <= 0) {
+    return lines;
+  }
+
+  const discountCents = Math.min(Math.round(discount * 100), baseCents);
+  const shares = priced.map((line) =>
+    Math.floor((discountCents * line.cents) / baseCents),
+  );
+  const allocated = shares.reduce((sum, share) => sum + share, 0);
+  const remainder = discountCents - allocated;
+  const lastPricedIndex = [...priced]
+    .reverse()
+    .find((line) => line.cents > 0)?.index;
+
+  if (lastPricedIndex !== undefined && remainder > 0) {
+    shares[lastPricedIndex] += remainder;
+  }
+
+  return lines.map((line, index) => ({
+    ...line,
+    price: Math.max(0, ((priced[index]?.cents ?? 0) - (shares[index] ?? 0)) / 100),
+  }));
+}
+
 export function buildAppointmentLoyaltyServiceLines(
   row: AppointmentLoyaltySourceRow,
 ): AppointmentLoyaltyServiceLine[] {

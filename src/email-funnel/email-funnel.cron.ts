@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { APP_TIME_ZONE } from '../common/app-time-zone';
 import { EmailFunnelService } from './email-funnel.service';
 
 @Injectable()
@@ -8,7 +9,7 @@ export class EmailFunnelCron {
 
   constructor(private readonly emailFunnelService: EmailFunnelService) {}
 
-  @Cron('*/15 * * * *')
+  @Cron('*/15 * * * *', { timeZone: APP_TIME_ZONE })
   async handleDueEmails(): Promise<void> {
     try {
       const processed = await this.emailFunnelService.processDueEmails();

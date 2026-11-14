@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { DEPOSIT_SUBACCOUNT_REQUIRED_MESSAGE } from '../../tenants/constants/deposit-feature.constants';
 import { resolveServiceDepositFields } from './service-deposit.util';
 
 describe('service-deposit.util', () => {
@@ -19,6 +20,12 @@ describe('service-deposit.util', () => {
     });
     expect(() => resolveServiceDepositFields(true, true, 0)).toThrow(
       BadRequestException,
+    );
+  });
+
+  it('rejects a required deposit when the Asaas subaccount cannot charge', () => {
+    expect(() => resolveServiceDepositFields(true, true, 20, false)).toThrow(
+      DEPOSIT_SUBACCOUNT_REQUIRED_MESSAGE,
     );
   });
 });

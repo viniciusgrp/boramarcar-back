@@ -18,7 +18,10 @@ import { resolveScopedProfessionalId } from '../tenants/utils/tenant-user-scope.
 import type { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { FinanceReportResponse } from './entities/finance-report.entity';
 import type { CommissionReportResponse } from './entities/professional-commission-summary.entity';
-import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
+import type {
+  CashFlowLedgerEntry,
+  CashFlowSummary,
+} from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
 import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
 import { SettlePayoutsDto } from './dto/settle-payouts.dto';
@@ -29,7 +32,10 @@ import { CreateRecurringExpenseTemplateDto } from './dto/create-recurring-expens
 import { FinanceService } from './finance.service';
 import { CashRegisterService } from './cash-register.service';
 import { RecurringExpensesService } from './recurring-expenses.service';
-import type { CashRegisterStatusResponse } from './entities/daily-cash-register.entity';
+import type {
+  CashRegisterStatusResponse,
+  OpenCashRegistersResponse,
+} from './entities/daily-cash-register.entity';
 import type { CloseCashRegisterResponse } from './entities/daily-cash-register.entity';
 import type { DailyCashRegister } from './entities/daily-cash-register.entity';
 import type { RecurringExpenseTemplate } from './entities/recurring-expense-template.entity';
@@ -90,6 +96,18 @@ export class FinanceController {
     );
   }
 
+  @Get('cash-flow/entries')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  async listCashFlowEntries(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<CashFlowLedgerEntry[]> {
+    return this.financeService.listCashFlowEntries(
+      context.tenant.id,
+      context.tenant.plan_tier,
+    );
+  }
+
   @Get('payouts/summary')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
   @Roles('OWNER', 'ADMIN')
@@ -114,9 +132,21 @@ export class FinanceController {
     );
   }
 
+  @Get('cash/open-registers')
+  @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
+  async listOpenCashRegisters(
+    @CurrentTenantContext() context: TenantAccessContext,
+  ): Promise<OpenCashRegistersResponse> {
+    return this.cashRegisterService.listOpenCashRegisters(
+      context.tenant.id,
+      context.tenant.plan_tier,
+    );
+  }
+
   @Post('cash/open')
   @UseGuards(AuthGuard, TenantAccessGuard, RolesGuard)
-  @Roles('OWNER', 'ADMIN')
+  @Roles('OWNER', 'ADMIN', 'PROFESSIONAL')
   async openCashRegister(
     @CurrentTenantContext() context: TenantAccessContext,
     @Body() dto: OpenCashRegisterDto,

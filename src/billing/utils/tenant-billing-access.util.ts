@@ -7,9 +7,16 @@ const MANAGEABLE_SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
 ];
 
 export function tenantHasManageableSubscription(tenant: Tenant): boolean {
-  if (!tenant.stripe_subscription_id?.trim()) {
+  if (!tenant.asaas_subscription_id?.trim()) {
     return false;
   }
 
   return MANAGEABLE_SUBSCRIPTION_STATUSES.includes(tenant.subscription_status);
+}
+
+export function tenantHasPendingAsaasSubscription(tenant: Tenant): boolean {
+  return (
+    Boolean(tenant.asaas_subscription_id?.trim()) &&
+    !tenantHasManageableSubscription(tenant)
+  );
 }

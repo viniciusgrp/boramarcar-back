@@ -1,115 +1,416 @@
 import type { ConfigService } from '@nestjs/config';
-import type { AppointmentsService } from '../appointments/appointments.service';
-import type { SupabaseService } from '../supabase/supabase.service';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { TenantsService } from '../tenants/tenants.service';
 import { BillingService } from './billing.service';
-import type { StripeCheckoutSession, StripeEvent } from './types/stripe-api.types';
+import { createChainableQuery } from '../test-utils/supabase-mock';
+import {
+  ASAAS_CHECKOUT_ITEM_DESCRIPTION_MAX_LENGTH,
+  ASAAS_CHECKOUT_ITEM_NAME_MAX_LENGTH,
+} from './utils/asaas-checkout-item.util';
 
-function buildBillingService(appointments: Partial<AppointmentsService>) {
-  const configService = {
-    get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY'
-        ? 'sk_test_dummy'
-        : key === 'APP_ENV'
-          ? 'production'
-          : undefined,
-  } as unknown as ConfigService;
-
-  const supabaseService = {
-    getClient: () => ({
-      from: () => ({
-        insert: jest.fn().mockResolvedValue({ error: null }),
-        delete: jest.fn(() => ({
-          eq: jest.fn().mockResolvedValue({ error: null }),
-        })),
-      }),
-    }),
-  } as unknown as SupabaseService;
-
-  return new BillingService(
-    configService,
-    {} as TenantsService,
-    supabaseService,
-    appointments as AppointmentsService,
-    {} as import('../affiliates/affiliates.service').AffiliatesService,
-  );
-}
-
-function buildCheckoutEvent(
-  type: 'checkout.session.completed' | 'checkout.session.expired',
-  session: Partial<StripeCheckoutSession>,
-): StripeEvent {
+function buildTenant(): Tenant {
   return {
-    id: `evt_${type}`,
-    type,
-    data: {
-      object: {
-        object: 'checkout.session',
-        mode: 'payment',
-        metadata: {
-          checkout_type: 'appointment_deposit',
-          appointment_id: 'appt-1',
-        },
-        ...session,
-      },
-    },
-  } as unknown as StripeEvent;
+    id: 'tenant-1',
+    name: 'Studio',
+    slug: 'studio',
+    asaas_wallet_id: 'wal_1',
+    asaas_charges_enabled: true,
+    deposit_application_fee_percent: 5,
+  } as Tenant;
 }
 
 describe('BillingService deposit lifecycle', () => {
-  it('confirms deposit on checkout.session.completed when hold is pending', async () => {
-    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
-      outcome: 'confirmed',
-      appointment: { id: 'appt-1', status: 'CONFIRMED' },
+  it('creates a Pix/card checkout with split to the subaccount wallet', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/1',
     });
-    const service = buildBillingService({ confirmDepositPaymentDetailed });
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.completed', {}),
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
     );
 
-    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith('appt-1');
-  });
-
-  it('auto-refunds when payment arrives after hold was cancelled', async () => {
-    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
-      outcome: 'late_payment_needs_refund',
-      appointment: { id: 'appt-1', status: 'CANCELLED' },
-    });
-    const markDepositRefunded = jest.fn().mockResolvedValue({
-      id: 'appt-1',
-      payment_status: 'REFUNDED',
-    });
-    const service = buildBillingService({
-      confirmDepositPaymentDetailed,
-      markDepositRefunded,
+    const checkout = await service.createDepositCheckoutSession({
+      appointmentId: 'appt-1',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 50,
+      accessToken: 'token',
+      customerName: 'Ana',
+      customerPhone: '11999999999',
     });
 
-    const refundsCreate = jest.fn().mockResolvedValue({ id: 're_1' });
-    (
-      service as unknown as {
-        stripe: { refunds: { create: typeof refundsCreate } };
-      }
-    ).stripe = { refunds: { create: refundsCreate } };
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.completed', {
-        payment_intent: 'pi_late',
+    expect(checkout.url).toBe('https://asaas.com/c/1');
+    expect(checkout.checkoutId).toBeNull();
+    expect(createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingTypes: ['PIX', 'CREDIT_CARD'],
+        minutesToExpire: 30,
+        externalReference: 'deposit:appt-1',
+        splits: [{ walletId: 'wal_1', percentageValue: 95 }],
+        items: [
+          expect.objectContaining({
+            name: 'Sinal: Studio',
+            description:
+              'Pagamento antecipado para confirmar agendamento. Studio',
+            imageBase64: expect.any(String),
+            value: 50,
+          }),
+        ],
       }),
     );
+    expect(createCheckout.mock.calls[0][0].customerData).toBeUndefined();
+  });
 
-    expect(refundsCreate).toHaveBeenCalledWith({ payment_intent: 'pi_late' });
+  it('does not send customerData without CPF so Asaas hosted form can open', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/2',
+    });
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
+    );
+
+    const result = await service.createDepositCheckoutSession({
+      appointmentId: 'appt-2',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 20,
+      accessToken: 'token',
+      customerName: 'Ana Paula',
+      customerPhone: '(11) 98888-7777',
+      customerEmail: 'ana@example.com',
+    });
+
+    expect(result.url).toBe('https://asaas.com/c/2');
+    expect(createCheckout.mock.calls[0][0].customerData).toBeUndefined();
+  });
+
+  it('prefills deposit checkout only when CPF is already known', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/3',
+    });
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
+    );
+
+    await service.createDepositCheckoutSession({
+      appointmentId: 'appt-3',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 20,
+      accessToken: 'token',
+      customerName: 'Ana Paula',
+      customerPhone: '(11) 98888-7777',
+      customerEmail: 'ana@example.com',
+      customerCpfCnpj: '249.715.637-92',
+    });
+
+    expect(createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerData: {
+          cpfCnpj: '24971563792',
+          name: 'Ana Paula',
+          phone: '11988887777',
+          email: 'ana@example.com',
+        },
+      }),
+    );
+  });
+
+  it('keeps a long tenant name within the Asaas checkout item name limit', async () => {
+    const tenantName = 'Teste Webhook2 Asaas HML';
+    const createCheckout = jest
+      .fn<
+        Promise<{ link: string }>,
+        [{ items: Array<{ name: string; description: string }> }]
+      >()
+      .mockResolvedValue({
+        link: 'https://asaas.com/c/long',
+      });
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      {
+        getClient: () => ({
+          from: () => createChainableQuery({ data: null, error: null }),
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
+    );
+
+    await service.createDepositCheckoutSession({
+      appointmentId: 'appt-1',
+      tenantId: 'tenant-1',
+      tenantName,
+      tenantSlug: 'studio',
+      depositAmountBrl: 50,
+      accessToken: 'token',
+      customerName: 'Ana',
+      customerPhone: '11999999999',
+    });
+
+    const item = createCheckout.mock.calls[0][0].items[0];
+
+    expect(`Sinal: ${tenantName}`).toHaveLength(31);
+    expect(item.name).toBe('Sinal: Teste Webhook2 Asaas HM');
+    expect(item.name.length).toBeLessThanOrEqual(
+      ASAAS_CHECKOUT_ITEM_NAME_MAX_LENGTH,
+    );
+    expect(item.description).toContain(tenantName);
+    expect(item.description.length).toBeLessThanOrEqual(
+      ASAAS_CHECKOUT_ITEM_DESCRIPTION_MAX_LENGTH,
+    );
+    expect(item.name).not.toMatch(/[–—]/);
+    expect(item.description).not.toMatch(/[–—]/);
+  });
+
+  it('refunds a late deposit payment', async () => {
+    const refundPayment = jest.fn().mockResolvedValue({});
+    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
+      outcome: 'late_payment_needs_refund',
+    });
+    const markDepositRefunded = jest.fn();
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { findById: jest.fn() } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { confirmDepositPaymentDetailed, markDepositRefunded } as never,
+      {} as never,
+      { refundPayment } as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_dep',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_dep',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
+    expect(refundPayment).toHaveBeenCalledWith('pay_dep');
     expect(markDepositRefunded).toHaveBeenCalledWith('appt-1');
   });
 
-  it('releases pending hold on checkout.session.expired', async () => {
-    const releasePendingDepositHold = jest.fn().mockResolvedValue(true);
-    const service = buildBillingService({ releasePendingDepositHold });
-
-    await service.handleStripeWebhook(
-      buildCheckoutEvent('checkout.session.expired', {}),
+  it('releases a pending deposit hold when the charge is deleted', async () => {
+    const releasePendingDepositHold = jest.fn();
+    const updateSubscriptionByTenantId = jest.fn();
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { updateSubscriptionByTenantId } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { releasePendingDepositHold } as never,
+      {} as never,
+      {} as never,
     );
 
+    await service.processAsaasWebhookEvent({
+      id: 'evt_dep_del',
+      event: 'PAYMENT_DELETED',
+      payment: {
+        id: 'pay_dep',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
     expect(releasePendingDepositHold).toHaveBeenCalledWith('appt-1');
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+  });
+
+  it('confirms a deposit when the checkout is paid', async () => {
+    const confirmDepositPaymentDetailed = jest.fn().mockResolvedValue({
+      outcome: 'confirmed',
+    });
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      { findById: jest.fn() } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      { confirmDepositPaymentDetailed } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_checkout',
+      event: 'CHECKOUT_PAID',
+      checkout: {
+        id: 'chk_1',
+        externalReference: 'deposit:appt-1',
+      },
+    });
+
+    expect(confirmDepositPaymentDetailed).toHaveBeenCalledWith(
+      'appt-1',
+      undefined,
+    );
+  });
+
+  it('does not enable charges when only the documents are approved', async () => {
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      {
+        findByAsaasAccountId: jest.fn().mockResolvedValue(buildTenant()),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_docs',
+      event: 'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+      account: {
+        id: 'acc_1',
+        accountStatus: { documentation: 'APPROVED', general: 'PENDING' },
+      },
+    });
+
+    expect(updateAsaasAccountStatus).toHaveBeenCalledWith('tenant-1', {
+      asaasDetailsSubmitted: true,
+    });
+  });
+
+  it('enables charges only after general approval', async () => {
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      { get: (key: string) => ({ APP_ENV: 'production' })[key] } as unknown as ConfigService,
+      {
+        findByAsaasAccountId: jest.fn().mockResolvedValue(buildTenant()),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_general',
+      event: 'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+      account: { id: 'acc_1' },
+    });
+
+    expect(updateAsaasAccountStatus).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ asaasChargesEnabled: true }),
+    );
+  });
+
+  it('registers subaccount webhooks for account status only, on the platform email', async () => {
+    const createAccount = jest.fn().mockResolvedValue({
+      id: 'acc_1',
+      walletId: 'wal_new',
+    });
+    const updateAsaasAccountStatus = jest.fn().mockResolvedValue(buildTenant());
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            PUBLIC_API_ORIGIN: 'https://api.example.com',
+            ASAAS_WEBHOOK_TOKEN: 'whsec',
+            SUPPORT_EMAIL: 'ops@horariocerto.app',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+            ASAAS_SUBACCOUNT_KEY_ENCRYPTION_KEY: 'test-subaccount-key',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue({
+          ...buildTenant(),
+          asaas_wallet_id: null,
+        }),
+        updateAsaasAccountStatus,
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createAccount } as never,
+    );
+
+    await service.createAsaasAccount('tenant-1', {
+      name: 'Studio',
+      email: 'owner@shop.com',
+      cpfCnpj: '12345678901',
+      incomeValue: 5000,
+      address: 'Rua A',
+      addressNumber: '10',
+      province: 'Centro',
+      postalCode: '01001000',
+      birthDate: '1990-05-15',
+    });
+
+    const webhook = createAccount.mock.calls[0][0].webhooks[0] as {
+      email: string;
+      events: string[];
+    };
+
+    expect(webhook.email).toBe('ops@horariocerto.app');
+    expect(webhook.events).toEqual([
+      'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+      'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
+      'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+      'ACCOUNT_STATUS_DOCUMENT_REJECTED',
+    ]);
   });
 });

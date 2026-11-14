@@ -2,15 +2,15 @@
  * Política explícita de sinal (depósito) no Horário Certo.
  *
  * 1. Hold: ao criar agendamento com sinal, o status fica PENDING_PAYMENT e o slot
- *    fica reservado até hold_expires_at (alinhado à expiração do Checkout Stripe, 30 min)
+ *    fica reservado até hold_expires_at (alinhado à expiração do Checkout Asaas, 30 min)
  *    ou até o cliente concluir / abandonar o pagamento.
  * 2. Confirmação: o webhook só confirma (CONFIRMED + PAID) se o status ainda for
  *    PENDING_PAYMENT. Pagamento tardio após CANCELLED não reativa o horário.
  * 3. Pagamento tardio (hold expirado / abandonado / cancelado): o valor capturado
- *    deve ser estornado automaticamente no Stripe e payment_status vira REFUNDED.
+ *    deve ser estornado automaticamente no Asaas e payment_status vira REFUNDED.
  * 4. Cancelamento de agendamento já PAID (cliente ou estabelecimento): o sinal
  *    NÃO é reembolsado automaticamente (proteção contra no-show). Estorno manual
- *    fica a critério do estabelecimento no Dashboard Stripe / suporte.
+ *    fica a critério do estabelecimento no painel Asaas / suporte.
  * 5. Falha ao criar a sessão de Checkout: o hold PENDING_PAYMENT é cancelado na hora
  *    para não bloquear o slot até o cron.
  * 6. checkout.session.expired / página de cancelamento: liberam o hold PENDING_PAYMENT

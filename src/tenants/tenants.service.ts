@@ -91,13 +91,22 @@ import type { TenantAccessContext } from './entities/tenant-access-context.entit
 import type { TenantMeResponse } from './entities/tenant-me-response.entity';
 import type { TenantUser } from './entities/tenant-user.entity';
 import { canAccessPanelWithLinkedProfessional } from './utils/inactive-professional-access.util';
+import { tenantCanChargeDeposits } from './utils/deposit-charges.util';
+import { PLAN_TIERS } from './entities/plan-tier.type';
 
 export interface TenantSubscriptionUpdatePayload {
-  stripeCustomerId?: string | null;
-  stripeSubscriptionId?: string | null;
+  asaasCustomerId?: string | null;
+  asaasSubscriptionId?: string | null;
+  asaasPendingPaymentId?: string | null;
+  asaasOpenInvoiceUrl?: string | null;
   subscriptionStatus: SubscriptionStatus;
   subscriptionExpiresAt?: string | null;
+  subscriptionCancelAt?: string | null;
   planTier?: PlanTier;
+  pendingPlanTier?: PlanTier | null;
+  pendingPlanPaymentId?: string | null;
+  pendingPlanInvoiceUrl?: string | null;
+  pendingPlanEffectiveAt?: string | null;
   trialEndsAt?: string | null;
   preSubscriptionTrialEndsAt?: string | null;
   compUntil?: string | null;
@@ -150,9 +159,15 @@ function applySubscriptionTrialFields(
 
 function mapTenantRow(row: Tenant): Tenant {
   const subscriptionStatus = row.subscription_status;
+  const source = {
+    ...(row as Tenant & { asaas_subaccount_api_key_encrypted?: string | null }),
+  };
+  delete source.asaas_subaccount_api_key_encrypted;
+  delete (source as { deposit_charge_alerted_on?: string | null })
+    .deposit_charge_alerted_on;
 
   return {
-    ...row,
+    ...source,
     description:
       typeof row.description === 'string' && row.description.trim()
         ? row.description.trim()
@@ -196,9 +211,9 @@ function mapTenantRow(row: Tenant): Tenant {
     allow_customer_reschedule: Boolean(row.allow_customer_reschedule),
     deposit_feature_enabled: Boolean(row.deposit_feature_enabled),
     support_ai_enabled: Boolean(row.support_ai_enabled),
-    support_ai_stripe_subscription_item_id:
-      typeof row.support_ai_stripe_subscription_item_id === 'string'
-        ? row.support_ai_stripe_subscription_item_id
+    support_ai_asaas_subscription_id:
+      typeof row.support_ai_asaas_subscription_id === 'string'
+        ? row.support_ai_asaas_subscription_id
         : null,
     support_ai_status: normalizeSupportAiStatus(row.support_ai_status),
     deposit_application_fee_percent:
@@ -209,10 +224,14 @@ function mapTenantRow(row: Tenant): Tenant {
     booking_slot_interval_minutes: normalizeBookingSlotIntervalMinutes(
       row.booking_slot_interval_minutes,
     ),
-    stripe_connect_charges_enabled: Boolean(row.stripe_connect_charges_enabled),
-    stripe_connect_details_submitted: Boolean(
-      row.stripe_connect_details_submitted,
-    ),
+    asaas_charges_enabled: Boolean(row.asaas_charges_enabled),
+    asaas_details_submitted: Boolean(row.asaas_details_submitted),
+    subscription_cancel_at: row.subscription_cancel_at ?? null,
+    pending_plan_tier: readPendingPlanTier(row.pending_plan_tier),
+    pending_plan_payment_id: row.pending_plan_payment_id ?? null,
+    pending_plan_invoice_url: row.pending_plan_invoice_url ?? null,
+    pending_plan_effective_at: row.pending_plan_effective_at ?? null,
+    can_charge_deposits: tenantCanChargeDeposits(row),
     admin_secondary_color_light: normalizeAdminThemeColor(
       row.admin_secondary_color_light,
       DEFAULT_ADMIN_SECONDARY_COLOR_LIGHT,
@@ -231,6 +250,16 @@ function mapTenantRow(row: Tenant): Tenant {
       row.background_pattern_icon_count,
     ),
   };
+}
+
+function readPendingPlanTier(
+  value: string | null | undefined,
+): PlanTier | null {
+  if (value && PLAN_TIERS.includes(value as PlanTier)) {
+    return value as PlanTier;
+  }
+
+  return null;
 }
 
 function normalizeTenantBookingAcceptanceType(
@@ -601,14 +630,12 @@ export class TenantsService {
     return Boolean(data);
   }
 
-  async findByStripeCustomerId(
-    stripeCustomerId: string,
-  ): Promise<Tenant | null> {
+  async findByAsaasCustomerId(asaasCustomerId: string): Promise<Tenant | null> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
       .select('*')
-      .eq('stripe_customer_id', stripeCustomerId)
+      .eq('asaas_customer_id', asaasCustomerId)
       .maybeSingle();
 
     if (error) {
@@ -618,14 +645,14 @@ export class TenantsService {
     return data ? mapTenantRow(data as Tenant) : null;
   }
 
-  async findByStripeSubscriptionId(
-    stripeSubscriptionId: string,
+  async findByAsaasSubscriptionId(
+    asaasSubscriptionId: string,
   ): Promise<Tenant | null> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
       .select('*')
-      .eq('stripe_subscription_id', stripeSubscriptionId)
+      .eq('asaas_subscription_id', asaasSubscriptionId)
       .maybeSingle();
 
     if (error) {
@@ -635,69 +662,14 @@ export class TenantsService {
     return data ? mapTenantRow(data as Tenant) : null;
   }
 
-  async updateSubscriptionByStripeCustomerId(
-    stripeCustomerId: string,
-    payload: TenantSubscriptionUpdatePayload,
+  async findBySupportAiAsaasSubscriptionId(
+    subscriptionId: string,
   ): Promise<Tenant | null> {
-    const updatePayload: Record<string, string | null> = {
-      subscription_status: payload.subscriptionStatus,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (payload.stripeSubscriptionId !== undefined) {
-      updatePayload.stripe_subscription_id = payload.stripeSubscriptionId;
-    }
-
-    if (payload.subscriptionExpiresAt !== undefined) {
-      updatePayload.subscription_expires_at = payload.subscriptionExpiresAt;
-    }
-
-    if (payload.planTier !== undefined) {
-      updatePayload.plan_tier = payload.planTier;
-    }
-
-    applySubscriptionTrialFields(updatePayload, payload);
-
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
-      .update(updatePayload)
-      .eq('stripe_customer_id', stripeCustomerId)
       .select('*')
-      .maybeSingle();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return data ? mapTenantRow(data as Tenant) : null;
-  }
-
-  async updateSubscriptionByStripeSubscriptionId(
-    stripeSubscriptionId: string,
-    payload: TenantSubscriptionUpdatePayload,
-  ): Promise<Tenant | null> {
-    const updatePayload: Record<string, string | null> = {
-      subscription_status: payload.subscriptionStatus,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (payload.subscriptionExpiresAt !== undefined) {
-      updatePayload.subscription_expires_at = payload.subscriptionExpiresAt;
-    }
-
-    if (payload.planTier !== undefined) {
-      updatePayload.plan_tier = payload.planTier;
-    }
-
-    applySubscriptionTrialFields(updatePayload, payload);
-
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('tenants')
-      .update(updatePayload)
-      .eq('stripe_subscription_id', stripeSubscriptionId)
-      .select('*')
+      .eq('support_ai_asaas_subscription_id', subscriptionId)
       .maybeSingle();
 
     if (error) {
@@ -716,12 +688,20 @@ export class TenantsService {
       updated_at: new Date().toISOString(),
     };
 
-    if (payload.stripeCustomerId !== undefined) {
-      updatePayload.stripe_customer_id = payload.stripeCustomerId;
+    if (payload.asaasCustomerId !== undefined) {
+      updatePayload.asaas_customer_id = payload.asaasCustomerId;
     }
 
-    if (payload.stripeSubscriptionId !== undefined) {
-      updatePayload.stripe_subscription_id = payload.stripeSubscriptionId;
+    if (payload.asaasSubscriptionId !== undefined) {
+      updatePayload.asaas_subscription_id = payload.asaasSubscriptionId;
+    }
+
+    if (payload.asaasPendingPaymentId !== undefined) {
+      updatePayload.asaas_pending_payment_id = payload.asaasPendingPaymentId;
+    }
+
+    if (payload.asaasOpenInvoiceUrl !== undefined) {
+      updatePayload.asaas_open_invoice_url = payload.asaasOpenInvoiceUrl;
     }
 
     if (payload.subscriptionExpiresAt !== undefined) {
@@ -730,6 +710,26 @@ export class TenantsService {
 
     if (payload.planTier !== undefined) {
       updatePayload.plan_tier = payload.planTier;
+    }
+
+    if (payload.subscriptionCancelAt !== undefined) {
+      updatePayload.subscription_cancel_at = payload.subscriptionCancelAt;
+    }
+
+    if (payload.pendingPlanTier !== undefined) {
+      updatePayload.pending_plan_tier = payload.pendingPlanTier;
+    }
+
+    if (payload.pendingPlanPaymentId !== undefined) {
+      updatePayload.pending_plan_payment_id = payload.pendingPlanPaymentId;
+    }
+
+    if (payload.pendingPlanInvoiceUrl !== undefined) {
+      updatePayload.pending_plan_invoice_url = payload.pendingPlanInvoiceUrl;
+    }
+
+    if (payload.pendingPlanEffectiveAt !== undefined) {
+      updatePayload.pending_plan_effective_at = payload.pendingPlanEffectiveAt;
     }
 
     applySubscriptionTrialFields(updatePayload, payload);
@@ -753,7 +753,7 @@ export class TenantsService {
     tenantId: string,
     payload: {
       supportAiEnabled: boolean;
-      supportAiStripeSubscriptionItemId?: string | null;
+      supportAiAsaasSubscriptionId?: string | null;
       supportAiStatus?: SupportAiStatus | null;
     },
   ): Promise<Tenant> {
@@ -762,9 +762,9 @@ export class TenantsService {
       updated_at: new Date().toISOString(),
     };
 
-    if (payload.supportAiStripeSubscriptionItemId !== undefined) {
-      updatePayload.support_ai_stripe_subscription_item_id =
-        payload.supportAiStripeSubscriptionItemId;
+    if (payload.supportAiAsaasSubscriptionId !== undefined) {
+      updatePayload.support_ai_asaas_subscription_id =
+        payload.supportAiAsaasSubscriptionId;
     }
 
     if (payload.supportAiStatus !== undefined) {
@@ -1641,15 +1641,15 @@ export class TenantsService {
     });
   }
 
-  async updateStripeCustomerId(
+  async updateAsaasCustomerId(
     tenantId: string,
-    stripeCustomerId: string,
+    asaasCustomerId: string,
   ): Promise<void> {
     const { error } = await this.supabaseService
       .getClient()
       .from('tenants')
       .update({
-        stripe_customer_id: stripeCustomerId,
+        asaas_customer_id: asaasCustomerId,
         updated_at: new Date().toISOString(),
       })
       .eq('id', tenantId);
@@ -1659,30 +1659,38 @@ export class TenantsService {
     }
   }
 
-  async updateStripeConnectStatus(
+  async updateAsaasAccountStatus(
     tenantId: string,
     payload: {
-      stripeConnectAccountId?: string | null;
-      stripeConnectChargesEnabled?: boolean;
-      stripeConnectDetailsSubmitted?: boolean;
+      asaasAccountId?: string | null;
+      asaasWalletId?: string | null;
+      asaasChargesEnabled?: boolean;
+      asaasDetailsSubmitted?: boolean;
+      asaasAccountStatus?: string | null;
     },
   ): Promise<Tenant | null> {
     const updatePayload: Record<string, string | boolean | null> = {
       updated_at: new Date().toISOString(),
     };
 
-    if (payload.stripeConnectAccountId !== undefined) {
-      updatePayload.stripe_connect_account_id = payload.stripeConnectAccountId;
+    if (payload.asaasAccountId !== undefined) {
+      updatePayload.asaas_account_id = payload.asaasAccountId;
     }
 
-    if (payload.stripeConnectChargesEnabled !== undefined) {
-      updatePayload.stripe_connect_charges_enabled =
-        payload.stripeConnectChargesEnabled;
+    if (payload.asaasWalletId !== undefined) {
+      updatePayload.asaas_wallet_id = payload.asaasWalletId;
     }
 
-    if (payload.stripeConnectDetailsSubmitted !== undefined) {
-      updatePayload.stripe_connect_details_submitted =
-        payload.stripeConnectDetailsSubmitted;
+    if (payload.asaasChargesEnabled !== undefined) {
+      updatePayload.asaas_charges_enabled = payload.asaasChargesEnabled;
+    }
+
+    if (payload.asaasDetailsSubmitted !== undefined) {
+      updatePayload.asaas_details_submitted = payload.asaasDetailsSubmitted;
+    }
+
+    if (payload.asaasAccountStatus !== undefined) {
+      updatePayload.asaas_account_status = payload.asaasAccountStatus;
     }
 
     const { data, error } = await this.supabaseService
@@ -1700,14 +1708,79 @@ export class TenantsService {
     return data ? mapTenantRow(data as Tenant) : null;
   }
 
-  async findByStripeConnectAccountId(
-    stripeConnectAccountId: string,
-  ): Promise<Tenant | null> {
+  async claimDailyDepositChargeAlert(
+    tenantId: string,
+    alertedOn: string,
+  ): Promise<boolean> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        deposit_charge_alerted_on: alertedOn,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId)
+      .or(
+        `deposit_charge_alerted_on.is.null,deposit_charge_alerted_on.lt.${alertedOn}`,
+      )
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(
+        `Failed to claim deposit charge alert for tenant ${tenantId}: ${error.message}`,
+      );
+      return false;
+    }
+
+    return Boolean(data && typeof data === 'object' && 'id' in data);
+  }
+
+  async saveAsaasSubaccountApiKey(
+    tenantId: string,
+    encryptedApiKey: string,
+  ): Promise<void> {
+    const { error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        asaas_subaccount_api_key_encrypted: encryptedApiKey,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  async findAsaasSubaccountApiKeyCiphertext(
+    tenantId: string,
+  ): Promise<string | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .select('asaas_subaccount_api_key_encrypted')
+      .eq('id', tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const ciphertext = (
+      data as { asaas_subaccount_api_key_encrypted?: string | null } | null
+    )?.asaas_subaccount_api_key_encrypted;
+
+    return ciphertext?.trim() || null;
+  }
+
+  async findByAsaasAccountId(asaasAccountId: string): Promise<Tenant | null> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('tenants')
       .select('*')
-      .eq('stripe_connect_account_id', stripeConnectAccountId)
+      .eq('asaas_account_id', asaasAccountId)
       .maybeSingle();
 
     if (error) {

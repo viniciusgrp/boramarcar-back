@@ -195,6 +195,29 @@ export class MailService {
     });
   }
 
+  async sendDepositChargeUnavailable(
+    ownerEmail: string,
+    tenant: Tenant,
+  ): Promise<void> {
+    const intro =
+      'A conta de recebimentos ainda não pode cobrar sinal. Os serviços que pedem sinal continuam cadastrados, e os novos agendamentos públicos entram sem essa cobrança até a aprovação no Asaas.';
+
+    await this.sendMail({
+      to: ownerEmail,
+      subject: `Sinal indisponível em ${tenant.name}`,
+      text: [
+        `Olá,`,
+        '',
+        intro,
+        '',
+        'Conclua o cadastro da conta de recebimentos e aguarde a aprovação para voltar a cobrar sinal.',
+        '',
+        `Equipe ${BRAND_NAME}`,
+      ].join('\n'),
+      html: `<p>Olá,</p><p>${intro}</p><p>Conclua o cadastro da conta de recebimentos e aguarde a aprovação para voltar a cobrar sinal.</p><p>Equipe ${BRAND_NAME}</p>`,
+    });
+  }
+
   async sendEstablishmentEmailVerification(params: {
     recipientEmail: string;
     ownerName: string;
@@ -285,6 +308,31 @@ export class MailService {
 </table></td></tr></table>
 </body>
 </html>`;
+  }
+
+  async sendTeamInviteAccepted(params: {
+    recipientEmail: string;
+    tenantName: string;
+    memberEmail: string;
+    roleLabel: string;
+  }): Promise<void> {
+    const tenantName = this.escapeHtml(params.tenantName);
+    const memberEmail = this.escapeHtml(params.memberEmail);
+    const roleLabel = this.escapeHtml(params.roleLabel);
+
+    await this.sendMail({
+      to: params.recipientEmail,
+      subject: `Convite aceito - ${params.tenantName}`,
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h1 style="font-size: 20px; margin-bottom: 12px;">Alguém entrou na equipe</h1>
+          <p style="margin: 0 0 16px;">
+            <strong>${memberEmail}</strong> aceitou o convite para
+            <strong>${tenantName}</strong> como <strong>${roleLabel}</strong>.
+          </p>
+        </div>
+      `,
+    });
   }
 
   async sendTeamInvite(params: {

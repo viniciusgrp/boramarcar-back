@@ -10,7 +10,7 @@ describe('TenantsController', () => {
     slug: 'studio',
     subscription_status: 'ACTIVE',
     trial_ends_at: null,
-    stripe_customer_id: 'cus_secret',
+    asaas_customer_id: 'cus_secret',
     owner_id: 'owner-secret',
     enable_referral_program: false,
     referrer_points_bonus: 0,
@@ -42,7 +42,7 @@ describe('TenantsController', () => {
     contact_phone: null,
   } as Tenant;
 
-  it('returns the public tenant DTO without Stripe ids', async () => {
+  it('returns the public tenant DTO without Asaas ids', async () => {
     const controller = new TenantsController(
       { findBySlug: jest.fn().mockResolvedValue(tenant) } as never,
       {} as never,
@@ -52,7 +52,7 @@ describe('TenantsController', () => {
 
     const publicTenant = await controller.findBySlug('studio');
     expect(publicTenant).toEqual(toPublicTenant(tenant));
-    expect(publicTenant).not.toHaveProperty('stripe_customer_id');
+    expect(publicTenant).not.toHaveProperty('asaas_customer_id');
     expect(publicTenant).not.toHaveProperty('owner_id');
   });
 

@@ -60,6 +60,7 @@ export class ServicesService {
     tenantId: string,
     planTier: PlanTier,
     depositFeatureEnabled: boolean,
+    canChargeDeposits: boolean,
     dto: CreateServiceDto,
   ): Promise<Service> {
     this.validateServicePayload(dto.durationMinutes, dto.price);
@@ -68,6 +69,7 @@ export class ServicesService {
       canAccessDepositFeatures(planTier, depositFeatureEnabled),
       dto.requiresDeposit,
       dto.depositAmount,
+      canChargeDeposits,
     );
     const customCommissionRate = resolveServiceCustomCommissionRate(
       planTier,
@@ -111,6 +113,7 @@ export class ServicesService {
     tenantId: string,
     planTier: PlanTier,
     depositFeatureEnabled: boolean,
+    canChargeDeposits: boolean,
     serviceId: string,
     dto: UpdateServiceDto,
   ): Promise<Service> {
@@ -151,6 +154,7 @@ export class ServicesService {
         canAccessDepositFeatures(planTier, depositFeatureEnabled),
         dto.requiresDeposit,
         dto.depositAmount,
+        canChargeDeposits,
       );
       payload.requires_deposit = depositFields.requires_deposit;
       payload.deposit_amount = depositFields.deposit_amount;
@@ -193,11 +197,19 @@ export class ServicesService {
     tenantId: string,
     planTier: PlanTier,
     depositFeatureEnabled: boolean,
+    canChargeDeposits: boolean,
     serviceId: string,
   ): Promise<Service> {
-    return this.updateForTenant(tenantId, planTier, depositFeatureEnabled, serviceId, {
-      isActive: false,
-    });
+    return this.updateForTenant(
+      tenantId,
+      planTier,
+      depositFeatureEnabled,
+      canChargeDeposits,
+      serviceId,
+      {
+        isActive: false,
+      },
+    );
   }
 
   private async findOneWithProducts(

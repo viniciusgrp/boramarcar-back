@@ -3,6 +3,7 @@ import { APPOINTMENT_STATUSES } from '../../appointments/entities/appointment.en
 import type { BookingSource } from '../../appointments/entities/booking-source.type';
 import type {
   FinanceReportAppointment,
+  FinanceReportProductSale,
   FinanceReportSummary,
 } from '../entities/finance-report.entity';
 
@@ -66,31 +67,118 @@ export function mapFinanceReportAppointmentRow(
     serviceId: lineItems.serviceId,
     serviceName: lineItems.serviceName,
     totalPrice: Number(row.total_price ?? lineItems.servicePrice),
+    ...recognizedAmountForStatus(
+      row.status,
+      Number(row.total_price ?? lineItems.servicePrice),
+    ),
     commissionAmount: Number(row.commission_amount ?? 0),
     bookingSource: normalizeBookingSource(row.booking_source),
   };
 }
 
+export function recognizedAmountForStatus(
+  status: string,
+  amount: number,
+): { recognizedRevenue: number; countsTowardRevenue: boolean } {
+  // Only completed items count toward billing ("Conta no faturamento").
+  const countsTowardRevenue = status === 'COMPLETED';
+
+  return {
+    countsTowardRevenue,
+    recognizedRevenue: countsTowardRevenue ? roundCurrency(amount) : 0,
+  };
+}
+
+export function mapFinanceReportProductSale(row: {
+  id: string;
+  created_at: string;
+  status: string;
+  customer_name?: string | null;
+  professional_id?: string | null;
+  total_amount?: number | null;
+  commission_amount?: number | null;
+  professionals?: RelationName;
+  appointments?:
+    | { start_time?: string | null }
+    | { start_time?: string | null }[]
+    | null;
+}): FinanceReportProductSale {
+  const totalAmount = roundCurrency(Number(row.total_amount ?? 0));
+  const counts = recognizedAmountForStatus(row.status, totalAmount);
+  const appointmentRelation = Array.isArray(row.appointments)
+    ? row.appointments[0]
+    : row.appointments;
+  const appointmentStartTime =
+    appointmentRelation?.start_time?.trim() || null;
+
+  return {
+    id: row.id,
+    // Real timestamptz as UTC ISO — front formats once in America/Sao_Paulo (B4).
+    createdAt: row.created_at,
+    appointmentStartTime,
+    status: row.status === 'CANCELLED' ? 'CANCELLED' : 'COMPLETED',
+    customerName: row.customer_name?.trim() || null,
+    professionalId: row.professional_id?.trim() || null,
+    professionalName: row.professionals
+      ? extractRelationName(row.professionals)
+      : null,
+    totalAmount,
+    commissionAmount: roundCurrency(Number(row.commission_amount ?? 0)),
+    recognizedRevenue: counts.recognizedRevenue,
+    countsTowardRevenue: counts.countsTowardRevenue,
+  };
+}
+
+/** Effective calendar day for report filters / commission (B4). */
+export function productSaleEffectiveAt(
+  sale: Pick<FinanceReportProductSale, 'createdAt' | 'appointmentStartTime'>,
+): string {
+  return sale.appointmentStartTime || sale.createdAt;
+}
+
 export function buildFinanceReportSummary(
   appointments: FinanceReportAppointment[],
+  productSales: FinanceReportProductSale[] = [],
 ): FinanceReportSummary {
-  const totals = appointments.reduce(
-    (accumulator, appointment) => ({
-      totalRevenue: accumulator.totalRevenue + appointment.totalPrice,
-      totalCommissions:
-        accumulator.totalCommissions + appointment.commissionAmount,
-    }),
-    { totalRevenue: 0, totalCommissions: 0 },
+  const completed = appointments.filter(
+    (appointment) => appointment.status === 'COMPLETED',
   );
-
-  const totalRevenue = roundCurrency(totals.totalRevenue);
-  const totalCommissions = roundCurrency(totals.totalCommissions);
+  const countedProducts = productSales.filter(
+    (sale) => sale.countsTowardRevenue,
+  );
+  const serviceRevenue = roundCurrency(
+    completed.reduce(
+      (sum, appointment) => sum + appointment.recognizedRevenue,
+      0,
+    ),
+  );
+  const productRevenue = roundCurrency(
+    countedProducts.reduce((sum, sale) => sum + sale.recognizedRevenue, 0),
+  );
+  const serviceCommissions = roundCurrency(
+    completed.reduce(
+      (sum, appointment) => sum + appointment.commissionAmount,
+      0,
+    ),
+  );
+  const productCommissions = roundCurrency(
+    countedProducts.reduce((sum, sale) => sum + sale.commissionAmount, 0),
+  );
+  const totalRevenue = roundCurrency(serviceRevenue + productRevenue);
+  const totalCommissions = roundCurrency(
+    serviceCommissions + productCommissions,
+  );
 
   return {
     totalRevenue,
+    serviceRevenue,
+    productRevenue,
     totalCommissions,
+    serviceCommissions,
+    productCommissions,
     netProfit: roundCurrency(totalRevenue - totalCommissions),
-    appointmentCount: appointments.length,
+    appointmentCount: completed.length,
+    productSaleCount: countedProducts.length,
   };
 }
 

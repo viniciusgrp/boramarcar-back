@@ -1,45 +1,70 @@
 import type { Tenant } from '../entities/tenant.entity';
 import type { UserRole } from '../entities/user-role.type';
 
-const STRIPE_TENANT_KEYS = [
-  'stripe_customer_id',
-  'stripe_subscription_id',
-  'stripe_connect_account_id',
-  'support_ai_stripe_subscription_item_id',
+const ASAAS_TENANT_KEYS = [
+  'asaas_customer_id',
+  'asaas_subscription_id',
+  'asaas_pending_payment_id',
+  'asaas_open_invoice_url',
+  'asaas_account_id',
+  'asaas_wallet_id',
+  'support_ai_asaas_subscription_id',
+  'pending_plan_payment_id',
+  'pending_plan_invoice_url',
 ] as const;
 
-export type TenantWithoutStripeSecrets = Omit<
+export type TenantWithoutAsaasSecrets = Omit<
   Tenant,
-  (typeof STRIPE_TENANT_KEYS)[number]
+  (typeof ASAAS_TENANT_KEYS)[number]
 > & {
-  stripe_customer_id: null;
-  stripe_subscription_id: null;
-  stripe_connect_account_id: null;
-  support_ai_stripe_subscription_item_id: null;
+  asaas_customer_id: null;
+  asaas_subscription_id: null;
+  asaas_pending_payment_id: null;
+  asaas_open_invoice_url: null;
+  asaas_account_id: null;
+  asaas_wallet_id: null;
+  support_ai_asaas_subscription_id: null;
+  pending_plan_payment_id: null;
+  pending_plan_invoice_url: null;
 };
 
-/** Stripe account identifiers are owner-only (billing / Connect). */
-export function canExposeTenantStripeIds(role: UserRole | null | undefined): boolean {
+export function canExposeTenantAsaasIds(
+  role: UserRole | null | undefined,
+): boolean {
   return role === 'OWNER';
 }
 
-export function stripTenantStripeSecrets(tenant: Tenant): TenantWithoutStripeSecrets {
-  return {
+export function stripTenantAsaasSecrets(
+  tenant: Tenant,
+): TenantWithoutAsaasSecrets {
+  return omitAsaasSubaccountApiKey({
     ...tenant,
-    stripe_customer_id: null,
-    stripe_subscription_id: null,
-    stripe_connect_account_id: null,
-    support_ai_stripe_subscription_item_id: null,
-  };
+    asaas_customer_id: null,
+    asaas_subscription_id: null,
+    asaas_pending_payment_id: null,
+    asaas_open_invoice_url: null,
+    asaas_account_id: null,
+    asaas_wallet_id: null,
+    support_ai_asaas_subscription_id: null,
+    pending_plan_payment_id: null,
+    pending_plan_invoice_url: null,
+  });
 }
 
 export function toSafeTenantForRole(
   tenant: Tenant,
   role: UserRole | null | undefined,
-): Tenant | TenantWithoutStripeSecrets {
-  if (canExposeTenantStripeIds(role)) {
-    return tenant;
+): Tenant | TenantWithoutAsaasSecrets {
+  if (canExposeTenantAsaasIds(role)) {
+    return omitAsaasSubaccountApiKey(tenant);
   }
 
-  return stripTenantStripeSecrets(tenant);
+  return stripTenantAsaasSecrets(tenant);
+}
+
+function omitAsaasSubaccountApiKey<T extends object>(tenant: T): T {
+  const copy = { ...tenant };
+  delete (copy as { asaas_subaccount_api_key_encrypted?: unknown })
+    .asaas_subaccount_api_key_encrypted;
+  return copy;
 }

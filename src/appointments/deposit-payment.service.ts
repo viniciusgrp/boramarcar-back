@@ -27,6 +27,7 @@ export class DepositPaymentService {
 
   async confirmDepositPayment(
     appointmentId: string,
+    asaasPaymentId?: string | null,
   ): Promise<ConfirmDepositPaymentResult> {
     const existing = await this.findById(appointmentId);
 
@@ -55,15 +56,27 @@ export class DepositPaymentService {
       return { outcome: 'ignored', appointment: existing };
     }
 
+    const updatePayload: {
+      status: 'CONFIRMED';
+      payment_status: 'PAID';
+      deposit_paid: true;
+      hold_expires_at: null;
+      asaas_payment_id?: string;
+    } = {
+      status: 'CONFIRMED',
+      payment_status: 'PAID',
+      deposit_paid: true,
+      hold_expires_at: null,
+    };
+
+    if (asaasPaymentId?.trim()) {
+      updatePayload.asaas_payment_id = asaasPaymentId.trim();
+    }
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .update({
-        status: 'CONFIRMED',
-        payment_status: 'PAID',
-        deposit_paid: true,
-        hold_expires_at: null,
-      })
+      .update(updatePayload)
       .eq('id', appointmentId)
       .eq('status', DEPOSIT_CONFIRMABLE_STATUS)
       .select('*')
@@ -120,7 +133,11 @@ export class DepositPaymentService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('appointments')
-      .update({ status: 'CANCELLED' })
+      .update({
+        status: 'CANCELLED',
+        payment_status: 'EXPIRED',
+        hold_expires_at: null,
+      })
       .eq('id', appointmentId)
       .eq('status', DEPOSIT_CONFIRMABLE_STATUS)
       .select('id')
@@ -169,17 +186,16 @@ export class DepositPaymentService {
     return timingSafeEqual(expectedBuffer, providedBuffer);
   }
 
-  async expireAbandonedDepositHolds(): Promise<number> {
+  async expireAbandonedDepositHolds(): Promise<string[]> {
     const now = new Date().toISOString();
+    const client = this.supabaseService.getClient();
 
-    const { data, error } = await this.supabaseService
-      .getClient()
+    const { data, error } = await client
       .from('appointments')
-      .update({ status: 'CANCELLED' })
+      .select('id')
       .eq('status', DEPOSIT_CONFIRMABLE_STATUS)
       .not('hold_expires_at', 'is', null)
-      .lt('hold_expires_at', now)
-      .select('id');
+      .lt('hold_expires_at', now);
 
     if (error) {
       throw new InternalServerErrorException(
@@ -187,7 +203,31 @@ export class DepositPaymentService {
       );
     }
 
-    return (data ?? []).length;
+    const appointmentIds = (data ?? [])
+      .map((row) => (typeof row.id === 'string' ? row.id : ''))
+      .filter(Boolean);
+
+    if (appointmentIds.length === 0) {
+      return [];
+    }
+
+    const { error: updateError } = await client
+      .from('appointments')
+      .update({
+        status: 'CANCELLED',
+        payment_status: 'EXPIRED',
+        hold_expires_at: null,
+      })
+      .in('id', appointmentIds)
+      .eq('status', DEPOSIT_CONFIRMABLE_STATUS);
+
+    if (updateError) {
+      throw new InternalServerErrorException(
+        `Deposit hold expiration failed: ${updateError.message}`,
+      );
+    }
+
+    return appointmentIds;
   }
 
   private async findById(appointmentId: string): Promise<Appointment | null> {

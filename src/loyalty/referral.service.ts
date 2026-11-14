@@ -7,7 +7,9 @@ import { SupabaseService } from '../supabase/supabase.service';
 import type { Customer } from './entities/customer.entity';
 import {
   REFERRAL_REFEREE_BONUS_DESCRIPTION,
+  REFERRAL_REFEREE_BONUS_DESCRIPTION_LEGACY,
   REFERRAL_REFERRER_BONUS_DESCRIPTION,
+  REFERRAL_REFERRER_BONUS_DESCRIPTION_LEGACY,
 } from './utils/referral.constants';
 import {
   generateRandomReferralCodeLength,
@@ -147,7 +149,10 @@ export class ReferralService {
       const alreadyAwarded = await this.hasReferralBonusTransaction(
         params.tenantId,
         referrer.id,
-        REFERRAL_REFERRER_BONUS_DESCRIPTION,
+        [
+          REFERRAL_REFERRER_BONUS_DESCRIPTION,
+          REFERRAL_REFERRER_BONUS_DESCRIPTION_LEGACY,
+        ],
         params.appointmentId,
       );
 
@@ -176,7 +181,10 @@ export class ReferralService {
       const alreadyAwarded = await this.hasReferralBonusTransaction(
         params.tenantId,
         customer.id,
-        REFERRAL_REFEREE_BONUS_DESCRIPTION,
+        [
+          REFERRAL_REFEREE_BONUS_DESCRIPTION,
+          REFERRAL_REFEREE_BONUS_DESCRIPTION_LEGACY,
+        ],
         params.appointmentId,
       );
 
@@ -261,7 +269,7 @@ export class ReferralService {
   private async hasReferralBonusTransaction(
     tenantId: string,
     customerId: string,
-    description: string,
+    descriptions: string[],
     appointmentId: string,
   ): Promise<boolean> {
     const { data, error } = await this.supabaseService
@@ -270,7 +278,7 @@ export class ReferralService {
       .select('id')
       .eq('tenant_id', tenantId)
       .eq('customer_id', customerId)
-      .eq('description', description)
+      .in('description', descriptions)
       .eq('appointment_id', appointmentId)
       .limit(1);
 
