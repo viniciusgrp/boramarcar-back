@@ -330,20 +330,10 @@ export class BillingService {
 
     const paymentSubscriptionId = payment.subscription?.trim() || null;
     const currentSubscriptionId = tenant.asaas_subscription_id?.trim() || null;
-
-    if (tenant.subscription_status === 'CANCELED') {
-      this.logger.warn(
-        `Ignoring late plan payment ${payment.id} for canceled tenant ${tenant.id}`,
-      );
-      return;
-    }
-
-    if (tenant.subscription_cancel_at) {
-      this.logger.warn(
-        `Ignoring plan payment ${payment.id} for tenant ${tenant.id} because cancellation is scheduled for ${tenant.subscription_cancel_at}`,
-      );
-      return;
-    }
+    const isCurrentSubscriptionPayment =
+      Boolean(currentSubscriptionId) &&
+      Boolean(paymentSubscriptionId) &&
+      paymentSubscriptionId === currentSubscriptionId;
 
     if (
       currentSubscriptionId &&
@@ -352,6 +342,20 @@ export class BillingService {
     ) {
       this.logger.warn(
         `Ignoring plan payment ${payment.id} for subscription ${paymentSubscriptionId}; tenant ${tenant.id} is on ${currentSubscriptionId}`,
+      );
+      return;
+    }
+
+    if (tenant.subscription_status === 'CANCELED' && !isCurrentSubscriptionPayment) {
+      this.logger.warn(
+        `Ignoring late plan payment ${payment.id} for canceled tenant ${tenant.id}`,
+      );
+      return;
+    }
+
+    if (tenant.subscription_cancel_at && !isCurrentSubscriptionPayment) {
+      this.logger.warn(
+        `Ignoring plan payment ${payment.id} for tenant ${tenant.id} because cancellation is scheduled for ${tenant.subscription_cancel_at}`,
       );
       return;
     }
@@ -381,6 +385,7 @@ export class BillingService {
       asaasPendingPaymentId: null,
       asaasOpenInvoiceUrl: null,
       subscriptionStatus: 'ACTIVE',
+      subscriptionCancelAt: null,
       subscriptionExpiresAt,
       planTier,
       ...trialTransition,
@@ -861,13 +866,22 @@ export class BillingService {
 
     if (tenantHasPendingAsaasSubscription(tenant)) {
       try {
-        return await this.resumePendingSubscription(tenant, planTier);
+        const resumed = await this.resumePendingSubscription(tenant, planTier);
+        if (resumed) {
+          return resumed;
+        }
       } catch (error) {
         this.rethrowAsaasError(
           error,
           'Não foi possível abrir a fatura da assinatura pendente.',
         );
       }
+
+      // Sem fatura em aberto (já paga ou inexistente): não escrever no Asaas.
+      // Troca de plano com assinatura ativa/paga usa changePlan (diferença).
+      throw new BadRequestException(
+        'Não encontramos a fatura da assinatura já criada. Atualize o status e tente de novo.',
+      );
     }
 
     const ownerEmail = params.ownerEmail.trim();
@@ -1847,16 +1861,28 @@ export class BillingService {
     }
   }
 
+  /**
+   * Reabre a fatura de uma assinatura Asaas já criada e ainda não paga.
+   * Retorna null quando não há fatura em aberto (já paga ou inexistente),
+   * sem escrever no Asaas. Só atualiza valor/plano depois de confirmar a fatura.
+   */
   private async resumePendingSubscription(
     tenant: Tenant,
     planTier: PlanTier,
-  ): Promise<CheckoutSessionResponse> {
+  ): Promise<CheckoutSessionResponse | null> {
     const subscriptionId = tenant.asaas_subscription_id?.trim();
 
     if (!subscriptionId) {
       throw new BadRequestException(
         'Não encontramos a assinatura pendente deste estabelecimento.',
       );
+    }
+
+    const pendingPayment = await this.findOpenSubscriptionPayment(subscriptionId);
+    const invoiceUrl = pendingPayment?.invoiceUrl?.trim();
+
+    if (!invoiceUrl) {
+      return null;
     }
 
     if (normalizePlanTier(tenant.plan_tier) !== planTier) {
@@ -1868,15 +1894,6 @@ export class BillingService {
         externalReference: buildPlanExternalReference(tenant.id, planTier),
         updatePendingPayments: true,
       });
-    }
-
-    const pendingPayment = await this.findOpenSubscriptionPayment(subscriptionId);
-    const invoiceUrl = pendingPayment?.invoiceUrl?.trim();
-
-    if (!invoiceUrl) {
-      throw new BadRequestException(
-        'Não encontramos a fatura da assinatura já criada. Atualize o status e tente de novo.',
-      );
     }
 
     await this.tenantsService.updateSubscriptionByTenantId(tenant.id, {

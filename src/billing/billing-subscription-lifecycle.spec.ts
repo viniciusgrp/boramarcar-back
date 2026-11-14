@@ -357,6 +357,9 @@ describe('BillingService SaaS billing', () => {
   });
 
   it('returns the Asaas message when resuming a pending subscription fails', async () => {
+    const updateSubscription = jest
+      .fn()
+      .mockRejectedValue(new AsaasHttpError(400, null, 'Cobrança já paga'));
     const { service } = buildService(
       {
         findById: jest.fn().mockResolvedValue(
@@ -369,9 +372,16 @@ describe('BillingService SaaS billing', () => {
       },
       {},
       {
-        updateSubscription: jest
-          .fn()
-          .mockRejectedValue(new AsaasHttpError(400, null, 'Cobrança já paga')),
+        updateSubscription,
+        listPayments: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'pay_open',
+              status: 'PENDING',
+              invoiceUrl: 'https://asaas.com/i/pending',
+            },
+          ],
+        }),
       },
     );
 
@@ -385,6 +395,154 @@ describe('BillingService SaaS billing', () => {
     ).rejects.toMatchObject({
       message: 'Cobrança já paga',
     });
+    expect(updateSubscription).toHaveBeenCalled();
+  });
+
+  it('updates Asaas plan only after confirming an open invoice on resume', async () => {
+    const updateSubscription = jest.fn().mockResolvedValue({});
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
+      buildTenant({
+        asaas_subscription_id: 'sub_pending',
+        subscription_status: 'INACTIVE',
+        plan_tier: 'ELITE',
+      }),
+    );
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_pending',
+            subscription_status: 'INACTIVE',
+            plan_tier: 'PRO',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      {},
+      {
+        updateSubscription,
+        listPayments: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'pay_open',
+              status: 'PENDING',
+              invoiceUrl: 'https://asaas.com/i/open',
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'ELITE',
+      }),
+    ).resolves.toEqual({ url: 'https://asaas.com/i/open' });
+
+    expect(updateSubscription).toHaveBeenCalledWith(
+      'sub_pending',
+      expect.objectContaining({
+        value: 120,
+        updatePendingPayments: true,
+        externalReference: 'plan:tenant-1:ELITE',
+      }),
+    );
+  });
+
+  it('does not write to Asaas when resume finds no open invoice', async () => {
+    const updateSubscription = jest.fn();
+    const createPayment = jest.fn();
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_pending',
+            subscription_status: 'CANCELED',
+            plan_tier: 'PRO',
+            subscription_expires_at: null,
+          }),
+        ),
+      },
+      {},
+      {
+        updateSubscription,
+        createPayment,
+        listPayments: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'pay_paid',
+              status: 'RECEIVED',
+              invoiceUrl: 'https://asaas.com/i/paid',
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'PRO',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(updateSubscription).not.toHaveBeenCalled();
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it('refuses a plan change via resume when the pending invoice is already paid', async () => {
+    const updateSubscription = jest.fn();
+    const createPayment = jest.fn();
+    const createSubscription = jest.fn();
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            asaas_subscription_id: 'sub_pending',
+            subscription_status: 'CANCELED',
+            plan_tier: 'PRO',
+            subscription_expires_at: '2099-01-01T00:00:00.000Z',
+            asaas_customer_id: 'cus_1',
+          }),
+        ),
+      },
+      {},
+      {
+        updateSubscription,
+        createPayment,
+        createSubscription,
+        listPayments: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'pay_paid',
+              status: 'RECEIVED',
+              invoiceUrl: 'https://asaas.com/i/paid',
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(
+      service.createCheckoutSession({
+        tenantId: 'tenant-1',
+        tenantName: 'Studio',
+        ownerEmail: 'owner@example.com',
+        planTier: 'ELITE',
+      }),
+    ).rejects.toMatchObject({
+      message:
+        'Não encontramos a fatura da assinatura já criada. Atualize o status e tente de novo.',
+    });
+
+    expect(updateSubscription).not.toHaveBeenCalled();
+    expect(createPayment).not.toHaveBeenCalled();
+    expect(createSubscription).not.toHaveBeenCalled();
   });
 
   it('does not replace the document of an existing Asaas customer', async () => {
@@ -468,6 +626,83 @@ describe('BillingService SaaS billing', () => {
 
     await service.processAsaasWebhookEvent({
       id: 'evt_late',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_old',
+        customer: 'cus_1',
+        subscription: 'sub_old',
+        value: 69.9,
+        externalReference: 'plan:tenant-1:PRO',
+      },
+    });
+
+    expect(updateSubscriptionByTenantId).not.toHaveBeenCalled();
+    expect(affiliatesService.accruePaidPlanInvoice).not.toHaveBeenCalled();
+  });
+
+  it('reactivates a canceled tenant when payment matches the current subscription', async () => {
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
+      buildTenant({
+        subscription_status: 'ACTIVE',
+        asaas_subscription_id: 'sub_new',
+        plan_tier: 'PRO',
+      }),
+    );
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          subscription_status: 'CANCELED',
+          asaas_subscription_id: 'sub_new',
+          asaas_pending_payment_id: 'pay_open',
+          asaas_open_invoice_url: 'https://asaas.com/i/open',
+          subscription_cancel_at: '2026-12-27T00:00:00.000Z',
+          plan_tier: 'PRO',
+        }),
+      ),
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_resub',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_0_gjxgxah3mz5nnu',
+        customer: 'cus_1',
+        subscription: 'sub_new',
+        value: 69.9,
+        paymentDate: '2026-11-14',
+        externalReference: 'plan:tenant-1:PRO',
+      },
+    });
+
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        subscriptionStatus: 'ACTIVE',
+        planTier: 'PRO',
+        asaasSubscriptionId: 'sub_new',
+        asaasPendingPaymentId: null,
+        asaasOpenInvoiceUrl: null,
+        subscriptionCancelAt: null,
+      }),
+    );
+    expect(affiliatesService.accruePaidPlanInvoice).toHaveBeenCalled();
+  });
+
+  it('still ignores a canceled tenant payment from an old subscription', async () => {
+    const updateSubscriptionByTenantId = jest.fn();
+    const { service, affiliatesService } = buildService({
+      findById: jest.fn().mockResolvedValue(
+        buildTenant({
+          subscription_status: 'CANCELED',
+          asaas_subscription_id: 'sub_new',
+        }),
+      ),
+      updateSubscriptionByTenantId,
+    });
+
+    await service.processAsaasWebhookEvent({
+      id: 'evt_old',
       event: 'PAYMENT_RECEIVED',
       payment: {
         id: 'pay_old',
