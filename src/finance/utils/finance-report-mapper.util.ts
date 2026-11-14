@@ -108,12 +108,13 @@ export function mapFinanceReportProductSale(row: {
   const appointmentRelation = Array.isArray(row.appointments)
     ? row.appointments[0]
     : row.appointments;
-  const appointmentStart = appointmentRelation?.start_time?.trim() || null;
+  const appointmentStartTime =
+    appointmentRelation?.start_time?.trim() || null;
 
   return {
     id: row.id,
-    // Linked sales use the appointment wall-clock day, not the sale timestamp.
-    createdAt: appointmentStart || row.created_at,
+    createdAt: row.created_at,
+    appointmentStartTime,
     status: row.status === 'CANCELLED' ? 'CANCELLED' : 'COMPLETED',
     customerName: row.customer_name?.trim() || null,
     professionalId: row.professional_id?.trim() || null,
@@ -125,6 +126,13 @@ export function mapFinanceReportProductSale(row: {
     recognizedRevenue: counts.recognizedRevenue,
     countsTowardRevenue: counts.countsTowardRevenue,
   };
+}
+
+/** Effective calendar day for report filters / commission (B4). */
+export function productSaleEffectiveAt(
+  sale: Pick<FinanceReportProductSale, 'createdAt' | 'appointmentStartTime'>,
+): string {
+  return sale.appointmentStartTime || sale.createdAt;
 }
 
 export function buildFinanceReportSummary(

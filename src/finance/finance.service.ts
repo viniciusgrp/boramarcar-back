@@ -36,6 +36,7 @@ import {
   isValidFinanceReportStatus,
   mapFinanceReportAppointmentRow,
   mapFinanceReportProductSale,
+  productSaleEffectiveAt,
 } from './utils/finance-report-mapper.util';
 import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
@@ -940,8 +941,8 @@ export class FinanceService {
       serviceName: 'Venda de produto',
       customerName: sale.customerName ?? '',
       customerPhone: '',
-      startTime: sale.createdAt,
-      endTime: sale.createdAt,
+      startTime: productSaleEffectiveAt(sale),
+      endTime: productSaleEffectiveAt(sale),
       durationMinutes: 0,
       totalPrice: this.roundCurrency(sale.recognizedRevenue),
       commissionAmount: this.roundCurrency(sale.commissionAmount),
@@ -1009,13 +1010,13 @@ export class FinanceService {
       return mapped;
     }
 
-    // Filter by the effective report date (appointment day when linked).
+    // Filter by appointment day when linked, else sale timestamp (B4).
     const range = this.resolveDateRange(filters.startDate, filters.endDate);
     const startMs = Date.parse(range.startIso);
     const endMs = Date.parse(range.endIso);
 
     return mapped.filter((sale) => {
-      const saleMs = Date.parse(sale.createdAt);
+      const saleMs = Date.parse(productSaleEffectiveAt(sale));
       if (!Number.isFinite(saleMs)) {
         return false;
       }

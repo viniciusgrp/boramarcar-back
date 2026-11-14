@@ -113,7 +113,7 @@ describe('finance-report-mapper.util', () => {
     });
   });
 
-  it('dates a linked product sale on the appointment wall-clock day', () => {
+  it('exposes appointmentStartTime without rewriting createdAt (B4)', () => {
     const productSale = mapFinanceReportProductSale({
       id: 'sale-1',
       created_at: '2026-09-10T18:00:00.000Z',
@@ -123,6 +123,20 @@ describe('finance-report-mapper.util', () => {
       appointments: { start_time: '2026-09-08T14:00:00' },
     });
 
-    expect(productSale.createdAt).toBe('2026-09-08T14:00:00');
+    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
+    expect(productSale.appointmentStartTime).toBe('2026-09-08T14:00:00');
+  });
+
+  it('leaves appointmentStartTime null for standalone sales', () => {
+    const productSale = mapFinanceReportProductSale({
+      id: 'sale-2',
+      created_at: '2026-09-10T18:00:00.000Z',
+      status: 'COMPLETED',
+      total_amount: 10,
+      commission_amount: 0,
+    });
+
+    expect(productSale.appointmentStartTime).toBeNull();
+    expect(productSale.createdAt).toBe('2026-09-10T18:00:00.000Z');
   });
 });

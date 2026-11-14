@@ -2954,7 +2954,11 @@ export class AppointmentsService {
 
     return appointments.map((appointment, index) => {
       if (!settings.is_active || appointment.paidWithPoints) {
-        return { ...appointment, estimatedLoyaltyPoints: 0 };
+        return {
+          ...appointment,
+          estimatedEarnPoints: 0,
+          pointsAwarded: 0,
+        };
       }
 
       const row = rows[index];
@@ -2972,13 +2976,18 @@ export class AppointmentsService {
             },
           ];
 
+      const estimatedEarnPoints = calculateAppointmentLoyaltyPoints(
+        lines,
+        settings.points_per_currency,
+        settings.default_service_points,
+      );
+
       return {
         ...appointment,
-        estimatedLoyaltyPoints: calculateAppointmentLoyaltyPoints(
-          lines,
-          settings.points_per_currency,
-          settings.default_service_points,
-        ),
+        estimatedEarnPoints,
+        // Same rule as award-on-complete; ledger lookup avoided on agenda list.
+        pointsAwarded:
+          appointment.status === 'COMPLETED' ? estimatedEarnPoints : 0,
       };
     });
   }
@@ -3461,7 +3470,8 @@ export class AppointmentsService {
       paymentBadge: payment.paymentBadge,
       bookingSource: this.normalizeBookingSource(row.booking_source),
       paidWithPoints: Boolean(row.loyalty_reward_id),
-      estimatedLoyaltyPoints: 0,
+      estimatedEarnPoints: 0,
+      pointsAwarded: 0,
       couponCode: couponFields.couponCode,
       couponDiscountAmount: couponFields.couponDiscountAmount,
     };
