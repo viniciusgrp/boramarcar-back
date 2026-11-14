@@ -91,6 +91,8 @@ function buildService() {
   const customersService = {
     resolveForAuthenticatedBooking: jest.fn(),
     findByIdForTenant: jest.fn(),
+    findAllByAuthUserId: jest.fn(),
+    expandCustomerIdsByPhone: jest.fn(),
   };
   const depositPaymentService = {
     confirmDepositPayment: jest.fn(),
