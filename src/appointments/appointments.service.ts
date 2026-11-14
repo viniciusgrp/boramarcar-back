@@ -3129,6 +3129,9 @@ export class AppointmentsService {
       tenantSlug: tenant?.slug ?? '',
       customerName: adminAppointment.customerName,
       customerPhone: adminAppointment.customerPhone,
+      depositPaid: adminAppointment.depositPaid,
+      depositPaidAmount: adminAppointment.depositPaidAmount,
+      balanceDue: adminAppointment.balanceDue,
     };
   }
 

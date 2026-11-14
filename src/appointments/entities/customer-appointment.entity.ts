@@ -24,4 +24,7 @@ export interface CustomerAppointment {
   tenantSlug: string;
   customerName?: string;
   customerPhone?: string;
+  depositPaid: boolean;
+  depositPaidAmount: number;
+  balanceDue: number;
 }

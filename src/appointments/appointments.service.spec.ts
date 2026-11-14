@@ -1226,4 +1226,84 @@ describe('AppointmentsService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });
+
+  describe('customer payment fields', () => {
+    it('returns deposit and balance for a guest lookup and hides other tokens', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ reviews_enabled: false, slug: 'studio' }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({
+          data: [
+            {
+              id: 'appt-paid',
+              tenant_id: 'tenant-1',
+              customer_id: 'cust-1',
+              customer_name: 'Ana',
+              customer_phone: '11999999999',
+              professional_id: 'pro-1',
+              service_id: 'svc-1',
+              status: 'CONFIRMED',
+              start_time: '2099-01-15T10:00:00.000Z',
+              end_time: '2099-01-15T11:00:00.000Z',
+              total_price: 80,
+              deposit_paid: true,
+              deposit_amount: 20,
+              payment_status: 'PAID',
+              guest_access_token: 'token-certo',
+              professionals: { name: 'QA Bot' },
+              services: { name: 'Corte', price: 80, duration_minutes: 60 },
+              appointment_services: [
+                {
+                  service_id: 'svc-1',
+                  sort_order: 0,
+                  duration_minutes: 60,
+                  price: 80,
+                  services: { name: 'Corte' },
+                },
+              ],
+            },
+            {
+              id: 'appt-outro',
+              tenant_id: 'tenant-1',
+              customer_name: 'Outro',
+              customer_phone: '11888888888',
+              professional_id: 'pro-1',
+              status: 'CONFIRMED',
+              start_time: '2099-01-15T12:00:00.000Z',
+              end_time: '2099-01-15T13:00:00.000Z',
+              total_price: 50,
+              deposit_paid: true,
+              deposit_amount: 50,
+              payment_status: 'PAID',
+              guest_access_token: 'token-errado',
+            },
+          ],
+          error: null,
+        }),
+      );
+
+      const result = await ctx.service.findGuestAppointments({
+        tenantId: 'tenant-1',
+        scope: 'upcoming',
+        entries: [
+          { appointmentId: 'appt-paid', accessToken: 'token-certo' },
+          { appointmentId: 'appt-outro', accessToken: 'token-certo' },
+        ],
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          id: 'appt-paid',
+          depositPaid: true,
+          depositPaidAmount: 20,
+          balanceDue: 60,
+        }),
+      );
+      expect(result[0]).not.toHaveProperty('guest_access_token');
+      expect(JSON.stringify(result)).not.toContain('Outro');
+    });
+  });
 });
