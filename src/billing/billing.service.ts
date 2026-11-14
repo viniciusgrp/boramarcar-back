@@ -1000,11 +1000,9 @@ export class BillingService {
     }
 
     if (nextTier === normalizePlanTier(tenant.plan_tier)) {
-      if (
-        tenant.pending_plan_tier &&
-        tenant.pending_plan_tier !== tenant.plan_tier
-      ) {
-        return this.restoreCurrentPlanPrice(tenant);
+      // Undo scheduled/ghost pending change when the client re-selects the current plan.
+      if (tenant.pending_plan_tier || tenant.pending_plan_payment_id) {
+        return this.cancelPendingPlanChange(tenant.id);
       }
 
       throw new BadRequestException('Você já está neste plano.');
@@ -1098,6 +1096,42 @@ export class BillingService {
       invoiceUrl,
       applied: false,
     });
+  }
+
+  /**
+   * Cancels a scheduled downgrade or pending upgrade payment and restores the
+   * current plan value on Asaas (B7 — Desfazer troca).
+   */
+  async cancelPendingPlanChange(tenantId: string): Promise<ChangePlanResult> {
+    this.ensureAsaasOutbound('subscriptions.update');
+
+    const tenant = await this.requireTenant(tenantId);
+
+    if (!tenant.pending_plan_tier && !tenant.pending_plan_payment_id) {
+      throw new BadRequestException('Não há troca de plano pendente.');
+    }
+
+    if (tenant.pending_plan_payment_id) {
+      await this.deletePaymentBestEffort(tenant.pending_plan_payment_id);
+    }
+
+    if (tenant.asaas_subscription_id) {
+      return this.restoreCurrentPlanPrice(tenant);
+    }
+
+    const updated = await this.requireSubscriptionUpdate(tenant.id, {
+      subscriptionStatus: tenant.subscription_status,
+      pendingPlanTier: null,
+      pendingPlanPaymentId: null,
+      pendingPlanInvoiceUrl: null,
+      pendingPlanEffectiveAt: null,
+    });
+
+    return this.toChangePlanResult(
+      updated,
+      this.buildChangePlanPreview(updated, normalizePlanTier(updated.plan_tier)),
+      { invoiceUrl: null, applied: true },
+    );
   }
 
   async cancelSubscription(tenantId: string): Promise<Tenant> {

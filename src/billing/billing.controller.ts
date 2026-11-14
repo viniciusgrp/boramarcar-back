@@ -118,6 +118,17 @@ export class BillingController {
     return this.billingService.changePlan(tenant.id, dto.planTier);
   }
 
+  /** Cancels a scheduled downgrade / pending upgrade (Desfazer troca). */
+  @Post('change-plan/cancel-pending')
+  @SkipTenantAccessCheck()
+  @UseGuards(AuthGuard)
+  async cancelPendingPlanChange(
+    @CurrentUser() user: User,
+  ): Promise<ChangePlanResult> {
+    const tenant = await this.resolveOwnerTenant(user.id);
+    return this.billingService.cancelPendingPlanChange(tenant.id);
+  }
+
   @Post('cancel')
   @SkipTenantAccessCheck()
   @UseGuards(AuthGuard)
