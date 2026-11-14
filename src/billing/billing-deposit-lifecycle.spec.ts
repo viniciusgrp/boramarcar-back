@@ -62,6 +62,10 @@ describe('BillingService deposit lifecycle', () => {
         minutesToExpire: 30,
         externalReference: 'deposit:appt-1',
         splits: [{ walletId: 'wal_1', percentageValue: 95 }],
+        customerData: {
+          name: 'Ana',
+          phone: '11999999999',
+        },
         items: [
           expect.objectContaining({
             name: 'Sinal: Studio',
@@ -71,6 +75,52 @@ describe('BillingService deposit lifecycle', () => {
             value: 50,
           }),
         ],
+      }),
+    );
+  });
+
+  it('prefills deposit checkout with email and phone when available', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/2',
+    });
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
+    );
+
+    await service.createDepositCheckoutSession({
+      appointmentId: 'appt-2',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 20,
+      accessToken: 'token',
+      customerName: 'Ana Paula',
+      customerPhone: '(11) 98888-7777',
+      customerEmail: 'ana@example.com',
+    });
+
+    expect(createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerData: {
+          name: 'Ana Paula',
+          phone: '11988887777',
+          email: 'ana@example.com',
+        },
       }),
     );
   });

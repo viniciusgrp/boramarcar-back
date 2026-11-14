@@ -165,6 +165,13 @@ export class AsaasClient implements OnModuleInit {
     splits?: Array<{ walletId: string; percentageValue: number }>;
     externalReference: string;
     customer?: string;
+    /** Prefill checkout form. Do not send together with `customer`. */
+    customerData?: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      cpfCnpj?: string;
+    };
   }): Promise<AsaasCheckout> {
     return this.request<AsaasCheckout>('POST', '/checkouts', payload);
   }
