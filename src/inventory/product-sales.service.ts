@@ -163,6 +163,9 @@ export class ProductSalesService {
       await this.assertAppointmentBelongsToTenant(dto.appointmentId, tenantId);
     }
 
+    const cashRegisterId =
+      await this.financeService.resolveOpenCashRegisterId(tenantId);
+
     const { data: sale, error: saleError } = await this.supabaseService
       .getClient()
       .from('product_sales')
@@ -174,6 +177,7 @@ export class ProductSalesService {
         customer_name: dto.customerName?.trim() || null,
         customer_phone: dto.customerPhone?.trim() || null,
         payment_method: dto.paymentMethod ?? 'CASH',
+        cash_register_id: cashRegisterId,
         subtotal_amount: subtotalAmount,
         discount_amount: discountAmount,
         total_amount: totalAmount,
@@ -239,6 +243,7 @@ export class ProductSalesService {
       productSaleId: saleId,
       appointmentId: dto.appointmentId?.trim() || null,
       paymentMethod: dto.paymentMethod ?? 'CASH',
+      cashRegisterId,
       professionalId: dto.professionalId?.trim() || null,
       totalAmount,
       commissionAmount,

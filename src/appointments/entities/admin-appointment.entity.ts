@@ -21,7 +21,15 @@ export interface AdminAppointment {
   depositAmount: number | null;
   depositPaid: boolean;
   depositPaidAmount: number;
+  /** Service balance only (deposit-aware). Never includes linked product sales. */
   balanceDue: number;
+  /**
+   * Amount to suggest when concluding: same as balanceDue (service only).
+   * Linked products are already paid via PRODUCT_SALE — do not add them.
+   */
+  suggestedPaymentAmount: number;
+  /** Sum of completed product_sales linked to this appointment (already in cash). */
+  linkedProductSalesTotal: number;
   paymentStatus: PaymentStatus;
   paymentBadge: AppointmentPaymentBadge;
   bookingSource: BookingSource;

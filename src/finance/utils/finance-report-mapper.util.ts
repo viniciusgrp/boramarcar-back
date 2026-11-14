@@ -1,7 +1,6 @@
 import type { AppointmentStatus } from '../../appointments/entities/appointment.entity';
 import { APPOINTMENT_STATUSES } from '../../appointments/entities/appointment.entity';
 import type { BookingSource } from '../../appointments/entities/booking-source.type';
-import { formatAppInstantAsWallClockIso } from '../../common/format-app-instant.util';
 import type {
   FinanceReportAppointment,
   FinanceReportProductSale,
@@ -114,8 +113,8 @@ export function mapFinanceReportProductSale(row: {
 
   return {
     id: row.id,
-    // Real timestamptz → SP wall-clock digits (B4). Do not touch appointmentStartTime.
-    createdAt: formatAppInstantAsWallClockIso(row.created_at),
+    // Real timestamptz as UTC ISO — front formats once in America/Sao_Paulo (B4).
+    createdAt: row.created_at,
     appointmentStartTime,
     status: row.status === 'CANCELLED' ? 'CANCELLED' : 'COMPLETED',
     customerName: row.customer_name?.trim() || null,
