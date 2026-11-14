@@ -1208,9 +1208,15 @@ export class AppointmentsService {
 
     const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
 
+    const mapped = rows.map((row) => this.mapAdminAppointmentRow(row));
+    const withProducts = await this.enrichAdminAppointmentsWithProductSales(
+      tenantId,
+      mapped,
+    );
+
     return this.enrichAdminAppointmentsWithLoyaltyPoints(
       tenantId,
-      rows.map((row) => this.mapAdminAppointmentRow(row)),
+      withProducts,
       rows,
     );
   }
@@ -2936,12 +2942,65 @@ export class AppointmentsService {
     }
 
     const row = data as SupabaseAppointmentWithRelations;
-    const [enriched] = await this.enrichAdminAppointmentsWithLoyaltyPoints(
+    const [withProducts] = await this.enrichAdminAppointmentsWithProductSales(
       tenantId,
       [this.mapAdminAppointmentRow(row)],
+    );
+    const [enriched] = await this.enrichAdminAppointmentsWithLoyaltyPoints(
+      tenantId,
+      [withProducts ?? this.mapAdminAppointmentRow(row)],
       [row],
     );
     return enriched ?? null;
+  }
+
+  private async enrichAdminAppointmentsWithProductSales(
+    tenantId: string,
+    appointments: AdminAppointment[],
+  ): Promise<AdminAppointment[]> {
+    if (appointments.length === 0) {
+      return appointments;
+    }
+
+    const ids = appointments.map((appointment) => appointment.id);
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('product_sales')
+      .select('appointment_id, total_amount, status')
+      .eq('tenant_id', tenantId)
+      .in('appointment_id', ids)
+      .eq('status', 'COMPLETED');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const saleRows = Array.isArray(data) ? data : data ? [data] : [];
+    const totals = new Map<string, number>();
+
+    for (const row of saleRows) {
+      const appointmentId =
+        typeof row.appointment_id === 'string' ? row.appointment_id : '';
+      if (!appointmentId) {
+        continue;
+      }
+
+      const amount = Math.round(Number(row.total_amount ?? 0) * 100) / 100;
+      totals.set(appointmentId, (totals.get(appointmentId) ?? 0) + amount);
+    }
+
+    return appointments.map((appointment) => {
+      const linkedProductSalesTotal = Math.round(
+        (totals.get(appointment.id) ?? 0) * 100,
+      ) / 100;
+
+      return {
+        ...appointment,
+        linkedProductSalesTotal,
+        // Products are already cashed as PRODUCT_SALE — never inflate suggestion.
+        suggestedPaymentAmount: appointment.balanceDue,
+      };
+    });
   }
 
   private async enrichAdminAppointmentsWithLoyaltyPoints(
@@ -3469,6 +3528,8 @@ export class AppointmentsService {
       depositPaid: payment.depositPaid,
       depositPaidAmount: payment.depositPaidAmount,
       balanceDue: payment.balanceDue,
+      suggestedPaymentAmount: payment.balanceDue,
+      linkedProductSalesTotal: 0,
       paymentStatus: payment.paymentStatus,
       paymentBadge: payment.paymentBadge,
       bookingSource: this.normalizeBookingSource(row.booking_source),

@@ -114,6 +114,8 @@ export interface CreateDepositCheckoutSessionParams {
   customerName: string;
   customerPhone: string;
   customerEmail?: string | null;
+  /** Only used for Asaas prefill when already known; never invent a CPF. */
+  customerCpfCnpj?: string | null;
 }
 
 const PAID_PAYMENT_STATUSES = new Set(['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH']);
@@ -1443,6 +1445,9 @@ export class BillingService {
     );
     const checkoutItem = buildDepositCheckoutItemCopy(params.tenantName);
 
+    // Do not send partial customerData: Asaas then requires cpfCnpj + address and
+    // blocks checkout for clients without CPF/address. Hosted checkout collects
+    // missing fields. Only send a complete identification payload (incl. CPF).
     const customerData = this.buildDepositCheckoutCustomerData(params);
 
     try {
@@ -1486,19 +1491,31 @@ export class BillingService {
     }
   }
 
+  /**
+   * Prefill only when we already have a CPF. Name/email/phone alone make Asaas
+   * demand address fields and break checkout for guests without CPF/address.
+   */
   private buildDepositCheckoutCustomerData(
     params: CreateDepositCheckoutSessionParams,
-  ): { name?: string; email?: string; phone?: string } | null {
+  ): {
+    name?: string;
+    email?: string;
+    phone?: string;
+    cpfCnpj?: string;
+  } | null {
+    const cpfDigits = params.customerCpfCnpj?.replace(/\D/g, '') ?? '';
+
+    if (cpfDigits.length !== 11 && cpfDigits.length !== 14) {
+      return null;
+    }
+
     const name = params.customerName?.trim() || undefined;
     const email = params.customerEmail?.trim() || undefined;
     const phoneDigits = params.customerPhone?.replace(/\D/g, '') || '';
     const phone = phoneDigits.length >= 10 ? phoneDigits : undefined;
 
-    if (!name && !email && !phone) {
-      return null;
-    }
-
     return {
+      cpfCnpj: cpfDigits,
       ...(name ? { name } : {}),
       ...(email ? { email } : {}),
       ...(phone ? { phone } : {}),

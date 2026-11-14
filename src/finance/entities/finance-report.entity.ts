@@ -34,10 +34,7 @@ export interface FinanceReportAppointment {
 
 export interface FinanceReportProductSale {
   id: string;
-  /**
-   * Real sale instant, formatted as America/Sao_Paulo wall-clock digits
-   * (`…THH:mm:ss.000Z`). Not the appointment clock.
-   */
+  /** Real sale timestamptz as UTC ISO. Front formats once in America/Sao_Paulo. */
   createdAt: string;
   /**
    * Appointment wall-clock start when the sale is linked to a booking;

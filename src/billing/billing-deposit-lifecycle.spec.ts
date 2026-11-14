@@ -62,10 +62,6 @@ describe('BillingService deposit lifecycle', () => {
         minutesToExpire: 30,
         externalReference: 'deposit:appt-1',
         splits: [{ walletId: 'wal_1', percentageValue: 95 }],
-        customerData: {
-          name: 'Ana',
-          phone: '11999999999',
-        },
         items: [
           expect.objectContaining({
             name: 'Sinal: Studio',
@@ -77,9 +73,10 @@ describe('BillingService deposit lifecycle', () => {
         ],
       }),
     );
+    expect(createCheckout.mock.calls[0][0].customerData).toBeUndefined();
   });
 
-  it('prefills deposit checkout with email and phone when available', async () => {
+  it('does not send customerData without CPF so Asaas hosted form can open', async () => {
     const createCheckout = jest.fn().mockResolvedValue({
       link: 'https://asaas.com/c/2',
     });
@@ -102,7 +99,7 @@ describe('BillingService deposit lifecycle', () => {
       { createCheckout } as never,
     );
 
-    await service.createDepositCheckoutSession({
+    const result = await service.createDepositCheckoutSession({
       appointmentId: 'appt-2',
       tenantId: 'tenant-1',
       tenantName: 'Studio',
@@ -114,9 +111,50 @@ describe('BillingService deposit lifecycle', () => {
       customerEmail: 'ana@example.com',
     });
 
+    expect(result.url).toBe('https://asaas.com/c/2');
+    expect(createCheckout.mock.calls[0][0].customerData).toBeUndefined();
+  });
+
+  it('prefills deposit checkout only when CPF is already known', async () => {
+    const createCheckout = jest.fn().mockResolvedValue({
+      link: 'https://asaas.com/c/3',
+    });
+    const service = new BillingService(
+      {
+        get: (key: string) =>
+          ({
+            APP_ENV: 'production',
+            ASAAS_DEPOSIT_SUCCESS_URL: 'http://localhost/ok',
+            ASAAS_DEPOSIT_CANCEL_URL: 'http://localhost/cancel',
+            ASAAS_DEPOSIT_APPLICATION_FEE_PERCENT: '5',
+          })[key],
+      } as unknown as ConfigService,
+      {
+        findById: jest.fn().mockResolvedValue(buildTenant()),
+      } as unknown as TenantsService,
+      { getClient: () => ({ from: () => createChainableQuery({ data: null, error: null }) }) } as never,
+      {} as never,
+      {} as never,
+      { createCheckout } as never,
+    );
+
+    await service.createDepositCheckoutSession({
+      appointmentId: 'appt-3',
+      tenantId: 'tenant-1',
+      tenantName: 'Studio',
+      tenantSlug: 'studio',
+      depositAmountBrl: 20,
+      accessToken: 'token',
+      customerName: 'Ana Paula',
+      customerPhone: '(11) 98888-7777',
+      customerEmail: 'ana@example.com',
+      customerCpfCnpj: '249.715.637-92',
+    });
+
     expect(createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         customerData: {
+          cpfCnpj: '24971563792',
           name: 'Ana Paula',
           phone: '11988887777',
           email: 'ana@example.com',

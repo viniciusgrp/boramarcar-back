@@ -165,7 +165,10 @@ export class AsaasClient implements OnModuleInit {
     splits?: Array<{ walletId: string; percentageValue: number }>;
     externalReference: string;
     customer?: string;
-    /** Prefill checkout form. Do not send together with `customer`. */
+    /**
+     * Prefill checkout form. Do not send together with `customer`.
+     * Incomplete payloads (name/phone without CPF) make Asaas require address.
+     */
     customerData?: {
       name?: string;
       email?: string;

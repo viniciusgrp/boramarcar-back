@@ -38,10 +38,10 @@ import {
   mapFinanceReportProductSale,
   productSaleEffectiveAt,
 } from './utils/finance-report-mapper.util';
-import { formatAppInstantAsWallClockIso } from '../common/format-app-instant.util';
 import { buildAppointmentCommissionServiceLines } from '../appointments/utils/appointment-commission.util';
 import { calculateAppointmentCommissionAmount } from '../services/utils/service-commission.util';
 import { CashRegisterService } from './cash-register.service';
+import { cashFlowCategoryLabel } from './utils/cash-flow-category-label.util';
 
 interface EmployeePayoutStatusRow {
   appointment_id: string | null;
@@ -275,25 +275,34 @@ export class FinanceService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []).map((row) => ({
-      id: String(row.id),
-      type: row.type === 'EXPENSE' ? 'EXPENSE' : 'REVENUE',
-      amount: this.roundCurrency(Number(row.amount ?? 0)),
-      description: String(row.description ?? ''),
-      category: String(row.category ?? ''),
-      paymentMethod:
-        typeof row.payment_method === 'string' ? row.payment_method : null,
-      appointmentId:
-        typeof row.appointment_id === 'string' ? row.appointment_id : null,
-      productSaleId:
-        typeof row.product_sale_id === 'string' ? row.product_sale_id : null,
-      cashRegisterId:
-        typeof row.cash_register_id === 'string' ? row.cash_register_id : null,
-      // Real timestamptz → SP wall-clock digits (same convention as product sale createdAt).
-      createdAt: formatAppInstantAsWallClockIso(
-        typeof row.created_at === 'string' ? row.created_at : '',
-      ),
-    }));
+    return (data ?? []).map((row) => {
+      const category = String(row.category ?? '');
+
+      return {
+        id: String(row.id),
+        type: row.type === 'EXPENSE' ? 'EXPENSE' : 'REVENUE',
+        amount: this.roundCurrency(Number(row.amount ?? 0)),
+        description: String(row.description ?? ''),
+        category,
+        categoryLabel: cashFlowCategoryLabel(category),
+        paymentMethod:
+          typeof row.payment_method === 'string' ? row.payment_method : null,
+        appointmentId:
+          typeof row.appointment_id === 'string' ? row.appointment_id : null,
+        productSaleId:
+          typeof row.product_sale_id === 'string' ? row.product_sale_id : null,
+        cashRegisterId:
+          typeof row.cash_register_id === 'string' ? row.cash_register_id : null,
+        // Real timestamptz as UTC ISO — front formats once in America/Sao_Paulo.
+        createdAt: String(row.created_at ?? ''),
+      };
+    });
+  }
+
+  async resolveOpenCashRegisterId(
+    tenantId: string,
+  ): Promise<string | null> {
+    return this.cashRegisterService.resolveOpenCashRegisterId(tenantId);
   }
 
   async getPayoutsSummary(
@@ -698,13 +707,15 @@ export class FinanceService {
     productSaleId: string;
     appointmentId?: string | null;
     paymentMethod?: string | null;
+    cashRegisterId?: string | null;
     professionalId: string | null;
     totalAmount: number;
     commissionAmount: number;
     enablePayoutControl: boolean;
   }): Promise<void> {
     const cashRegisterId =
-      await this.cashRegisterService.resolveOpenCashRegisterId(params.tenantId);
+      params.cashRegisterId?.trim() ||
+      (await this.cashRegisterService.resolveOpenCashRegisterId(params.tenantId));
     const revenueAmount = this.roundCurrency(params.totalAmount);
 
     if (revenueAmount > 0) {
