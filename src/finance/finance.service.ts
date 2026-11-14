@@ -24,7 +24,10 @@ import type {
   CommissionReportResponse,
   ProfessionalCommissionSummary,
 } from './entities/professional-commission-summary.entity';
-import type { CashFlowSummary } from './entities/cash-flow-entry.entity';
+import type {
+  CashFlowLedgerEntry,
+  CashFlowSummary,
+} from './entities/cash-flow-entry.entity';
 import type { PayoutSummaryResponse } from './entities/employee-payout.entity';
 import type { PendingPayoutServicesResponse } from './entities/employee-payout.entity';
 import { normalizePayoutFrequency } from '../tenants/entities/payout-frequency.type';
@@ -237,6 +240,55 @@ export class FinanceService {
       totalExpenses,
       netProfit: this.roundCurrency(totalRevenue - totalExpenses),
     };
+  }
+
+  async listCashFlowEntries(
+    tenantId: string,
+    planTier: PlanTier,
+  ): Promise<CashFlowLedgerEntry[]> {
+    this.assertFinanceAccess(planTier);
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('cash_flow_entries')
+      .select(
+        `
+        id,
+        type,
+        amount,
+        description,
+        category,
+        payment_method,
+        appointment_id,
+        product_sale_id,
+        cash_register_id,
+        created_at
+      `,
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      type: row.type === 'EXPENSE' ? 'EXPENSE' : 'REVENUE',
+      amount: this.roundCurrency(Number(row.amount ?? 0)),
+      description: String(row.description ?? ''),
+      category: String(row.category ?? ''),
+      paymentMethod:
+        typeof row.payment_method === 'string' ? row.payment_method : null,
+      appointmentId:
+        typeof row.appointment_id === 'string' ? row.appointment_id : null,
+      productSaleId:
+        typeof row.product_sale_id === 'string' ? row.product_sale_id : null,
+      cashRegisterId:
+        typeof row.cash_register_id === 'string' ? row.cash_register_id : null,
+      createdAt: String(row.created_at ?? ''),
+    }));
   }
 
   async getPayoutsSummary(
@@ -922,18 +974,12 @@ export class FinanceService {
         professional_id,
         total_amount,
         commission_amount,
-        professionals ( name )
+        professionals ( name ),
+        appointments ( start_time )
       `,
       )
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
-
-    if (filters.startDate && filters.endDate) {
-      const range = this.resolveDateRange(filters.startDate, filters.endDate);
-      query = query
-        .gte('created_at', range.startIso)
-        .lte('created_at', range.endIso);
-    }
 
     if (filters.professionalId) {
       query = query.eq('professional_id', filters.professionalId);
@@ -953,11 +999,28 @@ export class FinanceService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []).map((row) =>
+    const mapped = (data ?? []).map((row) =>
       mapFinanceReportProductSale(
         row as Parameters<typeof mapFinanceReportProductSale>[0],
       ),
     );
+
+    if (!filters.startDate || !filters.endDate) {
+      return mapped;
+    }
+
+    // Filter by the effective report date (appointment day when linked).
+    const range = this.resolveDateRange(filters.startDate, filters.endDate);
+    const startMs = Date.parse(range.startIso);
+    const endMs = Date.parse(range.endIso);
+
+    return mapped.filter((sale) => {
+      const saleMs = Date.parse(sale.createdAt);
+      if (!Number.isFinite(saleMs)) {
+        return false;
+      }
+      return saleMs >= startMs && saleMs <= endMs;
+    });
   }
 
   private async resolveAppointmentIdsForService(

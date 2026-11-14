@@ -35,6 +35,7 @@ import {
   applyCouponDiscountToLoyaltyPrices,
   buildAppointmentLoyaltyServiceLines,
 } from './utils/appointment-loyalty.util';
+import { calculateAppointmentLoyaltyPoints } from '../services/utils/service-loyalty-points.util';
 import { assertAppointmentStartHasPassed } from './utils/appointment-completion.util';
 import {
   resolveAppointmentPaymentView,
@@ -1207,7 +1208,11 @@ export class AppointmentsService {
 
     const rows = (data ?? []) as SupabaseAppointmentWithRelations[];
 
-    return rows.map((row) => this.mapAdminAppointmentRow(row));
+    return this.enrichAdminAppointmentsWithLoyaltyPoints(
+      tenantId,
+      rows.map((row) => this.mapAdminAppointmentRow(row)),
+      rows,
+    );
   }
 
   async findConflictingAppointmentsForAbsenceRange(
@@ -2927,7 +2932,55 @@ export class AppointmentsService {
       return null;
     }
 
-    return this.mapAdminAppointmentRow(data as SupabaseAppointmentWithRelations);
+    const row = data as SupabaseAppointmentWithRelations;
+    const [enriched] = await this.enrichAdminAppointmentsWithLoyaltyPoints(
+      tenantId,
+      [this.mapAdminAppointmentRow(row)],
+      [row],
+    );
+    return enriched ?? null;
+  }
+
+  private async enrichAdminAppointmentsWithLoyaltyPoints(
+    tenantId: string,
+    appointments: AdminAppointment[],
+    rows: SupabaseAppointmentWithRelations[],
+  ): Promise<AdminAppointment[]> {
+    if (appointments.length === 0) {
+      return appointments;
+    }
+
+    const settings = await this.loyaltyService.getSettingsForTenant(tenantId);
+
+    return appointments.map((appointment, index) => {
+      if (!settings.is_active || appointment.paidWithPoints) {
+        return { ...appointment, estimatedLoyaltyPoints: 0 };
+      }
+
+      const row = rows[index];
+      const lines = row
+        ? applyCouponDiscountToLoyaltyPrices(
+            buildAppointmentLoyaltyServiceLines(
+              row as Parameters<typeof buildAppointmentLoyaltyServiceLines>[0],
+            ),
+            appointment.couponDiscountAmount,
+          )
+        : [
+            {
+              price: appointment.totalPrice,
+              loyaltyPointsEarned: null,
+            },
+          ];
+
+      return {
+        ...appointment,
+        estimatedLoyaltyPoints: calculateAppointmentLoyaltyPoints(
+          lines,
+          settings.points_per_currency,
+          settings.default_service_points,
+        ),
+      };
+    });
   }
 
   private extractServiceDuration(
@@ -3408,6 +3461,7 @@ export class AppointmentsService {
       paymentBadge: payment.paymentBadge,
       bookingSource: this.normalizeBookingSource(row.booking_source),
       paidWithPoints: Boolean(row.loyalty_reward_id),
+      estimatedLoyaltyPoints: 0,
       couponCode: couponFields.couponCode,
       couponDiscountAmount: couponFields.couponDiscountAmount,
     };

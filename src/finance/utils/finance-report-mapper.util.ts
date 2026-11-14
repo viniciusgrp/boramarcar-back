@@ -80,7 +80,8 @@ export function recognizedAmountForStatus(
   status: string,
   amount: number,
 ): { recognizedRevenue: number; countsTowardRevenue: boolean } {
-  const countsTowardRevenue = status !== 'CANCELLED' && status !== 'NO_SHOW';
+  // Only completed items count toward billing ("Conta no faturamento").
+  const countsTowardRevenue = status === 'COMPLETED';
 
   return {
     countsTowardRevenue,
@@ -97,13 +98,22 @@ export function mapFinanceReportProductSale(row: {
   total_amount?: number | null;
   commission_amount?: number | null;
   professionals?: RelationName;
+  appointments?:
+    | { start_time?: string | null }
+    | { start_time?: string | null }[]
+    | null;
 }): FinanceReportProductSale {
   const totalAmount = roundCurrency(Number(row.total_amount ?? 0));
   const counts = recognizedAmountForStatus(row.status, totalAmount);
+  const appointmentRelation = Array.isArray(row.appointments)
+    ? row.appointments[0]
+    : row.appointments;
+  const appointmentStart = appointmentRelation?.start_time?.trim() || null;
 
   return {
     id: row.id,
-    createdAt: row.created_at,
+    // Linked sales use the appointment wall-clock day, not the sale timestamp.
+    createdAt: appointmentStart || row.created_at,
     status: row.status === 'CANCELLED' ? 'CANCELLED' : 'COMPLETED',
     customerName: row.customer_name?.trim() || null,
     professionalId: row.professional_id?.trim() || null,
