@@ -237,6 +237,8 @@ export class ProductSalesService {
     await this.financeService.recordProductSaleCashFlow({
       tenantId,
       productSaleId: saleId,
+      appointmentId: dto.appointmentId?.trim() || null,
+      paymentMethod: dto.paymentMethod ?? 'CASH',
       professionalId: dto.professionalId?.trim() || null,
       totalAmount,
       commissionAmount,

@@ -692,6 +692,8 @@ export class FinanceService {
   async recordProductSaleCashFlow(params: {
     tenantId: string;
     productSaleId: string;
+    appointmentId?: string | null;
+    paymentMethod?: string | null;
     professionalId: string | null;
     totalAmount: number;
     commissionAmount: number;
@@ -708,6 +710,9 @@ export class FinanceService {
         .insert({
           tenant_id: params.tenantId,
           cash_register_id: cashRegisterId,
+          product_sale_id: params.productSaleId,
+          appointment_id: params.appointmentId?.trim() || null,
+          payment_method: params.paymentMethod?.trim() || null,
           type: 'REVENUE',
           amount: revenueAmount,
           description: 'Receita de venda de produtos',

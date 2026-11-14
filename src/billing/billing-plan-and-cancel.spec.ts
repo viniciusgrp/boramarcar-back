@@ -649,4 +649,69 @@ describe('BillingService plan changes and period-end cancel', () => {
       BadRequestException,
     );
   });
+
+  it('cancels a scheduled downgrade and restores the current Asaas value (B7)', async () => {
+    const updateSubscription = jest.fn().mockResolvedValue({});
+    const cleared = buildTenant({ pending_plan_tier: null });
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(cleared);
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            plan_tier: 'ELITE',
+            pending_plan_tier: 'PRO',
+            pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      { updateSubscription },
+    );
+
+    const result = await service.cancelPendingPlanChange('tenant-1');
+
+    expect(updateSubscription).toHaveBeenCalledWith(
+      'sub_1',
+      expect.objectContaining({ value: 120, updatePendingPayments: true }),
+    );
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({
+        pendingPlanTier: null,
+        pendingPlanPaymentId: null,
+        pendingPlanInvoiceUrl: null,
+        pendingPlanEffectiveAt: null,
+      }),
+    );
+    expect(result.applied).toBe(true);
+    expect(result.tenant.pending_plan_tier).toBeNull();
+  });
+
+  it('clears a ghost pending_plan when changePlan targets the current tier', async () => {
+    const updateSubscription = jest.fn().mockResolvedValue({});
+    const updateSubscriptionByTenantId = jest.fn().mockResolvedValue(
+      buildTenant({ pending_plan_tier: null }),
+    );
+    const { service } = buildService(
+      {
+        findById: jest.fn().mockResolvedValue(
+          buildTenant({
+            plan_tier: 'PRO',
+            pending_plan_tier: 'PRO',
+            pending_plan_effective_at: '2026-12-27T03:00:00.000Z',
+          }),
+        ),
+        updateSubscriptionByTenantId,
+      },
+      { updateSubscription },
+    );
+
+    const result = await service.changePlan('tenant-1', 'PRO');
+
+    expect(result.applied).toBe(true);
+    expect(updateSubscriptionByTenantId).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ pendingPlanTier: null }),
+    );
+  });
 });

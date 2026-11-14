@@ -2014,11 +2014,14 @@ export class AppointmentsService {
             ? existing.payment_status
             : null,
       });
+      // Appointment cash must stay within the service balance (deposit-aware).
+      // Linked product sales already post as PRODUCT_SALE — never inflate APPOINTMENT.
       const requestedAmount = payment?.paymentAmount;
-      const amountToRecord =
+      const parsedRequested =
         requestedAmount === null || requestedAmount === undefined
           ? paymentView.balanceDue
           : Math.round(Number(requestedAmount) * 100) / 100;
+      const amountToRecord = Math.min(parsedRequested, paymentView.balanceDue);
 
       if (!Number.isFinite(amountToRecord) || amountToRecord < 0) {
         throw new BadRequestException('Informe um valor recebido válido.');
