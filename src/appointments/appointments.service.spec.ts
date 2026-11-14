@@ -143,6 +143,7 @@ function buildService() {
     billingService,
     loyaltyService,
     couponsService,
+    customersService,
     depositPaymentService,
     mailService,
   };
@@ -1224,6 +1225,111 @@ describe('AppointmentsService', () => {
           serviceIds: ['svc-1'],
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('customer and guest payment fields', () => {
+    const paidDepositRow = {
+      id: 'appt-1',
+      customer_id: 'cust-1',
+      professional_id: 'pro-1',
+      service_id: 'svc-1',
+      customer_name: 'Ana',
+      customer_phone: '11999999999',
+      start_time: '2099-01-15T10:00:00',
+      end_time: '2099-01-15T11:00:00',
+      status: 'CONFIRMED',
+      booking_source: 'ONLINE',
+      total_duration_minutes: 60,
+      total_price: 80,
+      loyalty_reward_id: null,
+      coupon_id: null,
+      coupon_discount_amount: null,
+      deposit_paid: true,
+      deposit_amount: 20,
+      payment_status: 'PAID',
+      cancellation_requested_at: null,
+      guest_access_token: 'guest-token',
+      professionals: { name: 'João' },
+      services: { name: 'Corte', duration_minutes: 60, price: 80 },
+      coupons: null,
+      appointment_services: [
+        {
+          service_id: 'svc-1',
+          sort_order: 0,
+          duration_minutes: 60,
+          price: 80,
+          services: { name: 'Corte' },
+        },
+      ],
+    };
+
+    it('includes depositPaid fields on guest appointment lookup', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({
+          reviews_enabled: false,
+          allow_customer_self_cancellation: true,
+          allow_customer_reschedule: true,
+        }),
+      );
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: [paidDepositRow], error: null }),
+      );
+
+      const result = await ctx.service.findGuestAppointments({
+        tenantId: 'tenant-1',
+        entries: [{ appointmentId: 'appt-1', accessToken: 'guest-token' }],
+        scope: 'upcoming',
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        id: 'appt-1',
+        depositPaid: true,
+        depositPaidAmount: 20,
+        balanceDue: 60,
+      });
+    });
+
+    it('includes depositPaid fields on customer my/all groups', async () => {
+      const ctx = buildService();
+      ctx.tenantsService.findById.mockResolvedValue(
+        buildTenant({ reviews_enabled: false }),
+      );
+      ctx.customersService.findAllByAuthUserId = jest.fn().mockResolvedValue([
+        {
+          isProfileComplete: true,
+          tenantId: 'tenant-1',
+          tenantName: 'Studio',
+          tenantSlug: 'studio',
+          allowCustomerSelfCancellation: true,
+          allowCustomerReschedule: true,
+          customer: { id: 'cust-1', phone: '11999999999' },
+        },
+      ]);
+      ctx.customersService.expandCustomerIdsByPhone = jest
+        .fn()
+        .mockResolvedValue({
+          customerIds: ['cust-1'],
+          tenantByCustomerId: new Map([
+            ['cust-1', { primaryCustomerId: 'cust-1' }],
+          ]),
+        });
+      ctx.from.mockReturnValue(
+        createChainableQuery({ data: [paidDepositRow], error: null }),
+      );
+
+      const groups = await ctx.service.findAllForCustomer('auth-1', 'upcoming');
+
+      expect(groups).toHaveLength(1);
+      expect(groups[0].appointments).toHaveLength(1);
+      expect(groups[0].appointments[0]).toMatchObject({
+        id: 'appt-1',
+        depositPaid: true,
+        depositPaidAmount: 20,
+        balanceDue: 60,
+      });
     });
   });
 });
