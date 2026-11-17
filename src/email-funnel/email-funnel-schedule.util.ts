@@ -1,5 +1,6 @@
 import {
   EMAIL_FUNNEL_MAX_LATENESS_HOURS,
+  EMAIL_FUNNEL_MIN_HOURS_BETWEEN_SENDS,
   EMAIL_FUNNEL_TIME_ZONE,
 } from './email-funnel.types';
 import type {
@@ -133,6 +134,19 @@ export function resolveEmailFunnelStepDueStatus(params: {
   }
 
   return 'due';
+}
+
+export function shouldHoldEmailFunnelSend(
+  lastSentAt: Date | null,
+  now: Date,
+  minHours: number = EMAIL_FUNNEL_MIN_HOURS_BETWEEN_SENDS,
+): boolean {
+  if (!lastSentAt) {
+    return false;
+  }
+
+  const gapMs = minHours * 60 * 60 * 1000;
+  return now.getTime() - lastSentAt.getTime() < gapMs;
 }
 
 export function isEmailFunnelStepDue(params: {
