@@ -24,6 +24,7 @@ describe('background-pattern.util', () => {
       DEFAULT_BACKGROUND_PATTERN_ID,
     );
     expect(normalizeBackgroundPatternId(null)).toBe(DEFAULT_BACKGROUND_PATTERN_ID);
+    expect(normalizeBackgroundPatternId('mystic')).toBe('mystic');
   });
 
   it('normalizes hex color and falls back to slate', () => {
