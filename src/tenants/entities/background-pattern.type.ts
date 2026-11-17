@@ -6,6 +6,7 @@ export const BACKGROUND_PATTERN_IDS = [
   'clinic',
   'pet',
   'neutral',
+  'mystic',
 ] as const;
 
 export type BackgroundPatternId = (typeof BACKGROUND_PATTERN_IDS)[number];
