@@ -3,6 +3,13 @@ export const EMAIL_FUNNEL_TIME_ZONE = 'America/Sao_Paulo';
 /** Max hours after dueAt that a non-immediate step may still send. Past this → skip as `stale`. */
 export const EMAIL_FUNNEL_MAX_LATENESS_HOURS = 24;
 
+/**
+ * Minimum hours between two successful funnel sends for the same tenant.
+ * Matches the shortest planned gap (welcome → nudge, 18h). Stops a catch-up
+ * or a same-day schedule from dumping the sequence in one evening.
+ */
+export const EMAIL_FUNNEL_MIN_HOURS_BETWEEN_SENDS = 18;
+
 export const EMAIL_FUNNEL_STEP_KEYS = [
   'welcome',
   'nudge_agenda',

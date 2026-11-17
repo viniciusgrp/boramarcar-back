@@ -19,7 +19,10 @@ import {
 } from './email-funnel-eligibility.util';
 import { shouldDeferWelcomeUntilOwnerEmailConfirmed } from './email-funnel-welcome-gate.util';
 import { buildEmailFunnelContent } from './email-funnel-html.util';
-import { resolveEmailFunnelStepDueStatus } from './email-funnel-schedule.util';
+import {
+  resolveEmailFunnelStepDueStatus,
+  shouldHoldEmailFunnelSend,
+} from './email-funnel-schedule.util';
 import type { UpdateEmailFunnelStepDto } from './dto/email-funnel.dto';
 import type {
   EmailFunnelSendListItem,
@@ -121,6 +124,10 @@ export class EmailFunnelService {
     for (const tenant of tenants) {
       const ownerDetails = await this.resolveOwnerDetails(tenant.owner_id);
       const setup = await this.resolveSetupFlags(tenant.id);
+      let holdSend = shouldHoldEmailFunnelSend(
+        await this.latestSentAt(tenant.id),
+        now,
+      );
 
       for (const step of steps) {
         const result = await this.processLoadedTenantStep({
@@ -133,9 +140,15 @@ export class EmailFunnelService {
           hasBusinessHours: setup.hasBusinessHours,
           hasPublicBooking: setup.hasPublicBooking,
           now,
+          holdSend,
         });
-        if (result === 'sent' || result === 'skipped' || result === 'failed') {
+        if (result === 'skipped') {
           processed += 1;
+        }
+        if (result === 'sent' || result === 'failed') {
+          processed += 1;
+          holdSend = true;
+          break;
         }
       }
     }
@@ -282,6 +295,7 @@ export class EmailFunnelService {
       hasBusinessHours: setup.hasBusinessHours,
       hasPublicBooking: setup.hasPublicBooking,
       now: new Date(),
+      holdSend: false,
     });
   }
 
@@ -295,6 +309,7 @@ export class EmailFunnelService {
     hasBusinessHours: boolean;
     hasPublicBooking: boolean;
     now: Date;
+    holdSend: boolean;
   }): Promise<'sent' | 'skipped' | 'failed' | 'ignored'> {
     if (
       shouldDeferWelcomeUntilOwnerEmailConfirmed({
@@ -377,6 +392,10 @@ export class EmailFunnelService {
     }
 
     if (eligibility !== 'send' || !params.ownerEmail) {
+      return 'ignored';
+    }
+
+    if (params.holdSend) {
       return 'ignored';
     }
 
@@ -641,6 +660,29 @@ export class EmailFunnelService {
       firstName,
       emailConfirmed: Boolean(data.user?.email_confirmed_at),
     };
+  }
+
+  private async latestSentAt(tenantId: string): Promise<Date | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('email_funnel_sends')
+      .select('sent_at')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'sent')
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data?.sent_at || typeof data.sent_at !== 'string') {
+      return null;
+    }
+
+    const sentAt = new Date(data.sent_at);
+    return Number.isNaN(sentAt.getTime()) ? null : sentAt;
   }
 
   private async hasSendRecord(

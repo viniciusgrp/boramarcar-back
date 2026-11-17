@@ -146,8 +146,13 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
     initial_setup_booking_link_shared_at: null,
   };
 
-  function buildService(options?: { emailConfirmedAt?: string | null }) {
-    const sentKeys = new Set<string>();
+  function buildService(options?: {
+    emailConfirmedAt?: string | null;
+    steps?: EmailFunnelStepRow[];
+    alreadySent?: string[];
+    lastSentAt?: string | null;
+  }) {
+    const sentKeys = new Set<string>(options?.alreadySent ?? []);
     const sendHtmlEmail = jest.fn().mockResolvedValue(undefined);
     const from = jest.fn((table: string) => {
       if (table === 'email_funnel_sends') {
@@ -159,13 +164,25 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
             return builder;
           },
           in: () => builder,
-          maybeSingle: () =>
-            Promise.resolve({
+          order: () => builder,
+          limit: () => builder,
+          maybeSingle: () => {
+            if (!filters.step_key) {
+              return Promise.resolve({
+                data: options?.lastSentAt
+                  ? { sent_at: options.lastSentAt }
+                  : null,
+                error: null,
+              });
+            }
+
+            return Promise.resolve({
               data: sentKeys.has(filters.step_key)
                 ? { id: filters.step_key }
                 : null,
               error: null,
-            }),
+            });
+          },
           upsert: (row: { step_key: string; status: string }) => {
             if (row.status === 'sent' || row.status === 'skipped') {
               sentKeys.add(row.step_key);
@@ -183,7 +200,11 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
               maybeSingle: () =>
                 Promise.resolve({ data: welcomeStep, error: null }),
             }),
-            order: () => Promise.resolve({ data: [welcomeStep], error: null }),
+            order: () =>
+              Promise.resolve({
+                data: options?.steps ?? [welcomeStep],
+                error: null,
+              }),
           }),
         };
       }
@@ -277,5 +298,61 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
 
     expect(processed).toBe(0);
     expect(sendHtmlEmail).not.toHaveBeenCalled();
+  });
+
+  it('does not send the rest of the sequence in the same evening as welcome', async () => {
+    const nudge: EmailFunnelStepRow = {
+      ...welcomeStep,
+      step_key: 'nudge_agenda',
+      step_number: 2,
+      subject: 'Já configurou sua agenda?',
+    };
+    const tutorial: EmailFunnelStepRow = {
+      ...welcomeStep,
+      step_key: 'tutorial',
+      step_number: 4,
+      subject: 'Vamos configurar sua agenda juntos',
+    };
+    const { service, sendHtmlEmail } = buildService({
+      emailConfirmedAt: '2026-11-16T22:33:00.000Z',
+      steps: [welcomeStep, nudge, tutorial],
+      alreadySent: ['welcome'],
+      lastSentAt: '2026-11-16T22:33:00.000Z',
+    });
+
+    const processed = await service.processDueEmails(
+      new Date('2026-11-16T23:00:00.000Z'),
+    );
+
+    expect(processed).toBe(0);
+    expect(sendHtmlEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends only the next due step once the gap has passed', async () => {
+    const nudge: EmailFunnelStepRow = {
+      ...welcomeStep,
+      step_key: 'nudge_agenda',
+      step_number: 2,
+      subject: 'Já configurou sua agenda?',
+    };
+    const tutorial: EmailFunnelStepRow = {
+      ...welcomeStep,
+      step_key: 'tutorial',
+      step_number: 4,
+      subject: 'Vamos configurar sua agenda juntos',
+    };
+    const { service, sendHtmlEmail } = buildService({
+      emailConfirmedAt: '2026-11-15T20:00:00.000Z',
+      steps: [welcomeStep, nudge, tutorial],
+      alreadySent: ['welcome'],
+      lastSentAt: '2026-11-15T20:00:00.000Z',
+    });
+
+    await service.processDueEmails(new Date('2026-11-16T23:00:00.000Z'));
+
+    expect(sendHtmlEmail).toHaveBeenCalledTimes(1);
+    expect(sendHtmlEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'Já configurou sua agenda?' }),
+    );
   });
 });

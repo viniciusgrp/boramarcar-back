@@ -1,6 +1,7 @@
 import {
   isEmailFunnelStepDue,
   resolveEmailFunnelStepDueStatus,
+  shouldHoldEmailFunnelSend,
 } from './email-funnel-schedule.util';
 
 describe('isEmailFunnelStepDue', () => {
@@ -399,5 +400,27 @@ describe('isEmailFunnelStepDue', () => {
     expect(isEmailFunnelStepDue({ ...shared, now: beforeDue })).toBe(false);
     expect(isEmailFunnelStepDue({ ...shared, now: atDue })).toBe(true);
     expect(welcomeSentLater.getTime()).toBeLessThan(atDue.getTime());
+  });
+});
+
+describe('shouldHoldEmailFunnelSend', () => {
+  const sentAt = new Date('2026-11-16T22:33:00.000Z');
+
+  it('holds the next email inside the 18h gap', () => {
+    expect(
+      shouldHoldEmailFunnelSend(sentAt, new Date('2026-11-16T23:00:00.000Z')),
+    ).toBe(true);
+  });
+
+  it('releases the next email once 18h have passed', () => {
+    expect(
+      shouldHoldEmailFunnelSend(sentAt, new Date('2026-11-17T16:33:00.000Z')),
+    ).toBe(false);
+  });
+
+  it('does not hold when nothing was sent yet', () => {
+    expect(
+      shouldHoldEmailFunnelSend(null, new Date('2026-11-16T23:00:00.000Z')),
+    ).toBe(false);
   });
 });
