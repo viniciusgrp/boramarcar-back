@@ -54,6 +54,7 @@ import { EmailFunnelService } from '../email-funnel/email-funnel.service';
 import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { isProductionAppEnv } from '../common/app-env.util';
+import { isValidBrazilianPhone } from '../common/utils/brazilian-phone.util';
 import { isDisposableEmail } from '../security/disposable-email.util';
 import { MetaCapiService } from '../tracking/meta-capi.service';
 import type { Request } from 'express';
@@ -857,6 +858,8 @@ export class TenantsService {
       );
     }
 
+    const contactPhone = this.requireContactPhone(dto.contact_phone);
+
     const existingSlug = await this.findBySlug(normalizedSlug);
 
     if (existingSlug) {
@@ -926,6 +929,7 @@ export class TenantsService {
         utm_content: trackingData.utmContent,
         fbclid: trackingData.fbclid,
         first_visit_at: trackingData.firstVisitAt,
+        contact_phone: contactPhone,
       })
       .select('*')
       .single();
@@ -949,6 +953,7 @@ export class TenantsService {
       tenantData.id as string,
       ownerId,
       ownerName,
+      contactPhone,
     );
 
     void this.notifyNewTenantSignup({
@@ -1030,6 +1035,8 @@ export class TenantsService {
       );
     }
 
+    const contactPhone = this.requireContactPhone(dto.contact_phone);
+
     const existingSlug = await this.findBySlug(normalizedSlug);
 
     if (existingSlug) {
@@ -1067,6 +1074,7 @@ export class TenantsService {
         utm_content: trackingData.utmContent,
         fbclid: trackingData.fbclid,
         first_visit_at: trackingData.firstVisitAt,
+        contact_phone: contactPhone,
       })
       .select('*')
       .single();
@@ -1088,6 +1096,7 @@ export class TenantsService {
       tenantData.id as string,
       userId,
       ownerName,
+      contactPhone,
     );
 
     await this.supabaseService.getClient().auth.admin.updateUserById(userId, {
@@ -1125,10 +1134,16 @@ export class TenantsService {
     tenantId: string,
     ownerUserId: string,
     ownerName: string,
+    contactPhone: string,
   ): Promise<void> {
     try {
       await this.seedDefaultBusinessHours(tenantId);
-      await this.seedOwnerProfessional(tenantId, ownerUserId, ownerName);
+      await this.seedOwnerProfessional(
+        tenantId,
+        ownerUserId,
+        ownerName,
+        contactPhone,
+      );
     } catch (error) {
       this.logger.warn(
         `Failed to seed default setup for tenant ${tenantId}: ${
@@ -1171,6 +1186,7 @@ export class TenantsService {
     tenantId: string,
     ownerUserId: string,
     ownerName: string,
+    contactPhone: string,
   ): Promise<void> {
     const name = ownerName.trim() || 'Profissional';
 
@@ -1180,7 +1196,7 @@ export class TenantsService {
       .insert({
         tenant_id: tenantId,
         name,
-        contact_phone: null,
+        contact_phone: contactPhone,
         avatar_url: null,
         commission_percent: 0,
         product_commission_percent: null,
@@ -1788,6 +1804,18 @@ export class TenantsService {
     }
 
     return data ? mapTenantRow(data as Tenant) : null;
+  }
+
+  private requireContactPhone(phone?: string | null): string {
+    const normalized = this.normalizeContactPhone(phone);
+
+    if (!normalized || !isValidBrazilianPhone(normalized, { required: true })) {
+      throw new BadRequestException(
+        'Informe um telefone ou WhatsApp válido com DDD.',
+      );
+    }
+
+    return normalized;
   }
 
   private normalizeContactPhone(phone?: string | null): string | null {

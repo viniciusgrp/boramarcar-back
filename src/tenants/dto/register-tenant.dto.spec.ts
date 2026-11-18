@@ -9,12 +9,14 @@ const baseRegisterBody = {
   password: 'senha123',
   tenant_name: 'Studio Maria',
   slug: 'studio-maria',
+  contact_phone: '11999998888',
 };
 
 const baseOnboardBody = {
   owner_name: 'Maria Silva',
   tenant_name: 'Studio Maria',
   slug: 'studio-maria',
+  contact_phone: '11999998888',
 };
 
 async function validateRegister(body: Record<string, unknown>) {
@@ -115,5 +117,16 @@ describe('RegisterTenantDto / OnboardTenantDto marketing fields', () => {
     });
     expect(withGarbage.errors).toEqual([]);
     expect(withGarbage.dto.first_visit_at).toBeUndefined();
+  });
+
+  it('requires a Brazilian phone', async () => {
+    const { errors } = await validateRegister({
+      ...baseRegisterBody,
+      contact_phone: '123',
+    });
+
+    expect(errors.some((error) => error.property === 'contact_phone')).toBe(
+      true,
+    );
   });
 });
