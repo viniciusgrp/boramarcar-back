@@ -1,10 +1,140 @@
 import { MailService } from '../mail/mail.service';
 import {
   EmailFunnelService,
+  isSendReclaimable,
   resolvePreviewTrialEndsAt,
 } from './email-funnel.service';
 import type { EmailFunnelStepRow } from './email-funnel.types';
 
+interface FakeSendRow {
+  tenant_id: string;
+  step_key: string;
+  status: string;
+  error_message: string | null;
+  sent_at: string;
+  skipped_reason?: string | null;
+  recipient_email?: string | null;
+}
+
+/** Minimal in-memory stand-in for the `email_funnel_sends` Supabase table. */
+function createFakeSendsQuery(rows: FakeSendRow[]) {
+  type Filter = (row: FakeSendRow) => boolean;
+  const filters: Filter[] = [];
+  let mode: 'select' | 'update' | 'delete' = 'select';
+  let patch: Partial<FakeSendRow> = {};
+  let orderBy: { column: string; ascending: boolean } | null = null;
+  let max: number | null = null;
+
+  const matching = (): FakeSendRow[] => {
+    let result = rows.filter((row) => filters.every((fn) => fn(row)));
+    if (orderBy) {
+      const { column, ascending } = orderBy;
+      result = [...result].sort((a, b) => {
+        const left = String((a as unknown as Record<string, unknown>)[column]);
+        const right = String((b as unknown as Record<string, unknown>)[column]);
+        return ascending
+          ? left.localeCompare(right)
+          : right.localeCompare(left);
+      });
+    }
+    return max === null ? result : result.slice(0, max);
+  };
+
+  const run = () => {
+    const hit = matching();
+    if (mode === 'update') {
+      hit.forEach((row) => Object.assign(row, patch));
+    }
+    if (mode === 'delete') {
+      hit.forEach((row) => rows.splice(rows.indexOf(row), 1));
+    }
+    return hit;
+  };
+
+  const builder = {
+    select: () => builder,
+    eq: (column: string, value: unknown) => {
+      filters.push(
+        (row) => (row as unknown as Record<string, unknown>)[column] === value,
+      );
+      return builder;
+    },
+    neq: (column: string, value: unknown) => {
+      filters.push(
+        (row) => (row as unknown as Record<string, unknown>)[column] !== value,
+      );
+      return builder;
+    },
+    in: (column: string, values: unknown[]) => {
+      filters.push((row) =>
+        values.includes((row as unknown as Record<string, unknown>)[column]),
+      );
+      return builder;
+    },
+    gte: (column: string, value: string) => {
+      filters.push(
+        (row) =>
+          String((row as unknown as Record<string, unknown>)[column]) >= value,
+      );
+      return builder;
+    },
+    order: (column: string, options?: { ascending?: boolean }) => {
+      orderBy = { column, ascending: options?.ascending ?? true };
+      return builder;
+    },
+    limit: (value: number) => {
+      max = value;
+      return builder;
+    },
+    update: (value: Partial<FakeSendRow>) => {
+      mode = 'update';
+      patch = value;
+      return builder;
+    },
+    delete: () => {
+      mode = 'delete';
+      return builder;
+    },
+    insert: (row: FakeSendRow) => {
+      const duplicate = rows.some(
+        (existing) =>
+          existing.tenant_id === row.tenant_id &&
+          existing.step_key === row.step_key,
+      );
+      if (duplicate) {
+        return {
+          select: () =>
+            Promise.resolve({
+              data: null,
+              error: { code: '23505', message: 'duplicate key' },
+            }),
+        };
+      }
+      rows.push({ ...row });
+      return {
+        select: () => Promise.resolve({ data: [{ id: 'x' }], error: null }),
+      };
+    },
+    upsert: (row: FakeSendRow) => {
+      const existing = rows.find(
+        (item) =>
+          item.tenant_id === row.tenant_id && item.step_key === row.step_key,
+      );
+      if (existing) {
+        Object.assign(existing, row);
+      } else {
+        rows.push({ ...row });
+      }
+      return Promise.resolve({ error: null });
+    },
+    maybeSingle: () => Promise.resolve({ data: run()[0] ?? null, error: null }),
+    then: (
+      resolve: (value: { data: FakeSendRow[]; error: null }) => unknown,
+      reject?: (reason: unknown) => unknown,
+    ) => Promise.resolve({ data: run(), error: null }).then(resolve, reject),
+  };
+  return builder;
+}
 describe('resolvePreviewTrialEndsAt', () => {
   const now = new Date('2026-11-11T13:00:00.000Z');
 
@@ -151,46 +281,29 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
     steps?: EmailFunnelStepRow[];
     alreadySent?: string[];
     lastSentAt?: string | null;
+    extraSends?: FakeSendRow[];
   }) {
-    const sentKeys = new Set<string>(options?.alreadySent ?? []);
+    const sends: FakeSendRow[] = (options?.alreadySent ?? []).map((key) => ({
+      tenant_id: 'tenant-1',
+      step_key: key,
+      status: 'sent',
+      error_message: null,
+      sent_at: options?.lastSentAt ?? '2026-11-01T00:00:00.000Z',
+    }));
+    if (options?.lastSentAt && !options.alreadySent?.length) {
+      sends.push({
+        tenant_id: 'tenant-1',
+        step_key: 'previous',
+        status: 'sent',
+        error_message: null,
+        sent_at: options.lastSentAt,
+      });
+    }
+    sends.push(...(options?.extraSends ?? []));
     const sendHtmlEmail = jest.fn().mockResolvedValue(undefined);
     const from = jest.fn((table: string) => {
       if (table === 'email_funnel_sends') {
-        const filters: Record<string, string> = {};
-        const builder = {
-          select: () => builder,
-          eq: (column: string, value: string) => {
-            filters[column] = value;
-            return builder;
-          },
-          in: () => builder,
-          order: () => builder,
-          limit: () => builder,
-          maybeSingle: () => {
-            if (!filters.step_key) {
-              return Promise.resolve({
-                data: options?.lastSentAt
-                  ? { sent_at: options.lastSentAt }
-                  : null,
-                error: null,
-              });
-            }
-
-            return Promise.resolve({
-              data: sentKeys.has(filters.step_key)
-                ? { id: filters.step_key }
-                : null,
-              error: null,
-            });
-          },
-          upsert: (row: { step_key: string; status: string }) => {
-            if (row.status === 'sent' || row.status === 'skipped') {
-              sentKeys.add(row.step_key);
-            }
-            return Promise.resolve({ error: null });
-          },
-        };
-        return builder;
+        return createFakeSendsQuery(sends);
       }
 
       if (table === 'email_funnel_steps') {
@@ -261,7 +374,7 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
       } as never,
     );
 
-    return { service, sendHtmlEmail };
+    return { service, sendHtmlEmail, sends };
   }
 
   it('sends welcome once when the code path and the magic link path both trigger it', async () => {
@@ -354,5 +467,137 @@ describe('EmailFunnelService.sendWelcomeForNewTenant', () => {
     expect(sendHtmlEmail).toHaveBeenCalledWith(
       expect.objectContaining({ subject: 'Já configurou sua agenda?' }),
     );
+  });
+
+  it('sends the welcome only once when two triggers fire at the same time', async () => {
+    const { service, sendHtmlEmail } = buildService({
+      emailConfirmedAt: '2026-11-13T18:00:00.000Z',
+    });
+
+    await Promise.all([
+      service.sendWelcomeForNewTenant({
+        tenantId: 'tenant-1',
+        ownerEmail: 'dono@gmail.com',
+      }),
+      service.sendWelcomeForNewTenant({
+        tenantId: 'tenant-1',
+        ownerEmail: 'dono@gmail.com',
+      }),
+      service.sendWelcomeForNewTenant({
+        tenantId: 'tenant-1',
+        ownerEmail: 'dono@gmail.com',
+      }),
+    ]);
+
+    expect(sendHtmlEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('never runs two scheduler passes at the same time', async () => {
+    const { service, sendHtmlEmail } = buildService({
+      emailConfirmedAt: '2026-11-13T18:00:00.000Z',
+    });
+    const now = new Date('2026-11-13T18:00:00.000Z');
+
+    await Promise.all([
+      service.processDueEmails(now),
+      service.processDueEmails(now),
+    ]);
+
+    expect(sendHtmlEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send when another funnel e-mail is being sent for the same tenant', async () => {
+    const nudge: EmailFunnelStepRow = {
+      ...welcomeStep,
+      step_key: 'nudge_agenda',
+      step_number: 2,
+    };
+    const { service, sendHtmlEmail, sends } = buildService({
+      emailConfirmedAt: '2026-11-16T10:00:00.000Z',
+      steps: [welcomeStep, nudge],
+      extraSends: [
+        {
+          tenant_id: 'tenant-1',
+          step_key: 'tutorial',
+          status: 'sending',
+          error_message: null,
+          sent_at: '2026-11-16T22:59:00.000Z',
+        },
+      ],
+    });
+
+    await service.processDueEmails(new Date('2026-11-16T23:00:00.000Z'));
+
+    expect(sendHtmlEmail).not.toHaveBeenCalled();
+    expect(sends.map((row) => row.step_key)).toEqual(['tutorial']);
+  });
+
+  it('does not retry a failed step before the backoff window', async () => {
+    const { service, sendHtmlEmail } = buildService({
+      emailConfirmedAt: '2026-11-16T10:00:00.000Z',
+      extraSends: [
+        {
+          tenant_id: 'tenant-1',
+          step_key: 'welcome',
+          status: 'failed',
+          error_message: 'SES timeout',
+          sent_at: '2026-11-16T22:55:00.000Z',
+        },
+      ],
+    });
+
+    await service.processDueEmails(new Date('2026-11-16T23:00:00.000Z'));
+    expect(sendHtmlEmail).not.toHaveBeenCalled();
+
+    await service.processDueEmails(new Date('2026-11-16T23:40:00.000Z'));
+    expect(sendHtmlEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isSendReclaimable', () => {
+  const now = new Date('2026-11-16T12:00:00.000Z');
+  const ago = (minutes: number) =>
+    new Date(now.getTime() - minutes * 60_000).toISOString();
+
+  it('never reclaims sent or skipped rows', () => {
+    expect(
+      isSendReclaimable(
+        { status: 'sent', error_message: null, sent_at: ago(999) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isSendReclaimable(
+        { status: 'skipped', error_message: null, sent_at: ago(999) },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('reclaims failed after 30 min and stale sending after 15 min', () => {
+    expect(
+      isSendReclaimable(
+        { status: 'failed', error_message: 'x', sent_at: ago(10) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isSendReclaimable(
+        { status: 'failed', error_message: 'x', sent_at: ago(31) },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isSendReclaimable(
+        { status: 'sending', error_message: null, sent_at: ago(5) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isSendReclaimable(
+        { status: 'sending', error_message: null, sent_at: ago(16) },
+        now,
+      ),
+    ).toBe(true);
   });
 });

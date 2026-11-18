@@ -17,6 +17,7 @@ import {
   resolveEmailFunnelEligibility,
   shouldRecordSkip,
 } from './email-funnel-eligibility.util';
+import { EMAIL_FUNNEL_MIN_HOURS_BETWEEN_SENDS } from './email-funnel.types';
 import { shouldDeferWelcomeUntilOwnerEmailConfirmed } from './email-funnel-welcome-gate.util';
 import { buildEmailFunnelContent } from './email-funnel-html.util';
 import {
@@ -48,6 +49,7 @@ interface FunnelTenantRow {
 @Injectable()
 export class EmailFunnelService {
   private readonly logger = new Logger(EmailFunnelService.name);
+  private processing = false;
 
   constructor(
     private readonly supabaseService: SupabaseService,
@@ -117,6 +119,20 @@ export class EmailFunnelService {
   }
 
   async processDueEmails(now: Date = new Date()): Promise<number> {
+    if (this.processing) {
+      this.logger.warn('Email funnel run skipped: previous run still active.');
+      return 0;
+    }
+
+    this.processing = true;
+    try {
+      return await this.runDueEmails(now);
+    } finally {
+      this.processing = false;
+    }
+  }
+
+  private async runDueEmails(now: Date): Promise<number> {
     const steps = (await this.listSteps()).filter((step) => step.is_active);
     const tenants = await this.listCandidateTenants();
     let processed = 0;
@@ -399,6 +415,19 @@ export class EmailFunnelService {
       return 'ignored';
     }
 
+    // Atomic claim in the DB BEFORE calling the mail provider. Guarantees a
+    // single sender per (tenant, step) and one e-mail per tenant per gap window,
+    // even with several instances, overlapping crons or the welcome triggers.
+    const claim = await this.claimSend({
+      tenantId: params.tenant.id,
+      stepKey: params.step.step_key,
+      recipientEmail: params.ownerEmail,
+      now: params.now,
+    });
+    if (!claim) {
+      return 'ignored';
+    }
+
     const delivered = await this.deliverStepEmail({
       step: params.step,
       tenant: params.tenant,
@@ -426,6 +455,7 @@ export class EmailFunnelService {
       .select(
         'id, tenant_id, step_key, status, skipped_reason, error_message, recipient_email, sent_at, tenants(name), email_funnel_steps(subject, step_number)',
       )
+      .neq('status', 'sending')
       .order('sent_at', { ascending: false })
       .limit(300);
 
@@ -705,6 +735,151 @@ export class EmailFunnelService {
     return Boolean(data);
   }
 
+  /**
+   * Reserves the right to send a step. Returns null when another sender already
+   * owns it, the step was already handled, or the tenant received/is receiving
+   * another funnel e-mail inside the minimum gap window.
+   */
+  private async claimSend(params: {
+    tenantId: string;
+    stepKey: string;
+    recipientEmail: string | null;
+    now: Date;
+  }): Promise<true | null> {
+    const client = this.supabaseService.getClient();
+    const nowIso = params.now.toISOString();
+    const claimRow = {
+      tenant_id: params.tenantId,
+      step_key: params.stepKey,
+      status: 'sending',
+      skipped_reason: null,
+      error_message: null,
+      recipient_email: params.recipientEmail,
+      sent_at: nowIso,
+    };
+
+    let previous: ExistingSendState | null = null;
+    const inserted = await client
+      .from('email_funnel_sends')
+      .insert(claimRow)
+      .select('id');
+
+    if (inserted.error) {
+      if (inserted.error.code !== '23505') {
+        throw new InternalServerErrorException(inserted.error.message);
+      }
+
+      const existing = await this.getSendState(params.tenantId, params.stepKey);
+      if (!existing || !isSendReclaimable(existing, params.now)) {
+        return null;
+      }
+
+      // Compare-and-swap: only one concurrent caller can win this update.
+      const swapped = await client
+        .from('email_funnel_sends')
+        .update(claimRow)
+        .eq('tenant_id', params.tenantId)
+        .eq('step_key', params.stepKey)
+        .eq('status', existing.status)
+        .eq('sent_at', existing.sent_at)
+        .select('id');
+
+      if (swapped.error) {
+        throw new InternalServerErrorException(swapped.error.message);
+      }
+      if (!swapped.data || swapped.data.length === 0) {
+        return null;
+      }
+      previous = existing;
+    }
+
+    const windowStart = new Date(
+      params.now.getTime() -
+        EMAIL_FUNNEL_MIN_HOURS_BETWEEN_SENDS * 60 * 60 * 1000,
+    ).toISOString();
+    const competitors = await client
+      .from('email_funnel_sends')
+      .select('step_key, status, sent_at')
+      .eq('tenant_id', params.tenantId)
+      .in('status', ['sending', 'sent'])
+      .gte('sent_at', windowStart)
+      .neq('step_key', params.stepKey);
+
+    if (competitors.error) {
+      await this.releaseClaim(params, previous);
+      throw new InternalServerErrorException(competitors.error.message);
+    }
+
+    const lost = (competitors.data ?? []).some((other) => {
+      if (other.status === 'sent') {
+        return true;
+      }
+      // Both claiming at once: deterministic winner (earliest, then step key).
+      return (
+        other.sent_at < nowIso ||
+        (other.sent_at === nowIso && other.step_key < params.stepKey)
+      );
+    });
+
+    if (lost) {
+      await this.releaseClaim(params, previous);
+      return null;
+    }
+
+    return true;
+  }
+
+  private async releaseClaim(
+    params: { tenantId: string; stepKey: string },
+    previous: ExistingSendState | null,
+  ): Promise<void> {
+    const client = this.supabaseService.getClient();
+    const query = previous
+      ? client.from('email_funnel_sends').update({
+          status: previous.status,
+          error_message: previous.error_message,
+          sent_at: previous.sent_at,
+        })
+      : client.from('email_funnel_sends').delete();
+
+    const { error } = await query
+      .eq('tenant_id', params.tenantId)
+      .eq('step_key', params.stepKey)
+      .eq('status', 'sending');
+
+    if (error) {
+      this.logger.warn(
+        `Could not release funnel claim ${params.tenantId}/${params.stepKey}: ${error.message}`,
+      );
+    }
+  }
+
+  private async getSendState(
+    tenantId: string,
+    stepKey: string,
+  ): Promise<ExistingSendState | null> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('email_funnel_sends')
+      .select('status, error_message, sent_at')
+      .eq('tenant_id', tenantId)
+      .eq('step_key', stepKey)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data
+      ? {
+          status: String(data.status),
+          error_message:
+            typeof data.error_message === 'string' ? data.error_message : null,
+          sent_at: String(data.sent_at),
+        }
+      : null;
+  }
+
   private async deliverStepEmail(params: {
     step: EmailFunnelStepRow;
     tenant: FunnelTenantRow;
@@ -896,6 +1071,34 @@ export class EmailFunnelService {
       updated_at: String(row.updated_at ?? ''),
     };
   }
+}
+
+interface ExistingSendState {
+  status: string;
+  error_message: string | null;
+  sent_at: string;
+}
+
+/** Minutes before a failed attempt may be retried automatically. */
+const FAILED_RETRY_BACKOFF_MINUTES = 30;
+/** Minutes before an abandoned "sending" claim (crashed run) can be taken over. */
+const SENDING_STALE_MINUTES = 15;
+
+export function isSendReclaimable(
+  existing: ExistingSendState,
+  now: Date,
+): boolean {
+  const ageMs = now.getTime() - new Date(existing.sent_at).getTime();
+  if (Number.isNaN(ageMs)) {
+    return false;
+  }
+  if (existing.status === 'failed') {
+    return ageMs >= FAILED_RETRY_BACKOFF_MINUTES * 60 * 1000;
+  }
+  if (existing.status === 'sending') {
+    return ageMs >= SENDING_STALE_MINUTES * 60 * 1000;
+  }
+  return false;
 }
 
 /**
