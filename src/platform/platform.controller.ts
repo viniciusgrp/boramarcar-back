@@ -21,6 +21,7 @@ import type { PlatformAdmin } from './entities/platform-admin.entity';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { PlatformService } from './platform.service';
 import {
+  BulkDeletePlatformTenantsDto,
   DeletePlatformTenantDto,
   ExtendPlatformTrialDto,
   GrantPlatformPlanDto,
@@ -74,6 +75,13 @@ export class PlatformController {
       status,
       plan,
     });
+  }
+
+  @Post('tenants/bulk-delete')
+  async deleteTenants(
+    @Body() dto: BulkDeletePlatformTenantsDto,
+  ): Promise<{ deleted: number }> {
+    return this.platformService.deleteTenants(dto.ids, dto.confirmPhrase);
   }
 
   @Get('tenants/:id')
