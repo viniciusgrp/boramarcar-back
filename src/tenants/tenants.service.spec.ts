@@ -66,6 +66,7 @@ describe('TenantsService', () => {
         password: 'senha1234',
         tenant_name: 'Pentest',
         slug: 'pentest-loja',
+        contact_phone: '11999998888',
         recaptcha_token: 'token',
       }),
     ).rejects.toMatchObject({ message: DISPOSABLE_EMAIL_MESSAGE });
@@ -93,6 +94,7 @@ describe('TenantsService', () => {
         password: 'ab12345',
         tenant_name: 'Studio',
         slug: 'studio-novo',
+        contact_phone: '11999998888',
         recaptcha_token: 'token',
       }),
     ).rejects.toMatchObject({
@@ -123,6 +125,7 @@ describe('TenantsService', () => {
         password: 'somenteletras',
         tenant_name: 'Studio',
         slug: 'studio-novo',
+        contact_phone: '11999998888',
         recaptcha_token: 'token',
       }),
     ).rejects.toMatchObject({
@@ -131,6 +134,131 @@ describe('TenantsService', () => {
     });
 
     expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects signup without a valid phone before creating the user', async () => {
+    const createUser = jest.fn();
+    const service = new TenantsService(
+      { getClient: () => ({ auth: { admin: { createUser } } }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      buildConfig(),
+      { sendCompleteRegistration: jest.fn() } as never,
+    );
+
+    await expect(
+      service.register({
+        owner_name: 'Dono',
+        email: 'dono@gmail.com',
+        password: 'senha1234',
+        tenant_name: 'Studio',
+        slug: 'studio-novo',
+        contact_phone: '123',
+        recaptcha_token: 'token',
+      }),
+    ).rejects.toMatchObject({
+      message: 'Informe um telefone ou WhatsApp válido com DDD.',
+    });
+
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('stores the signup phone on the tenant and the owner professional', async () => {
+    const inserts: Record<string, unknown> = {};
+    const createUser = jest.fn().mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'dono@gmail.com' } },
+      error: null,
+    });
+    const from = jest.fn((table: string) => {
+      if (table === 'tenants') {
+        return {
+          insert: (payload: unknown) => {
+            inserts.tenants = payload;
+            return {
+              select: () => ({
+                single: () =>
+                  Promise.resolve({
+                    data: {
+                      id: 'tenant-1',
+                      name: 'Studio',
+                      slug: 'studio-novo',
+                      owner_id: 'user-1',
+                      created_at: '2026-11-13T00:00:00.000Z',
+                      updated_at: '2026-11-13T00:00:00.000Z',
+                    },
+                    error: null,
+                  }),
+              }),
+            };
+          },
+        };
+      }
+
+      return {
+        insert: (payload: unknown) => {
+          inserts[table] = payload;
+          if (table === 'professionals') {
+            return {
+              select: () => ({
+                single: () =>
+                  Promise.resolve({ data: { id: 'pro-1' }, error: null }),
+              }),
+            };
+          }
+
+          return Promise.resolve({ error: null });
+        },
+      };
+    });
+    const service = new TenantsService(
+      {
+        getClient: () => ({
+          auth: { admin: { createUser } },
+          from,
+        }),
+      } as never,
+      {
+        createOwnerMembership: jest.fn().mockResolvedValue(undefined),
+        linkOwnerProfessionalMembership: jest.fn().mockResolvedValue(undefined),
+      } as never,
+      { notifyNewTenant: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        resolveAttributionForSignup: jest.fn().mockResolvedValue(null),
+      } as never,
+      {} as never,
+      {} as never,
+      buildConfig('production'),
+      { sendCompleteRegistration: jest.fn() } as never,
+    );
+    jest.spyOn(service, 'findBySlug').mockResolvedValue(null);
+    jest
+      .spyOn(
+        service as unknown as {
+          sendEstablishmentEmailVerification: () => Promise<string>;
+        },
+        'sendEstablishmentEmailVerification',
+      )
+      .mockResolvedValue('magiclink');
+
+    await service.register({
+      owner_name: 'Dono',
+      email: 'dono@gmail.com',
+      password: 'senha1234',
+      tenant_name: 'Studio',
+      slug: 'studio-novo',
+      contact_phone: '(11) 98888-7777',
+      recaptcha_token: 'token',
+    });
+
+    expect(inserts.tenants).toEqual(
+      expect.objectContaining({ contact_phone: '(11) 98888-7777' }),
+    );
+    expect(inserts.professionals).toEqual(
+      expect.objectContaining({ contact_phone: '(11) 98888-7777' }),
+    );
   });
 
   it('rejects changing a pending signup to a disposable email', async () => {
@@ -264,6 +392,7 @@ describe('TenantsService trial welcome timing', () => {
     password: 'senha1234',
     tenant_name: 'Studio',
     slug: 'studio-novo',
+    contact_phone: '(11) 98888-7777',
     recaptcha_token: 'token',
   };
 

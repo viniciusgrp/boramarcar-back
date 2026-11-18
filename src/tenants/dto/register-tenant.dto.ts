@@ -8,6 +8,7 @@ import {
   MinLength,
   IsISO8601,
 } from 'class-validator';
+import { IsBrazilianPhone } from '../../common/validators/is-brazilian-phone.validator';
 import { normalizeFirstVisitAt } from '../utils/normalize-first-visit-at.util';
 
 export class RegisterTenantDto {
@@ -29,6 +30,11 @@ export class RegisterTenantDto {
   @IsString()
   @IsNotEmpty()
   slug!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsBrazilianPhone({ required: true })
+  contact_phone!: string;
 
   @IsOptional()
   @IsString()
