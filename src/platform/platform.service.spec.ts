@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SupabaseService } from '../supabase/supabase.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -441,6 +442,49 @@ describe('PlatformService', () => {
     ]);
     expect(deleteUser).toHaveBeenCalledWith('user-1');
     expect(deleteUser).toHaveBeenCalledWith('cust-1');
+  });
+
+  it('rejects bulk delete without the confirmation phrase', async () => {
+    const service = new PlatformService(
+      { getClient: () => ({}) } as unknown as SupabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
+    );
+
+    await expect(service.deleteTenants(['t-1'], 'apagar')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('deletes each selected tenant once, using its name', async () => {
+    const tenant = buildTenant();
+    const supabaseService = {
+      getClient: () => ({
+        from: () => {
+          const query: Record<string, jest.Mock> = {};
+          query.select = jest.fn(() => query);
+          query.eq = jest.fn(() => query);
+          query.maybeSingle = jest.fn(async () => ({ data: tenant, error: null }));
+          return query;
+        },
+      }),
+    } as unknown as SupabaseService;
+
+    const service = new PlatformService(
+      supabaseService,
+      { get: () => undefined } as unknown as ConfigService,
+      { deleteSubscription: jest.fn() } as never,
+    );
+    const deleteTenant = jest
+      .spyOn(service, 'deleteTenant')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.deleteTenants(['t-1', 't-1'], 'excluir'),
+    ).resolves.toEqual({ deleted: 1 });
+
+    expect(deleteTenant).toHaveBeenCalledTimes(1);
+    expect(deleteTenant).toHaveBeenCalledWith('t-1', 'Barbearia Teste');
   });
 
   it('does not delete auth users still linked to another tenant', async () => {

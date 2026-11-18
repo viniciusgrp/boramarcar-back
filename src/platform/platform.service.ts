@@ -446,6 +446,25 @@ export class PlatformService {
     await this.deleteOwnedRow('professionals', tenantId, professionalId);
   }
 
+  async deleteTenants(
+    ids: string[],
+    confirmPhrase: string,
+  ): Promise<{ deleted: number }> {
+    if (confirmPhrase.trim().toUpperCase() !== 'EXCLUIR') {
+      throw new BadRequestException(
+        'Digite EXCLUIR para confirmar a exclusão em lote.',
+      );
+    }
+
+    const tenantIds = [...new Set(ids)];
+    for (const id of tenantIds) {
+      const tenant = await this.fetchTenantById(id);
+      await this.deleteTenant(id, tenant.name);
+    }
+
+    return { deleted: tenantIds.length };
+  }
+
   async deleteTenant(tenantId: string, confirmName: string): Promise<void> {
     const tenant = await this.fetchTenantById(tenantId);
     if (confirmName.trim() !== tenant.name) {

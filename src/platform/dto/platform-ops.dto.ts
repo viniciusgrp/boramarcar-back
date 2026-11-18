@@ -1,9 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsIn,
   IsInt,
   IsISO8601,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -32,6 +36,19 @@ export class DeletePlatformTenantDto {
   @MinLength(1)
   @MaxLength(120)
   confirmName!: string;
+}
+
+export class BulkDeletePlatformTenantsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsUUID('4', { each: true })
+  ids!: string[];
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20)
+  confirmPhrase!: string;
 }
 
 export class PlatformPassphraseLoginDto {
