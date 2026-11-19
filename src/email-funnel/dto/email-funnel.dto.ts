@@ -128,6 +128,11 @@ export class SendEmailFunnelPreviewDto {
 
   @IsEmail()
   to!: string;
+
+  /** When true, render body_if_setup (e.g. leave_whatsapp já configurado). */
+  @IsOptional()
+  @IsBoolean()
+  use_setup_copy?: boolean;
 }
 
 export class SendEmailFunnelTestDto {
@@ -142,4 +147,9 @@ export class SendEmailFunnelTestDto {
   @IsOptional()
   @IsString()
   tenant_id?: string;
+
+  /** When true, render body_if_setup (e.g. leave_whatsapp já configurado). */
+  @IsOptional()
+  @IsBoolean()
+  use_setup_copy?: boolean;
 }

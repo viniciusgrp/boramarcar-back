@@ -175,6 +175,7 @@ export class EmailFunnelService {
   async sendPreview(params: {
     stepKey: string;
     to: string;
+    useSetupCopy?: boolean;
   }): Promise<{ sentTo: string }> {
     const step = await this.getStep(params.stepKey);
     const to = params.to.trim().toLowerCase();
@@ -186,12 +187,14 @@ export class EmailFunnelService {
     const rendered = this.renderStep(step, {
       token: 'preview',
       trialEndsAt: resolvePreviewTrialEndsAt(step),
-      useSetupCopy: false,
+      useSetupCopy: params.useSetupCopy === true,
       ownerFirstName: 'Maria',
       tenantName: 'Estabelecimento Exemplo',
       tenantSlug: 'exemplo',
     });
 
+    // sendHtmlEmail respects APP_ENV and skips SMTP outside production.
+    // Prefer sendTestEmail (bypass) for a real inbox in HML.
     await this.mailService.sendHtmlEmail({
       to,
       subject: `[Teste] ${rendered.subject}`,
@@ -207,6 +210,7 @@ export class EmailFunnelService {
     stepKey: string;
     to: string;
     tenantId?: string;
+    useSetupCopy?: boolean;
   }): Promise<{ sentTo: string }> {
     const step = await this.getStep(params.stepKey);
     const to = params.to.trim().toLowerCase();
@@ -234,7 +238,7 @@ export class EmailFunnelService {
       // matches the trial_mid / trial copy (e.g. 7 days), even for old tenants
       // with a longer complimentary trial_ends_at.
       trialEndsAt: resolvePreviewTrialEndsAt(step),
-      useSetupCopy: false,
+      useSetupCopy: params.useSetupCopy === true,
       ownerFirstName: ownerDetails.firstName,
       tenantName: tenant?.name || 'Estabelecimento Exemplo',
       tenantSlug: tenant?.slug || 'exemplo',
@@ -245,6 +249,7 @@ export class EmailFunnelService {
     ).replace(/\/$/, '');
     const postOptOutUrl = `${frontendUrl}/api/email-funnel/unsubscribe`;
 
+    // bypassProductionCheck: real SMTP even when APP_ENV is hml/development.
     await this.mailService.sendTestEmail({
       to,
       subject: `[Teste] ${rendered.subject}`,

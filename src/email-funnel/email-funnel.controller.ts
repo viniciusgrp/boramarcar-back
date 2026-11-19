@@ -39,6 +39,7 @@ export class EmailFunnelController {
     return this.emailFunnelService.sendPreview({
       stepKey: dto.step_key,
       to: dto.to,
+      useSetupCopy: dto.use_setup_copy === true,
     });
   }
 
@@ -51,6 +52,7 @@ export class EmailFunnelController {
       stepKey,
       to: dto.to,
       tenantId: dto.tenant_id,
+      useSetupCopy: dto.use_setup_copy === true,
     });
   }
 
