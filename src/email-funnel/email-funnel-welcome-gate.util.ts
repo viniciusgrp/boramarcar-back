@@ -1,6 +1,10 @@
 /**
  * Welcome is immediate, but it must wait until the establishment email is
- * confirmed. Other steps keep their signup and trial anchors.
+ * confirmed (`auth.users.email_confirmed_at`, same source as 5e73c11).
+ *
+ * Non-welcome steps are paused separately via eligibility `email_unconfirmed`
+ * (non-final, no send row). If confirmation arrives after the due window,
+ * normal due/stale rules apply on the next cron cycle.
  */
 export function shouldDeferWelcomeUntilOwnerEmailConfirmed(params: {
   stepKey: string;

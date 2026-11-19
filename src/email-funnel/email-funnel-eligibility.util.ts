@@ -4,6 +4,21 @@ import type {
   EmailFunnelSkipReason,
 } from './email-funnel.types';
 
+/**
+ * Eligibility order (must stay stable; covered by unit tests):
+ * 1. already_processed / inactive / opted_out / paid
+ * 2. not_due — before any condition that would write a final skip
+ * 3. trial_ended (except post-trial / last-day steps)
+ * 4. stale — if the due window already expired (incl. while waiting for email confirm)
+ * 5. email_unconfirmed — non-welcome steps only; non-final (no send row)
+ * 6. setup_complete / condition_not_met
+ * 7. no_email
+ * 8. send
+ *
+ * Decision if the owner confirms after the due window: follow normal due/stale
+ * rules. A step that went stale while unconfirmed is recorded as `stale` on the
+ * next cron cycle; it is not reopened. Steps still `due` resume and may send.
+ */
 export function resolveEmailFunnelEligibility(params: {
   isActive: boolean;
   optedOut: boolean;
@@ -22,6 +37,10 @@ export function resolveEmailFunnelEligibility(params: {
   hasPublicBooking: boolean;
   isPostTrialStep: boolean;
   isLastDayOfTrialStep: boolean;
+  /** Same confirmation source as welcome (`auth.users.email_confirmed_at`). */
+  ownerEmailConfirmed?: boolean;
+  /** Welcome keeps its own gate; other steps pause via `email_unconfirmed`. */
+  stepKey?: string;
 }): EmailFunnelEligibility {
   if (params.alreadyProcessed) {
     return 'already_processed';
@@ -39,10 +58,29 @@ export function resolveEmailFunnelEligibility(params: {
     return 'paid';
   }
 
+  const dueStatus =
+    params.dueStatus ?? (params.isDue === true ? 'due' : 'not_due');
+
+  if (dueStatus === 'not_due') {
+    return 'not_due';
+  }
+
   // Allow last-day-of-trial steps (offset 0 before trial end) even after trial technically ended
   // This ensures trial_last_day sends at 10h even if trial_ends_at was earlier (e.g. 08h)
   if (params.trialEnded && !params.isPostTrialStep && !params.isLastDayOfTrialStep) {
     return 'trial_ended';
+  }
+
+  if (dueStatus === 'stale') {
+    return 'stale';
+  }
+
+  const isWelcome = params.stepKey === 'welcome';
+  if (
+    !isWelcome &&
+    params.ownerEmailConfirmed === false
+  ) {
+    return 'email_unconfirmed';
   }
 
   if (
@@ -69,17 +107,6 @@ export function resolveEmailFunnelEligibility(params: {
     }
   }
 
-  const dueStatus =
-    params.dueStatus ?? (params.isDue === true ? 'due' : 'not_due');
-
-  if (dueStatus === 'not_due') {
-    return 'not_due';
-  }
-
-  if (dueStatus === 'stale') {
-    return 'stale';
-  }
-
   if (!params.hasRecipientEmail) {
     return 'no_email';
   }
@@ -91,7 +118,7 @@ export function shouldRecordSkip(
   eligibility: EmailFunnelEligibility,
 ): eligibility is Exclude<
   EmailFunnelSkipReason,
-  'not_due' | 'inactive_step' | 'already_processed'
+  'not_due' | 'inactive_step' | 'already_processed' | 'email_unconfirmed'
 > {
   return (
     eligibility === 'paid' ||

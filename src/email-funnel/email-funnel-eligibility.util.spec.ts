@@ -74,6 +74,100 @@ describe('resolveEmailFunnelEligibility', () => {
     ).toBe('not_due');
   });
 
+  it('returns not_due before failing condition when the step is not due yet', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        isDue: false,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'setup_complete_and_not_shared',
+        hasService: false,
+        hasBusinessHours: false,
+      }),
+    ).toBe('not_due');
+  });
+
+  it('returns not_due before setup_complete when the step is not due yet', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        isDue: false,
+        hasService: true,
+        hasBusinessHours: true,
+      }),
+    ).toBe('not_due');
+  });
+
+  it('skips with condition_not_met only when the step is due', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        isDue: true,
+        skipIfSetupComplete: false,
+        sendOnlyIf: 'no_public_booking',
+        hasService: false,
+        hasBusinessHours: true,
+        hasPublicBooking: false,
+      }),
+    ).toBe('condition_not_met');
+  });
+
+  it('skips with setup_complete only when the step is due', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        isDue: true,
+        hasService: true,
+        hasBusinessHours: true,
+      }),
+    ).toBe('setup_complete');
+  });
+
+  it('pauses non-welcome steps while owner email is unconfirmed without recording skip', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        stepKey: 'nudge_agenda',
+        ownerEmailConfirmed: false,
+      }),
+    ).toBe('email_unconfirmed');
+    expect(shouldRecordSkip('email_unconfirmed')).toBe(false);
+  });
+
+  it('does not pause welcome via email_unconfirmed (welcome uses its own gate)', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        stepKey: 'welcome',
+        ownerEmailConfirmed: false,
+      }),
+    ).toBe('send');
+  });
+
+  it('resumes non-welcome steps once owner email is confirmed', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        stepKey: 'tutorial',
+        ownerEmailConfirmed: true,
+      }),
+    ).toBe('send');
+  });
+
+  it('prefers stale over email_unconfirmed when the due window already expired', () => {
+    expect(
+      resolveEmailFunnelEligibility({
+        ...base,
+        skipIfSetupComplete: false,
+        stepKey: 'nudge_agenda',
+        ownerEmailConfirmed: false,
+        dueStatus: 'stale',
+      }),
+    ).toBe('stale');
+  });
+
   it('blocks during trial steps after trial ends', () => {
     expect(
       resolveEmailFunnelEligibility({
@@ -209,8 +303,9 @@ describe('resolveEmailFunnelEligibility', () => {
     ).toBe('send');
   });
 
-  it('records skip for stale but not for not_due', () => {
+  it('records skip for stale but not for not_due or email_unconfirmed', () => {
     expect(shouldRecordSkip('stale')).toBe(true);
     expect(shouldRecordSkip('not_due')).toBe(false);
+    expect(shouldRecordSkip('email_unconfirmed')).toBe(false);
   });
 });

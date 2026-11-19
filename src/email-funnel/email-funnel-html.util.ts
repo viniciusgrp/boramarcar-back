@@ -8,6 +8,7 @@ import {
   getTrialDaysRemaining,
   formatDiasLabel,
   formatRestamLabel,
+  normalizeOwnerGreeting,
   type RenderEmailTemplateParams,
 } from './email-funnel-template.util';
 
@@ -59,7 +60,8 @@ export function buildFunnelTemplateVariables(params: {
   const diasRestantes = getTrialDaysRemaining(params.trialEndsAt);
 
   return {
-    nome: params.ownerFirstName || 'olá',
+    // Empty when missing so "Olá, {{nome}}." normalizes to "Olá." (not "Olá, olá.").
+    nome: params.ownerFirstName?.trim() || '',
     nome_negocio: params.tenantName || 'seu estabelecimento',
     link_agendamento: bookingUrl,
     dias_restantes: String(diasRestantes),
@@ -99,14 +101,22 @@ export function buildEmailFunnelContent(params: {
     frontendUrl: params.frontendUrl,
   });
 
-  const subject = interpolateVariables(params.step.subject, variables, {
-    escapeHtml: false,
-  });
+  const subject = normalizeOwnerGreeting(
+    interpolateVariables(params.step.subject, variables, {
+      escapeHtml: false,
+    }),
+  );
   const preheader = params.step.preheader
-    ? interpolateVariables(params.step.preheader, variables)
+    ? normalizeOwnerGreeting(
+        interpolateVariables(params.step.preheader, variables),
+      )
     : null;
-  const title = interpolateVariables(params.step.title, variables);
-  const body = interpolateVariables(bodySource, variables);
+  const title = normalizeOwnerGreeting(
+    interpolateVariables(params.step.title, variables),
+  );
+  const body = normalizeOwnerGreeting(
+    interpolateVariables(bodySource, variables),
+  );
 
   const imageUrl = resolveMediaUrl(params.step.image_url, params.frontendUrl);
   const ctaLabel = params.step.cta_label
@@ -149,10 +159,14 @@ export function buildEmailFunnelContent(params: {
     text: renderEmailPlainText({
       ...templateParams,
       // Plain text should not carry HTML-escaped body/title.
-      titulo: interpolateVariables(params.step.title, variables, {
-        escapeHtml: false,
-      }),
-      corpo: interpolateVariables(bodySource, variables, { escapeHtml: false }),
+      titulo: normalizeOwnerGreeting(
+        interpolateVariables(params.step.title, variables, {
+          escapeHtml: false,
+        }),
+      ),
+      corpo: normalizeOwnerGreeting(
+        interpolateVariables(bodySource, variables, { escapeHtml: false }),
+      ),
       cta_label: params.step.cta_label
         ? interpolateVariables(params.step.cta_label, variables, {
             escapeHtml: false,

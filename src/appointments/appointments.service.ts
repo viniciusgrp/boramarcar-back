@@ -3911,6 +3911,79 @@ export class AppointmentsService {
           `Failed to notify responsible for appointment ${params.appointment.id}: ${message}`,
         );
       });
+
+    this.notifyFirstPublicBookingReceived(params);
+  }
+
+  /**
+   * Once per tenant: first PUBLIC appointment that becomes CONFIRMED
+   * (create already confirmed, approval, or deposit payment). Never for INTERNAL.
+   * Outside the funnel 18h rule. Best-effort; never fails the booking.
+   */
+  private notifyFirstPublicBookingReceived(params: {
+    tenant: Tenant;
+    appointment: Appointment;
+    serviceName: string;
+  }): void {
+    if (params.appointment.booking_source !== 'PUBLIC') {
+      return;
+    }
+
+    void this.claimFirstPublicAppointmentEmail(params.tenant.id)
+      .then(async (claimed) => {
+        if (!claimed) {
+          return;
+        }
+
+        const owner = await this.resolveTenantOwnerDetails(
+          params.tenant.owner_id,
+        );
+        if (!owner.email) {
+          return;
+        }
+
+        await this.mailService.sendFirstPublicBookingReceived({
+          ownerEmail: owner.email,
+          ownerFirstName: owner.firstName,
+          tenant: params.tenant,
+          customerName: params.appointment.customer_name,
+          serviceName: params.serviceName,
+          startTimeIso: params.appointment.start_time,
+        });
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown first public booking email error';
+        this.logger.error(
+          `Failed to send first public booking email for tenant ${params.tenant.id}: ${message}`,
+        );
+      });
+  }
+
+  private async claimFirstPublicAppointmentEmail(
+    tenantId: string,
+  ): Promise<boolean> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('tenants')
+      .update({
+        first_public_appointment_email_sent_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId)
+      .is('first_public_appointment_email_sent_at', null)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(
+        `Failed to claim first public booking email for tenant ${tenantId}: ${error.message}`,
+      );
+      return false;
+    }
+
+    return Boolean(data && typeof data === 'object' && 'id' in data);
   }
 
   private dispatchAppointmentPendingApprovalEmails(params: {
@@ -4171,7 +4244,36 @@ export class AppointmentsService {
   private async resolveTenantOwnerEmail(
     ownerId: string | null,
   ): Promise<string | null> {
-    return this.resolveAuthUserEmail(ownerId);
+    return (await this.resolveTenantOwnerDetails(ownerId)).email;
+  }
+
+  private async resolveTenantOwnerDetails(
+    ownerId: string | null,
+  ): Promise<{ email: string | null; firstName: string | null }> {
+    if (!ownerId?.trim()) {
+      return { email: null, firstName: null };
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .auth.admin.getUserById(ownerId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const email = data.user?.email?.trim() || null;
+    const metadata = data.user?.user_metadata as
+      | Record<string, unknown>
+      | undefined;
+    const rawName =
+      (typeof metadata?.full_name === 'string' && metadata.full_name) ||
+      (typeof metadata?.name === 'string' && metadata.name) ||
+      (typeof metadata?.given_name === 'string' && metadata.given_name) ||
+      '';
+    const firstName = rawName.trim().split(/\s+/)[0]?.trim() || null;
+
+    return { email, firstName };
   }
 
   private async resolveAuthUserEmail(

@@ -109,6 +109,11 @@ function buildService() {
   const mailService = {
     sendAppointmentReminder: jest.fn().mockResolvedValue(undefined),
     sendDepositChargeUnavailable: jest.fn().mockResolvedValue(undefined),
+    sendFirstPublicBookingReceived: jest.fn().mockResolvedValue(undefined),
+    sendAppointmentConfirmation: jest.fn().mockResolvedValue(undefined),
+    sendAppointmentConfirmedResponsible: jest
+      .fn()
+      .mockResolvedValue(undefined),
   };
   const getUserById = jest.fn().mockResolvedValue({
     data: { user: { email: 'owner@example.com' } },
@@ -153,6 +158,7 @@ function buildService() {
     customersService,
     depositPaymentService,
     mailService,
+    getUserById,
   };
 }
 
@@ -1339,6 +1345,144 @@ describe('AppointmentsService', () => {
         depositPaidAmount: 20,
         balanceDue: 60,
       });
+    });
+  });
+
+  describe('first public booking received email', () => {
+    const baseParams = {
+      tenant: buildTenant({ owner_id: 'owner-1', slug: 'studio' }),
+      customer: {
+        id: 'cust-1',
+        tenant_id: 'tenant-1',
+        name: 'Carla Souza',
+        phone: '11999999999',
+        email: 'carla@example.com',
+        loyalty_points: 0,
+        created_at: '',
+        updated_at: '',
+      },
+      appointment: {
+        id: 'appt-1',
+        tenant_id: 'tenant-1',
+        professional_id: 'pro-1',
+        service_id: 'svc-1',
+        customer_id: 'cust-1',
+        customer_name: 'Carla Souza',
+        customer_phone: '11999999999',
+        start_time: '2026-11-20T14:00:00.000Z',
+        end_time: '2026-11-20T15:00:00.000Z',
+        status: 'CONFIRMED' as const,
+        deposit_paid: false,
+        payment_status: 'NONE' as const,
+        commission_amount: 0,
+        booking_source: 'PUBLIC' as 'PUBLIC' | 'INTERNAL',
+      },
+      serviceName: 'Corte feminino',
+      professionalName: 'João',
+    };
+
+    it('sends once when a PUBLIC appointment is confirmed and ignores a second claim', async () => {
+      const ctx = buildService();
+      const claimChain = createChainableQuery({
+        data: { id: 'tenant-1' },
+        error: null,
+      });
+      ctx.from.mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return claimChain;
+        }
+        return createChainableQuery({ data: null, error: null });
+      });
+      ctx.getUserById.mockResolvedValue({
+        data: {
+          user: {
+            email: 'owner@example.com',
+            user_metadata: { full_name: 'Ana Silva' },
+          },
+        },
+        error: null,
+      });
+
+      (
+        ctx.service as never as {
+          dispatchAppointmentConfirmationEmail: (p: typeof baseParams) => void;
+        }
+      ).dispatchAppointmentConfirmationEmail(baseParams);
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(claimChain.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          first_public_appointment_email_sent_at: expect.any(String),
+        }),
+      );
+      expect(claimChain.is).toHaveBeenCalledWith(
+        'first_public_appointment_email_sent_at',
+        null,
+      );
+      expect(ctx.mailService.sendFirstPublicBookingReceived).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(ctx.mailService.sendFirstPublicBookingReceived).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerEmail: 'owner@example.com',
+          ownerFirstName: 'Ana',
+          customerName: 'Carla Souza',
+          serviceName: 'Corte feminino',
+          startTimeIso: '2026-11-20T14:00:00.000Z',
+        }),
+      );
+
+      // Second confirmation (approve again / another public booking): claim returns null
+      claimChain.maybeSingle = jest
+        .fn()
+        .mockResolvedValue({ data: null, error: null });
+      ctx.mailService.sendFirstPublicBookingReceived.mockClear();
+
+      (
+        ctx.service as never as {
+          dispatchAppointmentConfirmationEmail: (p: typeof baseParams) => void;
+        }
+      ).dispatchAppointmentConfirmationEmail({
+        ...baseParams,
+        appointment: { ...baseParams.appointment, id: 'appt-2' },
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(
+        ctx.mailService.sendFirstPublicBookingReceived,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not fire for INTERNAL (manual panel) appointments', async () => {
+      const ctx = buildService();
+      const claimChain = createChainableQuery({
+        data: { id: 'tenant-1' },
+        error: null,
+      });
+      ctx.from.mockReturnValue(claimChain);
+
+      (
+        ctx.service as never as {
+          dispatchAppointmentConfirmationEmail: (p: typeof baseParams) => void;
+        }
+      ).dispatchAppointmentConfirmationEmail({
+        ...baseParams,
+        appointment: {
+          ...baseParams.appointment,
+          booking_source: 'INTERNAL',
+        },
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(claimChain.update).not.toHaveBeenCalled();
+      expect(
+        ctx.mailService.sendFirstPublicBookingReceived,
+      ).not.toHaveBeenCalled();
     });
   });
 });

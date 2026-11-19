@@ -74,6 +74,109 @@ describe('resolveMediaUrl', () => {
     expect(html).toContain('ses:no-track');
   });
 
+  it('renders Olá. when the owner has no first name', () => {
+    const step: EmailFunnelStepRow = {
+      step_key: 'welcome',
+      step_number: 1,
+      subject: 'Sua conta do Horário Certo está pronta',
+      preheader: 'Cadastre os serviços.',
+      title: 'Sua conta está pronta.',
+      body_text: 'Olá, {{nome}}.\n\nBem-vindo ao Horário Certo.',
+      body_if_setup: null,
+      steps_json: null,
+      cta_label: 'Abrir o Início',
+      cta_path: '/admin/dashboard',
+      trigger_type: 'immediate',
+      trigger_offset: 0,
+      send_hour: null,
+      window_start_hour: null,
+      window_end_hour: null,
+      skip_if_setup_complete: false,
+      send_only_if: null,
+      is_active: true,
+      image_url: null,
+      video_url: null,
+      updated_at: '2026-11-19T00:00:00.000Z',
+    };
+
+    const content = buildEmailFunnelContent({
+      step,
+      frontendUrl: 'https://hml.horariocerto.app',
+      ctaUrl: 'https://hml.horariocerto.app/admin/dashboard',
+      optOutUrl: 'https://hml.horariocerto.app/descadastrar-emails-trial?token=x',
+      useSetupCopy: false,
+      trialEndsAt: null,
+      ownerFirstName: null,
+      tenantName: 'Barbearia Norte',
+      tenantSlug: 'barbearia-norte',
+      companyAddress: null,
+    });
+
+    expect(content.html).toContain('Olá.');
+    expect(content.html).not.toContain('Olá, olá');
+    expect(content.text).toContain('Olá.');
+    expect(content.text).not.toContain('Olá, .');
+  });
+
+  it('uses body_if_setup when useSetupCopy is true and the field is filled', () => {
+    const step: EmailFunnelStepRow = {
+      step_key: 'leave_whatsapp',
+      step_number: 3,
+      subject: 'Pare de organizar a agenda no WhatsApp',
+      preheader: 'O cliente escolhe o serviço e o horário pelo seu link.',
+      title: 'Sua agenda já está no ar.',
+      body_text: 'Versão sem setup.',
+      body_if_setup: 'Versão já configurado para {{nome_negocio}}.',
+      steps_json: null,
+      cta_label: 'Abrir o Início',
+      cta_path: '/admin/dashboard',
+      trigger_type: 'days_after_signup',
+      trigger_offset: 2,
+      send_hour: 10,
+      window_start_hour: null,
+      window_end_hour: null,
+      skip_if_setup_complete: false,
+      send_only_if: null,
+      is_active: true,
+      image_url: null,
+      video_url: null,
+      updated_at: '2026-11-19T00:00:00.000Z',
+    };
+
+    const withSetup = buildEmailFunnelContent({
+      step,
+      frontendUrl: 'https://hml.horariocerto.app',
+      ctaUrl: 'https://hml.horariocerto.app/admin/dashboard',
+      optOutUrl: 'https://hml.horariocerto.app/descadastrar-emails-trial?token=x',
+      useSetupCopy: true,
+      trialEndsAt: null,
+      ownerFirstName: 'Maria',
+      tenantName: 'Barbearia Norte',
+      tenantSlug: 'barbearia-norte',
+      companyAddress: null,
+    });
+
+    expect(withSetup.html).toContain('Versão já configurado para Barbearia Norte.');
+    expect(withSetup.html).not.toContain('Versão sem setup.');
+    expect(withSetup.text).toContain('Versão já configurado para Barbearia Norte.');
+
+    const withoutSetup = buildEmailFunnelContent({
+      step,
+      frontendUrl: 'https://hml.horariocerto.app',
+      ctaUrl: 'https://hml.horariocerto.app/admin/dashboard',
+      optOutUrl: 'https://hml.horariocerto.app/descadastrar-emails-trial?token=x',
+      useSetupCopy: false,
+      trialEndsAt: null,
+      ownerFirstName: 'Maria',
+      tenantName: 'Barbearia Norte',
+      tenantSlug: 'barbearia-norte',
+      companyAddress: null,
+    });
+
+    expect(withoutSetup.html).toContain('Versão sem setup.');
+    expect(withoutSetup.html).not.toContain('Versão já configurado');
+  });
+
   it('interpolates dias_restantes in subject/preheader with Portuguese agreement', () => {
     const step: EmailFunnelStepRow = {
       step_key: 'trial_mid',
