@@ -19,6 +19,10 @@ import {
 import { formatTenantAddress } from './utils/format-tenant-address.util';
 import { BRAND_NAME } from '../common/brand.constants';
 import { resolveBrandHomeUrl } from '../email-funnel/email-funnel-template.util';
+import {
+  buildFirstPublicBookingEmailContent,
+  FIRST_PUBLIC_BOOKING_EMAIL_SUBJECT,
+} from './utils/first-public-booking-email.util';
 
 @Injectable()
 export class MailService {
@@ -215,6 +219,39 @@ export class MailService {
         `Equipe ${BRAND_NAME}`,
       ].join('\n'),
       html: `<p>Olá,</p><p>${intro}</p><p>Conclua o cadastro da conta de recebimentos e aguarde a aprovação para voltar a cobrar sinal.</p><p>Equipe ${BRAND_NAME}</p>`,
+    });
+  }
+
+  /**
+   * Transactional: first PUBLIC appointment confirmed for the tenant.
+   * Outside the funnel 18h rule; no trial unsubscribe footer.
+   */
+  async sendFirstPublicBookingReceived(params: {
+    ownerEmail: string;
+    ownerFirstName: string | null;
+    tenant: Tenant;
+    customerName: string | null;
+    serviceName: string | null;
+    startTimeIso: string | null;
+  }): Promise<void> {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      'https://horariocerto.app';
+    const content = buildFirstPublicBookingEmailContent({
+      ownerFirstName: params.ownerFirstName,
+      tenantName: params.tenant.name,
+      tenantSlug: params.tenant.slug,
+      frontendUrl,
+      customerName: params.customerName,
+      serviceName: params.serviceName,
+      startTimeIso: params.startTimeIso,
+    });
+
+    await this.sendMail({
+      to: params.ownerEmail,
+      subject: FIRST_PUBLIC_BOOKING_EMAIL_SUBJECT,
+      html: content.html,
+      text: content.text,
     });
   }
 

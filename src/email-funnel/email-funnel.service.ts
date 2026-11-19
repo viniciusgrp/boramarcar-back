@@ -385,9 +385,15 @@ export class EmailFunnelService {
       hasPublicBooking: params.hasPublicBooking,
       isPostTrialStep,
       isLastDayOfTrialStep,
+      ownerEmailConfirmed: params.ownerEmailConfirmed,
+      stepKey: params.step.step_key,
     });
 
-    if (eligibility === 'already_processed' || eligibility === 'not_due') {
+    if (
+      eligibility === 'already_processed' ||
+      eligibility === 'not_due' ||
+      eligibility === 'email_unconfirmed'
+    ) {
       return 'ignored';
     }
 

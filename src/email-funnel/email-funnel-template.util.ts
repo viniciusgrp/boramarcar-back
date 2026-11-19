@@ -247,8 +247,12 @@ const EMAIL_TEMPLATE = `<!DOCTYPE html>
             <td class="hc-pad hc-foot" style="padding:24px 40px 32px 40px;border-top:1px solid #E7E3DA;">
               <p class="hc-muted" style="margin:0 0 8px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;"><strong>${BRAND_NAME}</strong> &middot; <a class="hc-link" href="{{{brand_home_url}}}" target="_blank" style="color:#0F5F58;text-decoration:underline;">{{brand_domain_label}}</a> &middot; <a class="hc-link" href="mailto:{{contact_email}}" style="color:#0F5F58;text-decoration:underline;">{{contact_email}}</a></p>
               {{#if empresa_endereco}}<p class="hc-muted" style="margin:0 0 8px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;">{{{empresa_endereco}}}</p>{{/if}}
+              {{#if transactional_footer}}
+              <p class="hc-muted" style="margin:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;">{{{transactional_footer}}}</p>
+              {{else}}
               <p class="hc-muted" style="margin:0 0 12px 0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;color:#5E625D;">Você recebeu este e-mail porque criou uma conta de teste no ${BRAND_NAME}.</p>
               <p style="margin:0;font-family:Inter, Arial, Helvetica, sans-serif;font-size:13px;line-height:20px;"><a class="hc-link" href="{{{unsubscribe_url}}}" ses:no-track target="_blank" style="color:#0F5F58;text-decoration:underline;display:inline-block;padding:12px 0;">Não quero mais receber estes e-mails</a></p>
+              {{/if}}
             </td>
           </tr>
 
@@ -291,10 +295,24 @@ export interface RenderEmailTemplateParams {
   media_link_url?: string;
   cta_label: string;
   cta_url: string;
-  unsubscribe_url: string;
+  /** Required for funnel emails; ignored when transactional_footer is set. */
+  unsubscribe_url?: string;
+  /**
+   * When set, replaces the trial footer + unsubscribe link (transactional emails).
+   * Plain text already escaped by the caller when needed.
+   */
+  transactional_footer?: string;
   empresa_endereco?: string;
   /** Frontend origin for the current environment (logo + brand link). */
   frontendUrl: string;
+}
+
+/**
+ * Turns "Olá, {{nome}}." into "Olá." when the owner has no first name
+ * (nome interpolates to empty). Same for "Oi, .".
+ */
+export function normalizeOwnerGreeting(text: string): string {
+  return text.replace(/\b(Olá|Oi),\s*\./g, '$1.');
 }
 
 function resolveTemplateBrandUrls(frontendUrl: string): {
@@ -359,8 +377,14 @@ export function renderEmailPlainText(params: RenderEmailTemplateParams): string 
     text += `${params.empresa_endereco}\n\n`;
   }
 
-  text += `Você recebeu este e-mail porque criou uma conta de teste no ${BRAND_NAME}.\n\n`;
-  text += `Descadastrar: ${params.unsubscribe_url}\n`;
+  if (params.transactional_footer) {
+    text += `${params.transactional_footer}\n`;
+  } else {
+    text += `Você recebeu este e-mail porque criou uma conta de teste no ${BRAND_NAME}.\n\n`;
+    if (params.unsubscribe_url) {
+      text += `Descadastrar: ${params.unsubscribe_url}\n`;
+    }
+  }
 
   return text;
 }

@@ -43,7 +43,9 @@ export type EmailFunnelSkipReason =
   | 'already_processed'
   | 'trial_ended'
   | 'condition_not_met'
-  | 'stale';
+  | 'stale'
+  /** Non-final: owner email not confirmed yet; do not write a send/skip row. */
+  | 'email_unconfirmed';
 
 export type EmailFunnelDueStatus = 'not_due' | 'due' | 'stale';
 

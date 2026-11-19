@@ -5,6 +5,7 @@ import {
   formatDiasLabel,
   formatRestamLabel,
   interpolateVariables,
+  normalizeOwnerGreeting,
   renderEmailTemplate,
   renderEmailPlainText,
 } from './email-funnel-template.util';
@@ -110,6 +111,14 @@ describe('formatDiasLabel / formatRestamLabel', () => {
     expect(formatDiasLabel(0)).toBe('dias');
     expect(formatDiasLabel(7)).toBe('dias');
     expect(formatRestamLabel(7)).toBe('restam');
+  });
+});
+
+describe('normalizeOwnerGreeting', () => {
+  it('collapses empty-name greetings to Olá. / Oi.', () => {
+    expect(normalizeOwnerGreeting('Olá, .')).toBe('Olá.');
+    expect(normalizeOwnerGreeting('Oi, . Bem-vindo.')).toBe('Oi. Bem-vindo.');
+    expect(normalizeOwnerGreeting('Olá, Maria.')).toBe('Olá, Maria.');
   });
 });
 
