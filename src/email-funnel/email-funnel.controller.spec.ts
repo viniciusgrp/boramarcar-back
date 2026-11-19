@@ -47,6 +47,7 @@ describe('EmailFunnelController', () => {
       stepKey: 'welcome_day_0',
       to: 'tester@example.com',
       tenantId: undefined,
+      useSetupCopy: false,
     });
   });
 
@@ -66,6 +67,27 @@ describe('EmailFunnelController', () => {
       stepKey: 'welcome_day_1',
       to: 'tester@example.com',
       tenantId: 'tenant-42',
+      useSetupCopy: false,
+    });
+  });
+
+  it('forwards use_setup_copy for body_if_setup previews', async () => {
+    const sendTestEmail = jest.fn().mockResolvedValue({ ok: true });
+    const controller = new EmailFunnelController({
+      sendTestEmail,
+    } as never);
+
+    await expect(
+      controller.sendTestEmail('leave_whatsapp', {
+        to: 'tester@example.com',
+        use_setup_copy: true,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(sendTestEmail).toHaveBeenCalledWith({
+      stepKey: 'leave_whatsapp',
+      to: 'tester@example.com',
+      tenantId: undefined,
+      useSetupCopy: true,
     });
   });
 
@@ -84,6 +106,7 @@ describe('EmailFunnelController', () => {
     expect(sendPreview).toHaveBeenCalledWith({
       stepKey: 'welcome_day_0',
       to: 'tester@example.com',
+      useSetupCopy: false,
     });
   });
 });
